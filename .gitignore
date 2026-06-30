@@ -1,0 +1,17 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+coverage/
+.coverage
+workspace/
+*.sqlite
+*.db
+*.pt
+*.onnx
+*.engine
+runs/
