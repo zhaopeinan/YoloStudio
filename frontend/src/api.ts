@@ -37,6 +37,79 @@ export type DatasetScanSummary = {
   warnings: string[];
 };
 
+export type DatasetImportGroup = {
+  name: string;
+  image_count: number;
+  metadata_rows: number;
+};
+
+export type DatasetImportResponse = {
+  project_id: number;
+  dataset_id: number;
+  project_name: string;
+  dataset_name: string;
+  image_count: number;
+  groups: DatasetImportGroup[];
+};
+
+export type DatasetImage = {
+  id: number;
+  relative_path: string;
+  platform: string | null;
+  altitude: number | null;
+  timestamp: number | null;
+  annotation_count: number;
+  image_url: string;
+};
+
+export type DatasetImageListResponse = {
+  items: DatasetImage[];
+  limit: number;
+  offset: number;
+  total: number;
+};
+
+export type ProjectClass = {
+  id: number;
+  project_id: number;
+  name: string;
+  color: string;
+  description: string | null;
+  active: boolean;
+};
+
+export type ClassListResponse = {
+  items: ProjectClass[];
+};
+
+export type Annotation = {
+  id?: number;
+  image_id?: number;
+  class_id: number;
+  class_name?: string;
+  class_color?: string;
+  x_center: number;
+  y_center: number;
+  width: number;
+  height: number;
+  track_id?: string | null;
+  edge_tags?: string[];
+};
+
+export type AnnotationWrite = {
+  class_id: number;
+  x_center: number;
+  y_center: number;
+  width: number;
+  height: number;
+  track_id?: string | null;
+  edge_tags?: string[];
+};
+
+export type AnnotationListResponse = {
+  items: Annotation[];
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -59,5 +132,54 @@ export function scanDataset(sourcePath: string): Promise<DatasetScanSummary> {
   return requestJson<DatasetScanSummary>("/api/datasets/scan", {
     method: "POST",
     body: JSON.stringify({ source_path: sourcePath }),
+  });
+}
+
+export function importDataset(
+  sourcePath: string,
+  projectName = "YOLO Trainer Project",
+  datasetName = "image_dataset",
+): Promise<DatasetImportResponse> {
+  return requestJson<DatasetImportResponse>("/api/datasets/import", {
+    method: "POST",
+    body: JSON.stringify({
+      source_path: sourcePath,
+      project_name: projectName,
+      dataset_name: datasetName,
+    }),
+  });
+}
+
+export function listImages(datasetId: number): Promise<DatasetImageListResponse> {
+  return requestJson<DatasetImageListResponse>(
+    `/api/datasets/${datasetId}/images?limit=50&offset=0`,
+  );
+}
+
+export function listClasses(projectId: number): Promise<ClassListResponse> {
+  return requestJson<ClassListResponse>(`/api/projects/${projectId}/classes`);
+}
+
+export function createClass(
+  projectId: number,
+  body: { name: string; color?: string; description?: string },
+): Promise<ProjectClass> {
+  return requestJson<ProjectClass>(`/api/projects/${projectId}/classes`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getAnnotations(imageId: number): Promise<AnnotationListResponse> {
+  return requestJson<AnnotationListResponse>(`/api/images/${imageId}/annotations`);
+}
+
+export function replaceAnnotations(
+  imageId: number,
+  annotations: AnnotationWrite[],
+): Promise<AnnotationListResponse> {
+  return requestJson<AnnotationListResponse>(`/api/images/${imageId}/annotations`, {
+    method: "PUT",
+    body: JSON.stringify({ annotations }),
   });
 }

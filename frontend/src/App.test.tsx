@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -44,15 +45,72 @@ vi.mock("./api", () => ({
     ],
     warnings: ["No YOLO label .txt files were found"],
   }),
+  importDataset: async () => ({
+    project_id: 1,
+    dataset_id: 1,
+    project_name: "YOLO Trainer Project",
+    dataset_name: "image_dataset",
+    image_count: 1,
+    groups: [{ name: "iris", image_count: 1, metadata_rows: 1 }],
+  }),
+  listImages: async () => ({
+    items: [
+      {
+        id: 10,
+        relative_path: "iris/frame001.jpg",
+        platform: "iris",
+        altitude: 12,
+        timestamp: 1,
+        annotation_count: 0,
+        image_url: "/api/images/10/file",
+      },
+    ],
+    limit: 50,
+    offset: 0,
+    total: 1,
+  }),
+  listClasses: async () => ({
+    items: [
+      {
+        id: 1,
+        project_id: 1,
+        name: "target",
+        color: "#ef4444",
+        description: null,
+        active: true,
+      },
+    ],
+  }),
+  createClass: async () => ({
+    id: 2,
+    project_id: 1,
+    name: "vehicle",
+    color: "#22c55e",
+    description: null,
+    active: true,
+  }),
+  getAnnotations: async () => ({ items: [] }),
+  replaceAnnotations: async () => ({ items: [] }),
 }));
 
 describe("App", () => {
   it("renders local app status and dataset scan controls", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
     expect(await screen.findByText("cpu")).toBeInTheDocument();
     expect(screen.getByLabelText("Dataset zip path")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scan Dataset" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import Dataset" })).toBeInTheDocument();
+    expect(screen.getByText("Class Library")).toBeInTheDocument();
+    expect(screen.getByText("Image Browser")).toBeInTheDocument();
+    expect(screen.getByText("Annotation")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Import Dataset" }));
+
+    expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
+    expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
   });
 });
