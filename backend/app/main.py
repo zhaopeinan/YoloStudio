@@ -10,6 +10,8 @@ from app.core.devices import detect_devices
 from app.core.settings import get_settings
 from app.datasets.router import images_router, router as datasets_router
 from app.db.session import init_db
+from app.quality.router import router as quality_router
+from app.versions.router import router as versions_router
 
 
 @asynccontextmanager
@@ -32,6 +34,8 @@ app.include_router(datasets_router)
 app.include_router(images_router)
 app.include_router(classes_router)
 app.include_router(annotations_router)
+app.include_router(quality_router)
+app.include_router(versions_router)
 
 
 @app.get("/api/health")

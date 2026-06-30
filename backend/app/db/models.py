@@ -29,6 +29,7 @@ class Project(TimestampMixin, Base):
 
     datasets: Mapped[list["Dataset"]] = relationship(back_populates="project")
     classes: Mapped[list["ClassDef"]] = relationship(back_populates="project")
+    versions: Mapped[list["DatasetVersion"]] = relationship(back_populates="project")
 
 
 class Dataset(TimestampMixin, Base):
@@ -44,6 +45,7 @@ class Dataset(TimestampMixin, Base):
 
     project: Mapped["Project"] = relationship(back_populates="datasets")
     images: Mapped[list["Image"]] = relationship(back_populates="dataset")
+    versions: Mapped[list["DatasetVersion"]] = relationship(back_populates="dataset")
 
 
 class Image(TimestampMixin, Base):
@@ -93,3 +95,19 @@ class Annotation(TimestampMixin, Base):
 
     image: Mapped["Image"] = relationship(back_populates="annotations")
     class_def: Mapped["ClassDef"] = relationship(back_populates="annotations")
+
+
+class DatasetVersion(TimestampMixin, Base):
+    __tablename__ = "dataset_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    class_mapping: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False, default=dict)
+    split_manifest: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    frozen: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    project: Mapped["Project"] = relationship(back_populates="versions")
+    dataset: Mapped["Dataset"] = relationship(back_populates="versions")
