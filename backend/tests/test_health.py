@@ -12,6 +12,7 @@ def test_health_endpoint_reports_local_app_state():
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["app"] == "YOLO Trainer"
-    assert "workspace_root" in payload
-    assert "database_path" in payload
+    assert payload["workspace_root"]
+    assert payload["database_path"].endswith("app.db")
     assert payload["devices"]["selected"] in {"cuda", "mps", "cpu"}
+    assert "cpu" in payload["devices"]["available"]
