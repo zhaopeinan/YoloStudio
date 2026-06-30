@@ -140,6 +140,9 @@ After a training run exists:
 4. Click `Run Prediction Analysis`.
 5. Review matched, false-positive, and false-negative counts.
 6. Inspect the prediction/failure sample list; each row keeps the source image ID for annotator follow-up.
+7. Click `Open Image` on a sample to jump to that image in the annotator.
+8. The annotator overlays prediction boxes on top of ground-truth boxes and shows matched/false+/false-
+   counts for the selected image.
 
 Prediction artifacts are written under:
 
@@ -162,5 +165,6 @@ curl -X POST http://127.0.0.1:8000/api/training/runs/1/prediction-jobs \
 
 curl http://127.0.0.1:8000/api/training/runs/1/prediction-jobs
 curl http://127.0.0.1:8000/api/prediction-jobs/1/predictions
+curl http://127.0.0.1:8000/api/prediction-jobs/1/images/1/review
 curl http://127.0.0.1:8000/api/prediction-jobs/1/logs
 ```
