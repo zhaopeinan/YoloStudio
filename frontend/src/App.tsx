@@ -117,6 +117,8 @@ export default function App() {
   const [predictionScope, setPredictionScope] = useState("all");
   const [predictionConfidence, setPredictionConfidence] = useState(0.25);
   const [activeReview, setActiveReview] = useState<PredictionImageReview | null>(null);
+  const [showGroundTruthLayer, setShowGroundTruthLayer] = useState(true);
+  const [showPredictionLayer, setShowPredictionLayer] = useState(true);
 
   useEffect(() => {
     getHealth()
@@ -148,6 +150,9 @@ export default function App() {
       setAnnotations([]);
       return;
     }
+    if (activeReview?.image.id === selectedImageId) {
+      return;
+    }
 
     setAnnotationError(null);
     setActiveReview(null);
@@ -156,7 +161,7 @@ export default function App() {
         setAnnotations(response.items.map(toDraftBox));
       })
       .catch((error: Error) => setAnnotationError(error.message));
-  }, [selectedImageId]);
+  }, [activeReview?.image.id, selectedImageId]);
 
   async function handleScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -364,6 +369,38 @@ export default function App() {
     setAnnotations((current) => current.filter((annotation) => annotation.local_id !== localId));
   }
 
+  function addPredictionAsAnnotation(prediction: Prediction) {
+    const classInfo = classById.get(prediction.class_id);
+    setAnnotations((current) => {
+      if (current.some((annotation) => annotation.local_id === predictionDraftId(prediction.id))) {
+        return current;
+      }
+
+      return [...current, predictionToDraftBox(prediction, classInfo)];
+    });
+    setShowGroundTruthLayer(true);
+  }
+
+  function markFalseNegativeReviewed(prediction: Prediction) {
+    if (!prediction.matched_annotation_id) {
+      return;
+    }
+
+    setAnnotations((current) =>
+      current.map((annotation) =>
+        annotation.id === prediction.matched_annotation_id
+          ? {
+              ...annotation,
+              edge_tags: mergeTags(annotation.edge_tags, [
+                "false_negative",
+                "reviewed_prediction",
+              ]),
+            }
+          : annotation,
+      ),
+    );
+  }
+
   async function handleSaveAnnotations() {
     if (!selectedImageId) {
       return;
@@ -489,15 +526,14 @@ export default function App() {
 
   async function openPredictionImage(prediction: Prediction) {
     setPredictionError(null);
-    const existingImage = images.find((image) => image.id === prediction.image_id);
-    if (existingImage) {
-      setSelectedImageId(existingImage.id);
-    }
 
     try {
       const review = await getPredictionImageReview(prediction.job_id, prediction.image_id);
+      const existingImage = images.find((image) => image.id === review.image.id);
       setActiveReview(review);
       setAnnotations(review.annotations.map(toDraftBox));
+      setShowGroundTruthLayer(true);
+      setShowPredictionLayer(true);
       if (!existingImage) {
         setImages((current) => [
           ...current,
@@ -511,8 +547,8 @@ export default function App() {
             image_url: review.image.image_url,
           },
         ]);
-        setSelectedImageId(review.image.id);
       }
+      setSelectedImageId(review.image.id);
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "Prediction review failed");
     }
@@ -1123,16 +1159,22 @@ export default function App() {
                     onPointerUp={handlePointerUp}
                     onPointerCancel={() => setDragState(null)}
                   >
-                    {annotations.map((annotation) => (
-                      <BoxRect
-                        key={annotation.local_id}
-                        annotation={annotation}
-                        color={resolveClassColor(annotation, classById)}
-                      />
-                    ))}
-                    {activeReview && activeReview.image.id === selectedImage.id
+                    {showGroundTruthLayer
+                      ? annotations.map((annotation) => (
+                          <BoxRect
+                            key={annotation.local_id}
+                            annotation={annotation}
+                            color={resolveClassColor(annotation, classById)}
+                          />
+                        ))
+                      : null}
+                    {activeReview && activeReview.image.id === selectedImage.id && showPredictionLayer
                       ? activeReview.predictions.map((prediction) => (
-                          <PredictionRect key={prediction.id} prediction={prediction} />
+                          <PredictionRect
+                            key={prediction.id}
+                            prediction={prediction}
+                            className={classById.get(prediction.class_id)?.name}
+                          />
                         ))
                       : null}
                     {dragState ? <DragRect dragState={dragState} color={selectedClass?.color} /> : null}
@@ -1157,12 +1199,75 @@ export default function App() {
 
                 {activeReview && activeReview.image.id === selectedImage.id ? (
                   <div className="review-banner">
-                    <strong>Prediction overlay</strong>
-                    <span>
-                      matched {activeReview.counts.matched ?? 0} | false+{" "}
-                      {activeReview.counts.false_positive ?? 0} | false-{" "}
-                      {activeReview.counts.false_negative ?? 0}
-                    </span>
+                    <div className="review-banner-heading">
+                      <div>
+                        <strong>Prediction overlay</strong>
+                        <span>
+                          matched {activeReview.counts.matched ?? 0} | false+{" "}
+                          {activeReview.counts.false_positive ?? 0} | false-{" "}
+                          {activeReview.counts.false_negative ?? 0}
+                        </span>
+                      </div>
+                      <div className="layer-toggles" aria-label="Annotation review layers">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={showGroundTruthLayer}
+                            onChange={(event) => setShowGroundTruthLayer(event.target.checked)}
+                          />
+                          GT
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={showPredictionLayer}
+                            onChange={(event) => setShowPredictionLayer(event.target.checked)}
+                          />
+                          Pred
+                        </label>
+                      </div>
+                    </div>
+                    <div className="review-legend" aria-label="Prediction legend">
+                      <span className="legend matched">Matched</span>
+                      <span className="legend false-positive">False +</span>
+                      <span className="legend false-negative">False -</span>
+                    </div>
+                    <div className="review-actions" aria-label="Prediction correction actions">
+                      {activeReview.predictions
+                        .filter((prediction) => prediction.failure_type !== "matched")
+                        .map((prediction) => (
+                          <div className="review-action-row" key={prediction.id}>
+                            <div>
+                              <strong>{formatFailureType(prediction.failure_type)}</strong>
+                              <span>
+                                Class #{prediction.class_id} | {prediction.confidence.toFixed(2)}
+                              </span>
+                            </div>
+                            {prediction.failure_type === "false_positive" ? (
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => addPredictionAsAnnotation(prediction)}
+                                disabled={annotations.some(
+                                  (annotation) =>
+                                    annotation.local_id === predictionDraftId(prediction.id),
+                                )}
+                              >
+                                Add as annotation
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => markFalseNegativeReviewed(prediction)}
+                                disabled={!prediction.matched_annotation_id}
+                              >
+                                Mark reviewed
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 ) : null}
 
@@ -1254,6 +1359,28 @@ function toDraftBox(annotation: Annotation, index: number): DraftBox {
   };
 }
 
+function predictionDraftId(predictionId: number) {
+  return `prediction-${predictionId}`;
+}
+
+function predictionToDraftBox(
+  prediction: Prediction,
+  classInfo: ProjectClass | undefined,
+): DraftBox {
+  return {
+    class_id: prediction.class_id,
+    class_name: classInfo?.name,
+    class_color: classInfo?.color,
+    x_center: prediction.x_center,
+    y_center: prediction.y_center,
+    width: prediction.width,
+    height: prediction.height,
+    local_id: predictionDraftId(prediction.id),
+    track_id: "",
+    edge_tags: ["false_positive", "reviewed_prediction"],
+  };
+}
+
 function toAnnotationWrite(annotation: DraftBox): AnnotationWrite {
   return {
     class_id: annotation.class_id,
@@ -1296,6 +1423,14 @@ function rectangleToAnnotation(startX: number, startY: number, endX: number, end
 
 function clamp(value: number) {
   return Math.min(1, Math.max(0, value));
+}
+
+function mergeTags(existing: string[] | undefined, tags: string[]) {
+  return Array.from(new Set([...(existing ?? []), ...tags]));
+}
+
+function formatFailureType(value: string) {
+  return value.replace(/_/g, " ");
 }
 
 function resolveClassColor(annotation: DraftBox, classById: Map<number, ProjectClass>) {
@@ -1346,27 +1481,49 @@ function DragRect(props: { dragState: DragState; color?: string }) {
   );
 }
 
-function PredictionRect(props: { prediction: Prediction }) {
-  const { prediction } = props;
+function PredictionRect(props: { prediction: Prediction; className?: string }) {
+  const { prediction, className } = props;
   const color =
     prediction.failure_type === "matched"
       ? "#16a34a"
       : prediction.failure_type === "false_negative"
         ? "#f97316"
         : "#dc2626";
+  const left = prediction.x_center - prediction.width / 2;
+  const top = prediction.y_center - prediction.height / 2;
+  const label = `${formatFailureType(prediction.failure_type)} | ${
+    className ?? `Class ${prediction.class_id}`
+  }${prediction.failure_type === "false_negative" ? "" : ` ${prediction.confidence.toFixed(2)}`}`;
+  const labelX = clamp(left);
+  const labelY = clamp(top - 0.018);
 
   return (
-    <rect
-      x={prediction.x_center - prediction.width / 2}
-      y={prediction.y_center - prediction.height / 2}
-      width={prediction.width}
-      height={prediction.height}
-      fill="transparent"
-      stroke={color}
-      strokeDasharray={prediction.failure_type === "matched" ? "0" : "0.02 0.012"}
-      strokeWidth={0.006}
-      vectorEffect="non-scaling-stroke"
-    />
+    <g>
+      <title>{label}</title>
+      <rect
+        x={left}
+        y={top}
+        width={prediction.width}
+        height={prediction.height}
+        fill="transparent"
+        stroke={color}
+        strokeDasharray={prediction.failure_type === "matched" ? "0" : "0.02 0.012"}
+        strokeWidth={0.006}
+        vectorEffect="non-scaling-stroke"
+      />
+      <text
+        x={labelX}
+        y={labelY}
+        fill={color}
+        fontSize={0.022}
+        fontWeight={900}
+        paintOrder="stroke"
+        stroke="#111820"
+        strokeWidth={0.006}
+      >
+        {label}
+      </text>
+    </g>
   );
 }
 

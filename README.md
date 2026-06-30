@@ -141,8 +141,11 @@ After a training run exists:
 5. Review matched, false-positive, and false-negative counts.
 6. Inspect the prediction/failure sample list; each row keeps the source image ID for annotator follow-up.
 7. Click `Open Image` on a sample to jump to that image in the annotator.
-8. The annotator overlays prediction boxes on top of ground-truth boxes and shows matched/false+/false-
-   counts for the selected image.
+8. Use the `GT` and `Pred` layer toggles to isolate saved boxes or model outputs.
+9. Prediction boxes show failure type, class, and confidence on the image overlay.
+10. Use `Add as annotation` to promote a false-positive prediction into an editable annotation draft.
+11. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
+12. Click `Save Annotations` when the correction draft looks right.
 
 Prediction artifacts are written under:
 

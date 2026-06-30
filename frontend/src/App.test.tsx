@@ -288,8 +288,36 @@ vi.mock("./api", () => ({
         matched_annotation_id: 1,
         failure_type: "matched",
       },
+      {
+        id: 2,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 1,
+        x_center: 0.1,
+        y_center: 0.1,
+        width: 0.1,
+        height: 0.1,
+        confidence: 0.77,
+        matched_annotation_id: null,
+        failure_type: "false_positive",
+      },
+      {
+        id: 3,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 1,
+        x_center: 0.7,
+        y_center: 0.7,
+        width: 0.12,
+        height: 0.12,
+        confidence: 0,
+        matched_annotation_id: 1,
+        failure_type: "false_negative",
+      },
     ],
-    counts: { matched: 1, false_positive: 0, false_negative: 0 },
+    counts: { matched: 1, false_positive: 1, false_negative: 1 },
   }),
 }));
 
@@ -328,5 +356,19 @@ describe("App", () => {
     await user.click(screen.getAllByRole("button", { name: "Open Image" })[0]);
 
     expect(await screen.findByText("Prediction overlay")).toBeInTheDocument();
+    expect(screen.getByLabelText("Annotation review layers")).toBeInTheDocument();
+    expect(screen.getByLabelText("Prediction legend")).toBeInTheDocument();
+    expect(screen.getByText("false positive")).toBeInTheDocument();
+    expect(screen.getByText("false negative")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add as annotation" }));
+
+    expect(screen.getByDisplayValue("false_positive, reviewed_prediction")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Mark reviewed" }));
+
+    expect(
+      await screen.findByDisplayValue("occluded, false_negative, reviewed_prediction"),
+    ).toBeInTheDocument();
   });
 });
