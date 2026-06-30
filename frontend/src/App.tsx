@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   Library,
   PackageCheck,
+  Play,
   Save,
   Trash2,
   Upload,
@@ -25,17 +26,21 @@ import type {
   HealthResponse,
   ProjectClass,
   AnnotationWrite,
+  TrainingRun,
 } from "./api";
 import {
   createClass,
   createDatasetVersion,
+  createTrainingRun,
   getAnnotations,
   getHealth,
   getQuality,
+  getTrainingRunLogs,
   importDataset,
   listClasses,
   listDatasetVersions,
   listImages,
+  listTrainingRuns,
   replaceAnnotations,
   scanDataset,
 } from "./api";
@@ -83,6 +88,18 @@ export default function App() {
   const [versionName, setVersionName] = useState("");
   const [versionError, setVersionError] = useState<string | null>(null);
   const [isCreatingVersion, setIsCreatingVersion] = useState(false);
+  const [runs, setRuns] = useState<TrainingRun[]>([]);
+  const [runLogs, setRunLogs] = useState<Record<number, string>>({});
+  const [trainingError, setTrainingError] = useState<string | null>(null);
+  const [isStartingRun, setIsStartingRun] = useState(false);
+  const [trainingModel, setTrainingModel] = useState("yolov8n.pt");
+  const [trainingEpochs, setTrainingEpochs] = useState(50);
+  const [trainingImageSize, setTrainingImageSize] = useState(640);
+  const [trainingBatchSize, setTrainingBatchSize] = useState(8);
+  const [trainingDevice, setTrainingDevice] = useState("");
+  const [augmentationPreset, setAugmentationPreset] = useState("balanced");
+  const [trainingTta, setTrainingTta] = useState(false);
+  const [thresholdScan, setThresholdScan] = useState(false);
 
   useEffect(() => {
     getHealth()
@@ -155,6 +172,7 @@ export default function App() {
         getQuality(imported.dataset_id),
         listDatasetVersions(imported.dataset_id),
       ]);
+      const runResponse = await listTrainingRuns(imported.project_id);
 
       setClasses(classResponse.items);
       setSelectedClassId(classResponse.items[0]?.id ?? null);
@@ -162,6 +180,7 @@ export default function App() {
       setSelectedImageId(imageResponse.items[0]?.id ?? null);
       setQuality(qualityResponse);
       setVersions(versionResponse.items);
+      setRuns(runResponse.items);
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Dataset import failed");
     } finally {
@@ -184,10 +203,27 @@ export default function App() {
       ]);
       setQuality(qualityResponse);
       setVersions(versionResponse.items);
+      if (importedDataset) {
+        const runResponse = await listTrainingRuns(importedDataset.project_id);
+        setRuns(runResponse.items);
+      }
     } catch (error) {
       setQualityError(error instanceof Error ? error.message : "Quality refresh failed");
     } finally {
       setIsLoadingQuality(false);
+    }
+  }
+
+  async function refreshTrainingRuns(projectId = importedDataset?.project_id) {
+    if (!projectId) {
+      return;
+    }
+
+    try {
+      const runResponse = await listTrainingRuns(projectId);
+      setRuns(runResponse.items);
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "Run refresh failed");
     }
   }
 
@@ -329,6 +365,46 @@ export default function App() {
       setVersionError(error instanceof Error ? error.message : "Version export failed");
     } finally {
       setIsCreatingVersion(false);
+    }
+  }
+
+  async function handleStartTrainingRun() {
+    const version = versions[0];
+    if (!version || !importedDataset) {
+      return;
+    }
+
+    setIsStartingRun(true);
+    setTrainingError(null);
+
+    try {
+      const run = await createTrainingRun({
+        version_id: version.id,
+        model: trainingModel.trim() || "yolov8n.pt",
+        epochs: trainingEpochs,
+        image_size: trainingImageSize,
+        batch_size: trainingBatchSize,
+        device: trainingDevice.trim() || undefined,
+        augmentation_preset: augmentationPreset,
+        tta: trainingTta,
+        threshold_scan: thresholdScan,
+      });
+      setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      await refreshTrainingRuns(importedDataset.project_id);
+      await loadRunLogs(run.id);
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "Training run failed to start");
+    } finally {
+      setIsStartingRun(false);
+    }
+  }
+
+  async function loadRunLogs(runId: number) {
+    try {
+      const response = await getTrainingRunLogs(runId);
+      setRunLogs((current) => ({ ...current, [runId]: response.text }));
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "Run logs failed to load");
     }
   }
 
@@ -546,6 +622,169 @@ export default function App() {
                     {version.split_counts.train}/{version.split_counts.val}/
                     {version.split_counts.test}
                   </span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </section>
+
+      <section className="training-grid" aria-label="Training setup and runs">
+        <section className="panel training-panel">
+          <div className="panel-heading compact-heading">
+            <div>
+              <p className="eyebrow">Model Training</p>
+              <h2>Training Setup</h2>
+            </div>
+            <Play size={20} />
+          </div>
+
+          <div className="training-form">
+            <label htmlFor="training-model">Model preset or local weights</label>
+            <input
+              id="training-model"
+              value={trainingModel}
+              onChange={(event) => setTrainingModel(event.target.value)}
+              disabled={versions.length === 0}
+            />
+
+            <div className="training-number-grid">
+              <label htmlFor="training-epochs">
+                Epochs
+                <input
+                  id="training-epochs"
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={trainingEpochs}
+                  onChange={(event) => setTrainingEpochs(Number(event.target.value))}
+                  disabled={versions.length === 0}
+                />
+              </label>
+              <label htmlFor="training-imgsz">
+                Image size
+                <input
+                  id="training-imgsz"
+                  type="number"
+                  min={32}
+                  max={4096}
+                  value={trainingImageSize}
+                  onChange={(event) => setTrainingImageSize(Number(event.target.value))}
+                  disabled={versions.length === 0}
+                />
+              </label>
+              <label htmlFor="training-batch">
+                Batch
+                <input
+                  id="training-batch"
+                  type="number"
+                  min={1}
+                  max={256}
+                  value={trainingBatchSize}
+                  onChange={(event) => setTrainingBatchSize(Number(event.target.value))}
+                  disabled={versions.length === 0}
+                />
+              </label>
+            </div>
+
+            <div className="training-number-grid">
+              <label htmlFor="training-device">
+                Device
+                <input
+                  id="training-device"
+                  value={trainingDevice}
+                  onChange={(event) => setTrainingDevice(event.target.value)}
+                  placeholder={health?.devices.selected ?? "cpu"}
+                  disabled={versions.length === 0}
+                />
+              </label>
+              <label htmlFor="augmentation-preset">
+                Augmentation
+                <input
+                  id="augmentation-preset"
+                  value={augmentationPreset}
+                  onChange={(event) => setAugmentationPreset(event.target.value)}
+                  disabled={versions.length === 0}
+                />
+              </label>
+            </div>
+
+            <div className="toggle-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={trainingTta}
+                  onChange={(event) => setTrainingTta(event.target.checked)}
+                  disabled={versions.length === 0}
+                />
+                TTA
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={thresholdScan}
+                  onChange={(event) => setThresholdScan(event.target.checked)}
+                  disabled={versions.length === 0}
+                />
+                Threshold scan
+              </label>
+            </div>
+
+            <button
+              type="button"
+              disabled={versions.length === 0 || isStartingRun}
+              onClick={handleStartTrainingRun}
+            >
+              <Play size={16} />
+              {isStartingRun ? "Starting" : "Start Training Run"}
+            </button>
+          </div>
+
+          {trainingError ? <div className="error-banner">{trainingError}</div> : null}
+        </section>
+
+        <section className="panel training-panel">
+          <div className="panel-heading compact-heading">
+            <div>
+              <p className="eyebrow">Experiments</p>
+              <h2>Run History</h2>
+            </div>
+            <Activity size={20} />
+          </div>
+
+          <div className="run-list" aria-label="Training runs">
+            {runs.length === 0 ? (
+              <p className="empty-state">Create a dataset version, then start a training run.</p>
+            ) : (
+              runs.map((run) => (
+                <div className="run-row" key={run.id}>
+                  <div className="run-row-heading">
+                    <strong>Run #{run.id}</strong>
+                    <span className={`run-status ${run.status}`}>{run.status}</span>
+                  </div>
+                  <span>{run.artifact_path}</span>
+                  <span>
+                    {String(run.config.model ?? "model")} | {String(run.config.epochs ?? "?")} epochs |{" "}
+                    {run.device}
+                  </span>
+                  {Object.keys(run.latest_metrics).length > 0 ? (
+                    <div className="metric-chips">
+                      {Object.entries(run.latest_metrics).map(([name, value]) => (
+                        <span key={name}>
+                          {name}: {value.toFixed(3)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {run.error_message ? <p className="run-error">{run.error_message}</p> : null}
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadRunLogs(run.id)}
+                  >
+                    Load Logs
+                  </button>
+                  {runLogs[run.id] ? <pre className="log-preview">{runLogs[run.id]}</pre> : null}
                 </div>
               ))
             )}

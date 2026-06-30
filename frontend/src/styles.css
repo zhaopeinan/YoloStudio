@@ -261,9 +261,18 @@ th {
   align-items: start;
 }
 
+.training-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+}
+
 .side-panel,
 .annotation-panel,
-.prep-panel {
+.prep-panel,
+.training-panel {
   min-width: 0;
 }
 
@@ -281,6 +290,8 @@ th {
 .box-list,
 .version-controls,
 .version-list,
+.training-form,
+.run-list,
 .box-editor {
   display: grid;
   gap: 10px;
@@ -288,6 +299,7 @@ th {
 
 .class-form label,
 .version-controls label,
+.training-form label,
 .box-editor label {
   color: #62727e;
   font-size: 13px;
@@ -458,6 +470,126 @@ input[type="color"] {
   font-weight: 900;
 }
 
+.training-number-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.training-number-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.toggle-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #172026;
+  background: #f8fafb;
+}
+
+.toggle-row input {
+  width: auto;
+  min-height: auto;
+}
+
+.run-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.run-row > span {
+  min-width: 0;
+  overflow: hidden;
+  color: #62727e;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-row-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.run-status {
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #12343a;
+  background: #dfeaec;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.run-status.completed {
+  color: #064e3b;
+  background: #d9f4e7;
+}
+
+.run-status.failed {
+  color: #7c2d12;
+  background: #ffe7dc;
+}
+
+.run-status.running,
+.run-status.preparing,
+.run-status.queued {
+  color: #0b5f6a;
+  background: #dff6f2;
+}
+
+.metric-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.metric-chips span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: #12343a;
+  background: #e6f3f4;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.run-error {
+  margin: 0;
+  color: #7c2d12;
+  font-weight: 700;
+}
+
+.log-preview {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  border-radius: 8px;
+  padding: 10px;
+  color: #dce7ea;
+  background: #111820;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .annotation-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
@@ -550,7 +682,9 @@ input[type="color"] {
 
   .status-grid,
   .metrics-row,
-  .prep-grid {
+  .prep-grid,
+  .training-grid,
+  .training-number-grid {
     grid-template-columns: 1fr;
   }
 

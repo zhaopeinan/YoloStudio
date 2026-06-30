@@ -129,6 +129,46 @@ vi.mock("./api", () => ({
     frozen: true,
     created_at: "2026-06-30T00:01:00",
   }),
+  listTrainingRuns: async () => ({
+    items: [
+      {
+        id: 1,
+        project_id: 1,
+        version_id: 1,
+        status: "completed",
+        device: "cpu",
+        config: { model: "yolov8n.pt", epochs: 2 },
+        artifact_path: "/tmp/workspace/projects/1/runs/1",
+        log_path: "/tmp/workspace/projects/1/runs/1/logs.txt",
+        error_message: null,
+        latest_metrics: { "metrics/mAP50(B)": 0.42 },
+        started_at: "2026-06-30T00:00:00",
+        ended_at: "2026-06-30T00:01:00",
+        created_at: "2026-06-30T00:00:00",
+        updated_at: "2026-06-30T00:01:00",
+      },
+    ],
+  }),
+  createTrainingRun: async () => ({
+    id: 2,
+    project_id: 1,
+    version_id: 1,
+    status: "queued",
+    device: "cpu",
+    config: { model: "yolov8n.pt", epochs: 50 },
+    artifact_path: "/tmp/workspace/projects/1/runs/2",
+    log_path: "/tmp/workspace/projects/1/runs/2/logs.txt",
+    error_message: null,
+    latest_metrics: {},
+    started_at: null,
+    ended_at: null,
+    created_at: "2026-06-30T00:02:00",
+    updated_at: "2026-06-30T00:02:00",
+  }),
+  getTrainingRunLogs: async () => ({
+    run_id: 1,
+    text: "training queued\ntraining completed\n",
+  }),
 }));
 
 describe("App", () => {
@@ -146,6 +186,9 @@ describe("App", () => {
     expect(screen.getByText("Annotation")).toBeInTheDocument();
     expect(screen.getByText("Quality Review")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Dataset Version" })).toBeInTheDocument();
+    expect(screen.getByText("Training Setup")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Training Run" })).toBeInTheDocument();
+    expect(screen.getByText("Run History")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Import Dataset" }));
 
@@ -154,5 +197,7 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
+    expect(await screen.findByText("Run #1")).toBeInTheDocument();
+    expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
   });
 });

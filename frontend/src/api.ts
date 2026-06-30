@@ -143,6 +143,44 @@ export type DatasetVersionListResponse = {
   items: DatasetVersion[];
 };
 
+export type TrainingRun = {
+  id: number;
+  project_id: number;
+  version_id: number;
+  status: string;
+  device: string;
+  config: Record<string, unknown>;
+  artifact_path: string;
+  log_path: string;
+  error_message: string | null;
+  latest_metrics: Record<string, number>;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TrainingRunListResponse = {
+  items: TrainingRun[];
+};
+
+export type TrainingRunLogsResponse = {
+  run_id: number;
+  text: string;
+};
+
+export type TrainingRunCreate = {
+  version_id: number;
+  model: string;
+  epochs: number;
+  image_size: number;
+  batch_size: number;
+  device?: string;
+  augmentation_preset: string;
+  tta: boolean;
+  threshold_scan: boolean;
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -233,4 +271,19 @@ export function createDatasetVersion(
 
 export function listDatasetVersions(datasetId: number): Promise<DatasetVersionListResponse> {
   return requestJson<DatasetVersionListResponse>(`/api/datasets/${datasetId}/versions`);
+}
+
+export function listTrainingRuns(projectId: number): Promise<TrainingRunListResponse> {
+  return requestJson<TrainingRunListResponse>(`/api/projects/${projectId}/training/runs`);
+}
+
+export function createTrainingRun(body: TrainingRunCreate): Promise<TrainingRun> {
+  return requestJson<TrainingRun>("/api/training/runs", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getTrainingRunLogs(runId: number): Promise<TrainingRunLogsResponse> {
+  return requestJson<TrainingRunLogsResponse>(`/api/training/runs/${runId}/logs`);
 }
