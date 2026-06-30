@@ -1,8 +1,103 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+
+const apiMock = vi.hoisted(() => {
+  const completedRun = {
+    id: 1,
+    project_id: 1,
+    version_id: 1,
+    status: "completed",
+    device: "cpu",
+    config: { model: "yolov8n.pt", epochs: 2 },
+    artifact_path: "/tmp/workspace/projects/1/runs/1",
+    log_path: "/tmp/workspace/projects/1/runs/1/logs.txt",
+    error_message: null,
+    latest_metrics: { "metrics/mAP50(B)": 0.42 },
+    started_at: "2026-06-30T00:00:00",
+    ended_at: "2026-06-30T00:01:00",
+    created_at: "2026-06-30T00:00:00",
+    updated_at: "2026-06-30T00:01:00",
+  };
+  const runningRun = {
+    ...completedRun,
+    id: 2,
+    status: "running",
+    latest_metrics: {},
+    started_at: "2026-06-30T00:02:00",
+    ended_at: null,
+    created_at: "2026-06-30T00:02:00",
+    updated_at: "2026-06-30T00:02:30",
+  };
+  const completedPredictionJob = {
+    id: 1,
+    run_id: 1,
+    project_id: 1,
+    status: "completed",
+    image_scope: "all",
+    confidence_threshold: 0.25,
+    artifact_path: "/tmp/workspace/projects/1/runs/1/predictions/1",
+    log_path: "/tmp/workspace/projects/1/runs/1/predictions/1/logs.txt",
+    image_count: 2,
+    prediction_count: 3,
+    matched_count: 1,
+    false_positive_count: 1,
+    false_negative_count: 1,
+    error_message: null,
+    started_at: "2026-06-30T00:03:00",
+    ended_at: "2026-06-30T00:04:00",
+    created_at: "2026-06-30T00:03:00",
+    updated_at: "2026-06-30T00:04:00",
+  };
+  const runningPredictionJob = {
+    ...completedPredictionJob,
+    id: 2,
+    run_id: 2,
+    status: "running",
+    image_count: 1,
+    prediction_count: 0,
+    matched_count: 0,
+    false_positive_count: 0,
+    false_negative_count: 0,
+    ended_at: null,
+    created_at: "2026-06-30T00:05:00",
+    updated_at: "2026-06-30T00:05:30",
+  };
+  const trainingRunsResponseQueue: Array<{ items: Array<typeof completedRun | typeof runningRun> }> =
+    [];
+  const predictionJobsResponseQueue: Array<{
+    items: Array<typeof completedPredictionJob | typeof runningPredictionJob>;
+  }> = [];
+  const listTrainingRuns = vi.fn(async () => {
+    return trainingRunsResponseQueue.shift() ?? { items: [completedRun] };
+  });
+  const listPredictionJobs = vi.fn(async () => {
+    return predictionJobsResponseQueue.shift() ?? { items: [completedPredictionJob] };
+  });
+  const getTrainingRunLogs = vi.fn(async (runId: number) => ({
+    run_id: runId,
+    text: `training log for run ${runId}\n`,
+  }));
+  const getPredictionJobLogs = vi.fn(async (jobId: number) => ({
+    job_id: jobId,
+    text: `prediction log for job ${jobId}\n`,
+  }));
+
+  return {
+    completedRun,
+    runningRun,
+    completedPredictionJob,
+    runningPredictionJob,
+    trainingRunsResponseQueue,
+    predictionJobsResponseQueue,
+    listTrainingRuns,
+    listPredictionJobs,
+    getTrainingRunLogs,
+    getPredictionJobLogs,
+  };
+});
 
 vi.mock("./api", () => ({
   getHealth: async () => ({
@@ -129,26 +224,7 @@ vi.mock("./api", () => ({
     frozen: true,
     created_at: "2026-06-30T00:01:00",
   }),
-  listTrainingRuns: async () => ({
-    items: [
-      {
-        id: 1,
-        project_id: 1,
-        version_id: 1,
-        status: "completed",
-        device: "cpu",
-        config: { model: "yolov8n.pt", epochs: 2 },
-        artifact_path: "/tmp/workspace/projects/1/runs/1",
-        log_path: "/tmp/workspace/projects/1/runs/1/logs.txt",
-        error_message: null,
-        latest_metrics: { "metrics/mAP50(B)": 0.42 },
-        started_at: "2026-06-30T00:00:00",
-        ended_at: "2026-06-30T00:01:00",
-        created_at: "2026-06-30T00:00:00",
-        updated_at: "2026-06-30T00:01:00",
-      },
-    ],
-  }),
+  listTrainingRuns: apiMock.listTrainingRuns,
   createTrainingRun: async () => ({
     id: 2,
     project_id: 1,
@@ -165,34 +241,8 @@ vi.mock("./api", () => ({
     created_at: "2026-06-30T00:02:00",
     updated_at: "2026-06-30T00:02:00",
   }),
-  getTrainingRunLogs: async () => ({
-    run_id: 1,
-    text: "training queued\ntraining completed\n",
-  }),
-  listPredictionJobs: async () => ({
-    items: [
-      {
-        id: 1,
-        run_id: 1,
-        project_id: 1,
-        status: "completed",
-        image_scope: "all",
-        confidence_threshold: 0.25,
-        artifact_path: "/tmp/workspace/projects/1/runs/1/predictions/1",
-        log_path: "/tmp/workspace/projects/1/runs/1/predictions/1/logs.txt",
-        image_count: 2,
-        prediction_count: 3,
-        matched_count: 1,
-        false_positive_count: 1,
-        false_negative_count: 1,
-        error_message: null,
-        started_at: "2026-06-30T00:03:00",
-        ended_at: "2026-06-30T00:04:00",
-        created_at: "2026-06-30T00:03:00",
-        updated_at: "2026-06-30T00:04:00",
-      },
-    ],
-  }),
+  getTrainingRunLogs: apiMock.getTrainingRunLogs,
+  listPredictionJobs: apiMock.listPredictionJobs,
   createPredictionJob: async () => ({
     id: 2,
     run_id: 1,
@@ -245,10 +295,7 @@ vi.mock("./api", () => ({
       },
     ],
   }),
-  getPredictionJobLogs: async () => ({
-    job_id: 1,
-    text: "prediction queued\nprediction completed\n",
-  }),
+  getPredictionJobLogs: apiMock.getPredictionJobLogs,
   getPredictionImageReview: async () => ({
     image: {
       id: 10,
@@ -322,6 +369,19 @@ vi.mock("./api", () => ({
 }));
 
 describe("App", () => {
+  beforeEach(() => {
+    apiMock.trainingRunsResponseQueue.length = 0;
+    apiMock.predictionJobsResponseQueue.length = 0;
+    apiMock.listTrainingRuns.mockClear();
+    apiMock.listPredictionJobs.mockClear();
+    apiMock.getTrainingRunLogs.mockClear();
+    apiMock.getPredictionJobLogs.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders local app status and dataset scan controls", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -371,4 +431,46 @@ describe("App", () => {
       await screen.findByDisplayValue("occluded, false_negative, reviewed_prediction"),
     ).toBeInTheDocument();
   });
+
+  it("auto-refreshes active training runs and prediction jobs until idle", async () => {
+    apiMock.trainingRunsResponseQueue.push(
+      { items: [apiMock.runningRun] },
+      { items: [apiMock.completedRun] },
+    );
+    apiMock.predictionJobsResponseQueue.push(
+      { items: [apiMock.runningPredictionJob] },
+      { items: [apiMock.completedPredictionJob] },
+    );
+
+    render(<App />);
+    await flushPromises();
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Import Dataset" }));
+    await flushPromises();
+
+    expect(screen.getByText("Run #2")).toBeInTheDocument();
+    expect(screen.getAllByText("Auto refresh on").length).toBeGreaterThanOrEqual(2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+      await Promise.resolve();
+    });
+    await flushPromises();
+
+    expect(screen.getByText("Run #1")).toBeInTheDocument();
+    expect(screen.getByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
+    expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
+    expect(apiMock.getPredictionJobLogs).toHaveBeenCalledWith(2);
+    expect(screen.getAllByText("Idle")).toHaveLength(2);
+  });
 });
+
+async function flushPromises() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}

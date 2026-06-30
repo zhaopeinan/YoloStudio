@@ -560,6 +560,18 @@ input[type="color"] {
   background: #dff6f2;
 }
 
+.monitor-state {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 5px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #4d6570;
+  background: #edf2f5;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .metric-chips {
   display: flex;
   flex-wrap: wrap;

@@ -96,6 +96,8 @@ After a dataset version exists:
 3. Set epochs, image size, batch size, device, augmentation preset, TTA, and threshold scan flags.
 4. Click `Start Training Run`.
 5. Check `Run History` for status, artifact path, latest metrics, errors, and logs.
+6. While a run is `queued`, `preparing`, or `running`, the frontend shows `Auto refresh on` and
+   refreshes run status plus logs automatically.
 
 The backend creates persistent run artifacts under:
 
@@ -146,6 +148,9 @@ After a training run exists:
 10. Use `Add as annotation` to promote a false-positive prediction into an editable annotation draft.
 11. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
 12. Click `Save Annotations` when the correction draft looks right.
+
+Prediction jobs also show `Auto refresh on` while queued or running. The UI refreshes the latest job,
+its prediction rows, and active job logs until the job reaches a terminal state.
 
 Prediction artifacts are written under:
 

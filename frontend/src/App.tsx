@@ -56,6 +56,9 @@ import {
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
 const defaultClassColor = "#ef4444";
+const monitorRefreshMs = 2500;
+const activeRunStatuses = new Set(["queued", "preparing", "running"]);
+const activePredictionStatuses = new Set(["queued", "running"]);
 
 type DraftBox = Annotation & {
   local_id: string;
@@ -145,6 +148,21 @@ export default function App() {
     return new Map(classes.map((classItem) => [classItem.id, classItem]));
   }, [classes]);
 
+  const hasActiveRun = useMemo(() => runs.some((run) => isActiveRun(run.status)), [runs]);
+  const hasActivePredictionJob = useMemo(
+    () => predictionJobs.some((job) => isActivePredictionJob(job.status)),
+    [predictionJobs],
+  );
+  const activeRunIds = useMemo(
+    () => runs.filter((run) => isActiveRun(run.status)).map((run) => run.id),
+    [runs],
+  );
+  const activePredictionJobIds = useMemo(
+    () => predictionJobs.filter((job) => isActivePredictionJob(job.status)).map((job) => job.id),
+    [predictionJobs],
+  );
+  const latestRunId = runs[0]?.id ?? null;
+
   useEffect(() => {
     if (!selectedImageId) {
       setAnnotations([]);
@@ -162,6 +180,36 @@ export default function App() {
       })
       .catch((error: Error) => setAnnotationError(error.message));
   }, [activeReview?.image.id, selectedImageId]);
+
+  useEffect(() => {
+    if (!importedDataset || !hasActiveRun) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshTrainingRuns(importedDataset.project_id);
+      activeRunIds.forEach((runId) => {
+        void loadRunLogs(runId);
+      });
+    }, monitorRefreshMs);
+
+    return () => window.clearInterval(interval);
+  }, [activeRunIds, hasActiveRun, importedDataset]);
+
+  useEffect(() => {
+    if (!latestRunId || !hasActivePredictionJob) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshPredictionJobs(latestRunId);
+      activePredictionJobIds.forEach((jobId) => {
+        void loadPredictionLogs(jobId);
+      });
+    }, monitorRefreshMs);
+
+    return () => window.clearInterval(interval);
+  }, [activePredictionJobIds, hasActivePredictionJob, latestRunId]);
 
   async function handleScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -269,6 +317,12 @@ export default function App() {
       if (jobsResponse.items[0]) {
         const predictionsResponse = await listPredictions(jobsResponse.items[0].id);
         setPredictions(predictionsResponse.items);
+        if (
+          isActivePredictionJob(jobsResponse.items[0].status) ||
+          predictionLogs[jobsResponse.items[0].id]
+        ) {
+          await loadPredictionLogs(jobsResponse.items[0].id);
+        }
       } else {
         setPredictions([]);
       }
@@ -894,6 +948,9 @@ export default function App() {
             <div>
               <p className="eyebrow">Experiments</p>
               <h2>Run History</h2>
+              <span className="monitor-state">
+                {hasActiveRun ? "Auto refresh on" : "Idle"}
+              </span>
             </div>
             <Activity size={20} />
           </div>
@@ -943,6 +1000,9 @@ export default function App() {
           <div>
             <p className="eyebrow">Model Review</p>
             <h2>Prediction Analysis</h2>
+            <span className="monitor-state">
+              {hasActivePredictionJob ? "Auto refresh on" : "Idle"}
+            </span>
           </div>
           <Radar size={20} />
         </div>
@@ -1431,6 +1491,14 @@ function mergeTags(existing: string[] | undefined, tags: string[]) {
 
 function formatFailureType(value: string) {
   return value.replace(/_/g, " ");
+}
+
+function isActiveRun(status: string) {
+  return activeRunStatuses.has(status);
+}
+
+function isActivePredictionJob(status: string) {
+  return activePredictionStatuses.has(status);
 }
 
 function resolveClassColor(annotation: DraftBox, classById: Map<number, ProjectClass>) {
