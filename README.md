@@ -47,3 +47,17 @@ Open `http://127.0.0.1:5173`, keep the backend running, and scan:
 ```text
 /Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip
 ```
+
+## Annotation smoke workflow
+
+With both servers running:
+
+1. Open `http://127.0.0.1:5173`.
+2. Click `Scan Dataset` to preview the zip.
+3. Click `Import Dataset` to copy the archive images into the managed workspace and create SQLite rows.
+4. In `Class Library`, create a class such as `target`.
+5. Select an image in `Image Browser`.
+6. Drag on the image in `Annotation` to create a bounding box.
+7. Optionally fill `Track ID` and `Edge tags`.
+8. Click `Save Annotations`.
+9. Reselect or reload the image and confirm the saved box is still listed.
