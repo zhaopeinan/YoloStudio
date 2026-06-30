@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.settings import Settings, get_settings
+from app.db.models import Prediction, PredictionJob, TrainingRun
+from app.db.session import get_db
+from app.prediction.runner import (
+    create_prediction_job,
+    execute_prediction_job,
+    predict_images,
+    read_prediction_logs,
+)
+from app.prediction.schemas import (
+    PredictionJobCreate,
+    PredictionJobList,
+    PredictionJobLogs,
+    PredictionJobRead,
+    PredictionList,
+    PredictionRead,
+)
+
+
+router = APIRouter(prefix="/api", tags=["prediction"])
+
+
+def _read_job(job: PredictionJob) -> PredictionJobRead:
+    return PredictionJobRead(
+        id=job.id,
+        run_id=job.run_id,
+        project_id=job.project_id,
+        status=job.status,
+        image_scope=job.image_scope,
+        confidence_threshold=job.confidence_threshold,
+        artifact_path=job.artifact_path,
+        log_path=job.log_path,
+        image_count=job.image_count,
+        prediction_count=job.prediction_count,
+        matched_count=job.matched_count,
+        false_positive_count=job.false_positive_count,
+        false_negative_count=job.false_negative_count,
+        error_message=job.error_message,
+        started_at=job.started_at,
+        ended_at=job.ended_at,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+def _read_prediction(prediction: Prediction) -> PredictionRead:
+    return PredictionRead(
+        id=prediction.id,
+        run_id=prediction.run_id,
+        job_id=prediction.job_id,
+        image_id=prediction.image_id,
+        class_id=prediction.class_id,
+        x_center=prediction.x_center,
+        y_center=prediction.y_center,
+        width=prediction.width,
+        height=prediction.height,
+        confidence=prediction.confidence,
+        matched_annotation_id=prediction.matched_annotation_id,
+        failure_type=prediction.failure_type,
+    )
+
+
+@router.post("/training/runs/{run_id}/prediction-jobs", response_model=PredictionJobRead)
+def create_run_prediction_job(
+    run_id: int,
+    request: PredictionJobCreate,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> PredictionJobRead:
+    run = db.get(TrainingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+
+    job = create_prediction_job(
+        db,
+        settings,
+        run,
+        image_scope=request.image_scope,
+        confidence_threshold=request.confidence_threshold,
+    )
+    job = execute_prediction_job(db, job, run, predictor=predict_images)
+    return _read_job(job)
+
+
+@router.get("/training/runs/{run_id}/prediction-jobs", response_model=PredictionJobList)
+def list_run_prediction_jobs(run_id: int, db: Session = Depends(get_db)) -> PredictionJobList:
+    if db.get(TrainingRun, run_id) is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+    jobs = db.scalars(
+        select(PredictionJob).where(PredictionJob.run_id == run_id).order_by(PredictionJob.id.desc())
+    ).all()
+    return PredictionJobList(items=[_read_job(job) for job in jobs])
+
+
+@router.get("/prediction-jobs/{job_id}/predictions", response_model=PredictionList)
+def list_job_predictions(job_id: int, db: Session = Depends(get_db)) -> PredictionList:
+    if db.get(PredictionJob, job_id) is None:
+        raise HTTPException(status_code=404, detail="Prediction job was not found")
+    predictions = db.scalars(
+        select(Prediction).where(Prediction.job_id == job_id).order_by(Prediction.id)
+    ).all()
+    return PredictionList(items=[_read_prediction(prediction) for prediction in predictions])
+
+
+@router.get("/prediction-jobs/{job_id}/logs", response_model=PredictionJobLogs)
+def get_prediction_job_logs(job_id: int, db: Session = Depends(get_db)) -> PredictionJobLogs:
+    job = db.get(PredictionJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Prediction job was not found")
+    return PredictionJobLogs(job_id=job.id, text=read_prediction_logs(job))

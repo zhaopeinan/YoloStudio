@@ -135,6 +135,7 @@ class TrainingRun(TimestampMixin, Base):
     project: Mapped["Project"] = relationship(back_populates="training_runs")
     version: Mapped["DatasetVersion"] = relationship(back_populates="training_runs")
     metrics: Mapped[list["RunMetric"]] = relationship(back_populates="run")
+    prediction_jobs: Mapped[list["PredictionJob"]] = relationship(back_populates="run")
 
 
 class RunMetric(TimestampMixin, Base):
@@ -148,3 +149,46 @@ class RunMetric(TimestampMixin, Base):
     value: Mapped[float] = mapped_column(Float, nullable=False)
 
     run: Mapped["TrainingRun"] = relationship(back_populates="metrics")
+
+
+class PredictionJob(TimestampMixin, Base):
+    __tablename__ = "prediction_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("training_runs.id"), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    image_scope: Mapped[str] = mapped_column(String(40), nullable=False, default="all")
+    confidence_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    log_path: Mapped[str] = mapped_column(Text, nullable=False)
+    image_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prediction_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    matched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    false_positive_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    false_negative_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    run: Mapped["TrainingRun"] = relationship(back_populates="prediction_jobs")
+    predictions: Mapped[list["Prediction"]] = relationship(back_populates="job")
+
+
+class Prediction(TimestampMixin, Base):
+    __tablename__ = "predictions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("training_runs.id"), nullable=False, index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("prediction_jobs.id"), nullable=False, index=True)
+    image_id: Mapped[int] = mapped_column(ForeignKey("images.id"), nullable=False, index=True)
+    class_id: Mapped[int] = mapped_column(ForeignKey("class_defs.id"), nullable=False, index=True)
+    x_center: Mapped[float] = mapped_column(Float, nullable=False)
+    y_center: Mapped[float] = mapped_column(Float, nullable=False)
+    width: Mapped[float] = mapped_column(Float, nullable=False)
+    height: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    matched_annotation_id: Mapped[int | None] = mapped_column(ForeignKey("annotations.id"))
+    failure_type: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    job: Mapped["PredictionJob"] = relationship(back_populates="predictions")
