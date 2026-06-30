@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.annotations.router import router as annotations_router
+from app.classes.router import router as classes_router
 from app.core.devices import detect_devices
 from app.core.settings import get_settings
-from app.datasets.router import router as datasets_router
+from app.datasets.router import images_router, router as datasets_router
 from app.db.session import init_db
 
 
@@ -27,6 +29,9 @@ app.add_middleware(
 )
 
 app.include_router(datasets_router)
+app.include_router(images_router)
+app.include_router(classes_router)
+app.include_router(annotations_router)
 
 
 @app.get("/api/health")
