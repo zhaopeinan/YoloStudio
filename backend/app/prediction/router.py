@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
-from app.db.models import Prediction, PredictionJob, TrainingRun
+from app.db.models import Annotation, ClassDef, Image, Prediction, PredictionJob, TrainingRun
 from app.db.session import get_db
 from app.prediction.runner import (
     create_prediction_job,
@@ -15,9 +15,12 @@ from app.prediction.runner import (
 )
 from app.prediction.schemas import (
     PredictionJobCreate,
+    PredictionImageReview,
     PredictionJobList,
     PredictionJobLogs,
     PredictionJobRead,
+    PredictionReviewAnnotation,
+    PredictionReviewImage,
     PredictionList,
     PredictionRead,
 )
@@ -114,3 +117,66 @@ def get_prediction_job_logs(job_id: int, db: Session = Depends(get_db)) -> Predi
     if job is None:
         raise HTTPException(status_code=404, detail="Prediction job was not found")
     return PredictionJobLogs(job_id=job.id, text=read_prediction_logs(job))
+
+
+@router.get("/prediction-jobs/{job_id}/images/{image_id}/review", response_model=PredictionImageReview)
+def get_prediction_image_review(
+    job_id: int,
+    image_id: int,
+    db: Session = Depends(get_db),
+) -> PredictionImageReview:
+    if db.get(PredictionJob, job_id) is None:
+        raise HTTPException(status_code=404, detail="Prediction job was not found")
+    image = db.get(Image, image_id)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Image was not found")
+
+    annotation_rows = db.execute(
+        select(Annotation, ClassDef)
+        .join(ClassDef, Annotation.class_id == ClassDef.id)
+        .where(Annotation.image_id == image_id)
+        .order_by(Annotation.id)
+    ).all()
+    predictions = db.scalars(
+        select(Prediction)
+        .where(Prediction.job_id == job_id, Prediction.image_id == image_id)
+        .order_by(Prediction.id)
+    ).all()
+    counts = {
+        "matched": sum(1 for prediction in predictions if prediction.failure_type == "matched"),
+        "false_positive": sum(
+            1 for prediction in predictions if prediction.failure_type == "false_positive"
+        ),
+        "false_negative": sum(
+            1 for prediction in predictions if prediction.failure_type == "false_negative"
+        ),
+    }
+
+    return PredictionImageReview(
+        image=PredictionReviewImage(
+            id=image.id,
+            relative_path=image.relative_path,
+            image_url=f"/api/images/{image.id}/file",
+            platform=image.platform,
+            altitude=image.altitude,
+            timestamp=image.timestamp,
+        ),
+        annotations=[
+            PredictionReviewAnnotation(
+                id=annotation.id,
+                image_id=annotation.image_id,
+                class_id=annotation.class_id,
+                class_name=class_def.name,
+                class_color=class_def.color,
+                x_center=annotation.x_center,
+                y_center=annotation.y_center,
+                width=annotation.width,
+                height=annotation.height,
+                track_id=annotation.track_id,
+                edge_tags=annotation.edge_tags or [],
+            )
+            for annotation, class_def in annotation_rows
+        ],
+        predictions=[_read_prediction(prediction) for prediction in predictions],
+        counts=counts,
+    )

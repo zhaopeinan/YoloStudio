@@ -137,3 +137,18 @@ def test_prediction_job_persists_matches_and_failures(tmp_path: Path, monkeypatc
 
         assert logs_response.status_code == 200
         assert "prediction completed" in logs_response.json()["text"]
+
+        review_response = client.get(
+            f"/api/prediction-jobs/{job['id']}/images/{first_image_id}/review"
+        )
+
+        assert review_response.status_code == 200
+        review = review_response.json()
+        assert review["image"]["id"] == first_image_id
+        assert len(review["annotations"]) == 1
+        assert len(review["predictions"]) == 2
+        assert review["counts"] == {
+            "matched": 1,
+            "false_positive": 1,
+            "false_negative": 0,
+        }

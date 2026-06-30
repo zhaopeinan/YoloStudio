@@ -57,3 +57,33 @@ class PredictionList(BaseModel):
 class PredictionJobLogs(BaseModel):
     job_id: int
     text: str
+
+
+class PredictionReviewImage(BaseModel):
+    id: int
+    relative_path: str
+    image_url: str
+    platform: str | None
+    altitude: float | None
+    timestamp: float | None
+
+
+class PredictionReviewAnnotation(BaseModel):
+    id: int
+    image_id: int
+    class_id: int
+    class_name: str
+    class_color: str
+    x_center: float
+    y_center: float
+    width: float
+    height: float
+    track_id: str | None
+    edge_tags: list[str]
+
+
+class PredictionImageReview(BaseModel):
+    image: PredictionReviewImage
+    annotations: list[PredictionReviewAnnotation]
+    predictions: list[PredictionRead]
+    counts: dict[str, int]
