@@ -129,3 +129,38 @@ curl -X POST http://127.0.0.1:8000/api/training/runs \
 curl http://127.0.0.1:8000/api/projects/1/training/runs
 curl http://127.0.0.1:8000/api/training/runs/1/logs
 ```
+
+## Prediction analysis and failure samples
+
+After a training run exists:
+
+1. Open `Prediction Analysis`.
+2. Choose an image scope: `all`, `train`, `val`, or `test`.
+3. Set a confidence threshold.
+4. Click `Run Prediction Analysis`.
+5. Review matched, false-positive, and false-negative counts.
+6. Inspect the prediction/failure sample list; each row keeps the source image ID for annotator follow-up.
+
+Prediction artifacts are written under:
+
+```text
+workspace/projects/<project_id>/runs/<run_id>/predictions/<job_id>/
+  logs.txt
+  predictions.json
+```
+
+Real prediction uses `workspace/projects/<project_id>/runs/<run_id>/ultralytics/weights/best.pt`.
+If weights or Ultralytics are missing, the prediction job is persisted as `failed` with a clear log
+message.
+
+API smoke after a run exists:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/training/runs/1/prediction-jobs \
+  -H "Content-Type: application/json" \
+  -d '{"image_scope":"all","confidence_threshold":0.25}'
+
+curl http://127.0.0.1:8000/api/training/runs/1/prediction-jobs
+curl http://127.0.0.1:8000/api/prediction-jobs/1/predictions
+curl http://127.0.0.1:8000/api/prediction-jobs/1/logs
+```
