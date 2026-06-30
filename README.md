@@ -86,3 +86,46 @@ Version export includes only annotated images. It freezes the project class libr
 zero-based YOLO class map sorted by class ID, writes normalized `class x_center y_center width height`
 labels, and uses a deterministic 80/10/10 split with at least one validation image when there are
 two or more annotated images.
+
+## Training run lifecycle
+
+After a dataset version exists:
+
+1. Open `Training Setup`.
+2. Choose a model preset such as `yolov8n.pt`, or enter a local `.pt` path.
+3. Set epochs, image size, batch size, device, augmentation preset, TTA, and threshold scan flags.
+4. Click `Start Training Run`.
+5. Check `Run History` for status, artifact path, latest metrics, errors, and logs.
+
+The backend creates persistent run artifacts under:
+
+```text
+workspace/projects/<project_id>/runs/<run_id>/
+  config.json
+  logs.txt
+  metrics.jsonl
+```
+
+Only one run can be active for a project at a time. Run status can be `queued`, `preparing`,
+`running`, `completed`, or `failed`.
+
+Real training uses Ultralytics when it is installed in the backend Python environment:
+
+```bash
+cd backend
+python -m pip install ultralytics
+```
+
+If Ultralytics is not installed, the run is still persisted and moves to `failed` with a clear log
+message. This lets the UI and run history be tested without downloading model weights.
+
+API smoke after creating a dataset version:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/training/runs \
+  -H "Content-Type: application/json" \
+  -d '{"version_id":1,"model":"yolov8n.pt","epochs":1,"image_size":320,"batch_size":1}'
+
+curl http://127.0.0.1:8000/api/projects/1/training/runs
+curl http://127.0.0.1:8000/api/training/runs/1/logs
+```
