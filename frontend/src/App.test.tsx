@@ -84,6 +84,51 @@ const apiMock = vi.hoisted(() => {
     job_id: jobId,
     text: `prediction log for job ${jobId}\n`,
   }));
+  const getExportCapabilities = vi.fn(async () => ({
+    pt_available: true,
+    onnx_available: false,
+    tensorrt_available: false,
+    weights_path: "/tmp/workspace/projects/1/runs/1/ultralytics/weights/best.pt",
+    reasons: {
+      onnx: "Ultralytics is not installed",
+      tensorrt: "TensorRT Python package is not installed",
+    },
+  }));
+  const exportArtifacts: Array<{
+    id: number;
+    run_id: number;
+    project_id: number;
+    format: string;
+    status: string;
+    artifact_path: string;
+    error_message: string | null;
+    metadata: Record<string, string>;
+    started_at: string;
+    ended_at: string;
+    created_at: string;
+    updated_at: string;
+  }> = [];
+  const listRunExports = vi.fn(async () => ({
+    items: exportArtifacts,
+  }));
+  const createRunExport = vi.fn(async (runId: number, format: string) => {
+    const artifact = {
+      id: exportArtifacts.length + 1,
+      run_id: runId,
+      project_id: 1,
+      format,
+      status: "completed",
+      artifact_path: `/tmp/workspace/projects/1/runs/${runId}/exports/run-${runId}.${format}`,
+      error_message: null,
+      metadata: { format },
+      started_at: "2026-06-30T00:06:00",
+      ended_at: "2026-06-30T00:06:01",
+      created_at: "2026-06-30T00:06:00",
+      updated_at: "2026-06-30T00:06:01",
+    };
+    exportArtifacts.unshift(artifact);
+    return artifact;
+  });
 
   return {
     completedRun,
@@ -96,6 +141,10 @@ const apiMock = vi.hoisted(() => {
     listPredictionJobs,
     getTrainingRunLogs,
     getPredictionJobLogs,
+    getExportCapabilities,
+    listRunExports,
+    createRunExport,
+    exportArtifacts,
   };
 });
 
@@ -366,6 +415,9 @@ vi.mock("./api", () => ({
     ],
     counts: { matched: 1, false_positive: 1, false_negative: 1 },
   }),
+  getExportCapabilities: apiMock.getExportCapabilities,
+  listRunExports: apiMock.listRunExports,
+  createRunExport: apiMock.createRunExport,
 }));
 
 describe("App", () => {
@@ -376,6 +428,10 @@ describe("App", () => {
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
     apiMock.getPredictionJobLogs.mockClear();
+    apiMock.getExportCapabilities.mockClear();
+    apiMock.listRunExports.mockClear();
+    apiMock.createRunExport.mockClear();
+    apiMock.exportArtifacts.length = 0;
   });
 
   afterEach(() => {
@@ -412,6 +468,14 @@ describe("App", () => {
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
     expect(await screen.findByText("false_positive")).toBeInTheDocument();
     expect(await screen.findByText("Matched")).toBeInTheDocument();
+    expect(await screen.findByText("Model Export")).toBeInTheDocument();
+    expect(await screen.findByText(".pt Weights")).toBeInTheDocument();
+    expect(await screen.findByText("Ultralytics is not installed")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Export PT" }));
+
+    expect(apiMock.createRunExport).toHaveBeenCalledWith(1, "pt");
+    expect(await screen.findByText("PT export #1")).toBeInTheDocument();
 
     await user.click(screen.getAllByRole("button", { name: "Open Image" })[0]);
 

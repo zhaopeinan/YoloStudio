@@ -606,7 +606,8 @@ input[type="color"] {
   white-space: pre-wrap;
 }
 
-.prediction-panel {
+.prediction-panel,
+.export-panel {
   margin-top: 16px;
 }
 
@@ -649,6 +650,65 @@ input[type="color"] {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.export-option,
+.export-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.export-option div,
+.export-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.export-option span,
+.export-row span,
+.export-source {
+  min-width: 0;
+  overflow: hidden;
+  color: #62727e;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-option button {
+  width: 100%;
+  min-height: 34px;
+}
+
+.export-source {
+  margin: 14px 0 0;
+}
+
+.export-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.export-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.export-row .run-error {
+  grid-column: 1 / -1;
 }
 
 .prediction-row strong {
@@ -875,11 +935,12 @@ input[type="color"] {
   .prep-grid,
   .training-grid,
   .training-number-grid,
-  .prediction-controls,
-  .prediction-summary,
-  .prediction-layout {
-    grid-template-columns: 1fr;
-  }
+	  .prediction-controls,
+	  .prediction-summary,
+	  .prediction-layout,
+	  .export-grid {
+	    grid-template-columns: 1fr;
+	  }
 
   .workbench-grid,
   .annotation-layout {

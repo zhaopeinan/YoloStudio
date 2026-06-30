@@ -176,3 +176,33 @@ curl http://127.0.0.1:8000/api/prediction-jobs/1/predictions
 curl http://127.0.0.1:8000/api/prediction-jobs/1/images/1/review
 curl http://127.0.0.1:8000/api/prediction-jobs/1/logs
 ```
+
+## Model export
+
+After a completed training run exists:
+
+1. Open `Model Export`.
+2. Check whether the latest run has `ultralytics/weights/best.pt`.
+3. Use `Export PT` to copy/register the trained `.pt` weights under the run export folder.
+4. Use `Export ONNX` when Ultralytics is installed and the weights file exists.
+5. TensorRT is shown only when backend capability detection finds TensorRT support; otherwise the UI shows
+   the unsupported reason.
+
+Export artifacts are persisted in SQLite and written under:
+
+```text
+workspace/projects/<project_id>/runs/<run_id>/exports/
+  run-<run_id>.pt
+  run-<run_id>.onnx
+  run-<run_id>.engine
+```
+
+API smoke:
+
+```bash
+curl http://127.0.0.1:8000/api/training/runs/1/exports/capabilities
+curl -X POST http://127.0.0.1:8000/api/training/runs/1/exports \
+  -H "Content-Type: application/json" \
+  -d '{"format":"pt"}'
+curl http://127.0.0.1:8000/api/training/runs/1/exports
+```

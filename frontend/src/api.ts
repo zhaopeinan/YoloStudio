@@ -253,6 +253,33 @@ export type PredictionImageReview = {
   counts: Record<string, number>;
 };
 
+export type ExportArtifact = {
+  id: number;
+  run_id: number;
+  project_id: number;
+  format: string;
+  status: string;
+  artifact_path: string;
+  error_message: string | null;
+  metadata: Record<string, unknown>;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ExportArtifactListResponse = {
+  items: ExportArtifact[];
+};
+
+export type ExportCapabilities = {
+  pt_available: boolean;
+  onnx_available: boolean;
+  tensorrt_available: boolean;
+  weights_path: string | null;
+  reasons: Record<string, string>;
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -389,4 +416,19 @@ export function getPredictionImageReview(
   return requestJson<PredictionImageReview>(
     `/api/prediction-jobs/${jobId}/images/${imageId}/review`,
   );
+}
+
+export function getExportCapabilities(runId: number): Promise<ExportCapabilities> {
+  return requestJson<ExportCapabilities>(`/api/training/runs/${runId}/exports/capabilities`);
+}
+
+export function listRunExports(runId: number): Promise<ExportArtifactListResponse> {
+  return requestJson<ExportArtifactListResponse>(`/api/training/runs/${runId}/exports`);
+}
+
+export function createRunExport(runId: number, format: string): Promise<ExportArtifact> {
+  return requestJson<ExportArtifact>(`/api/training/runs/${runId}/exports`, {
+    method: "POST",
+    body: JSON.stringify({ format }),
+  });
 }

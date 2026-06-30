@@ -12,6 +12,7 @@ import {
   Play,
   Radar,
   Save,
+  Share2,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -24,6 +25,8 @@ import type {
   DatasetQualitySummary,
   DatasetScanSummary,
   DatasetVersion,
+  ExportArtifact,
+  ExportCapabilities,
   HealthResponse,
   ProjectClass,
   AnnotationWrite,
@@ -36,8 +39,10 @@ import {
   createClass,
   createDatasetVersion,
   createPredictionJob,
+  createRunExport,
   createTrainingRun,
   getAnnotations,
+  getExportCapabilities,
   getHealth,
   getPredictionJobLogs,
   getPredictionImageReview,
@@ -49,6 +54,7 @@ import {
   listImages,
   listPredictionJobs,
   listPredictions,
+  listRunExports,
   listTrainingRuns,
   replaceAnnotations,
   scanDataset,
@@ -122,6 +128,10 @@ export default function App() {
   const [activeReview, setActiveReview] = useState<PredictionImageReview | null>(null);
   const [showGroundTruthLayer, setShowGroundTruthLayer] = useState(true);
   const [showPredictionLayer, setShowPredictionLayer] = useState(true);
+  const [exportCapabilities, setExportCapabilities] = useState<ExportCapabilities | null>(null);
+  const [exports, setExports] = useState<ExportArtifact[]>([]);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [isCreatingExport, setIsCreatingExport] = useState<string | null>(null);
 
   useEffect(() => {
     getHealth()
@@ -162,6 +172,7 @@ export default function App() {
     [predictionJobs],
   );
   const latestRunId = runs[0]?.id ?? null;
+  const latestRun = runs[0] ?? null;
 
   useEffect(() => {
     if (!selectedImageId) {
@@ -210,6 +221,16 @@ export default function App() {
 
     return () => window.clearInterval(interval);
   }, [activePredictionJobIds, hasActivePredictionJob, latestRunId]);
+
+  useEffect(() => {
+    if (!latestRunId) {
+      setExportCapabilities(null);
+      setExports([]);
+      return;
+    }
+
+    void refreshExports(latestRunId);
+  }, [latestRunId]);
 
   async function handleScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -328,6 +349,26 @@ export default function App() {
       }
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "Prediction refresh failed");
+    }
+  }
+
+  async function refreshExports(runId = runs[0]?.id) {
+    if (!runId) {
+      setExportCapabilities(null);
+      setExports([]);
+      return;
+    }
+
+    try {
+      const [capabilitiesResponse, exportsResponse] = await Promise.all([
+        getExportCapabilities(runId),
+        listRunExports(runId),
+      ]);
+      setExportCapabilities(capabilitiesResponse);
+      setExports(exportsResponse.items);
+      setExportError(null);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Export refresh failed");
     }
   }
 
@@ -575,6 +616,26 @@ export default function App() {
       setPredictionLogs((current) => ({ ...current, [jobId]: response.text }));
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "Prediction logs failed to load");
+    }
+  }
+
+  async function handleCreateExport(format: string) {
+    const run = runs[0];
+    if (!run) {
+      return;
+    }
+
+    setIsCreatingExport(format);
+    setExportError(null);
+
+    try {
+      const artifact = await createRunExport(run.id, format);
+      setExports((current) => [artifact, ...current.filter((item) => item.id !== artifact.id)]);
+      await refreshExports(run.id);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setIsCreatingExport(null);
     }
   }
 
@@ -1100,6 +1161,78 @@ export default function App() {
         </div>
       </section>
 
+      <section className="panel export-panel" aria-label="Model export">
+        <div className="panel-heading compact-heading">
+          <div>
+            <p className="eyebrow">Deployment Artifacts</p>
+            <h2>Model Export</h2>
+          </div>
+          <Share2 size={20} />
+        </div>
+
+        {exportError ? <div className="error-banner">{exportError}</div> : null}
+
+        <div className="export-grid">
+          <ExportOption
+            title=".pt Weights"
+            format="pt"
+            enabled={Boolean(latestRun && latestRun.status === "completed" && exportCapabilities?.pt_available)}
+            reason={exportCapabilities?.reasons.pt}
+            isCreating={isCreatingExport === "pt"}
+            onCreate={handleCreateExport}
+          />
+          <ExportOption
+            title="ONNX"
+            format="onnx"
+            enabled={Boolean(
+              latestRun && latestRun.status === "completed" && exportCapabilities?.onnx_available,
+            )}
+            reason={exportCapabilities?.reasons.onnx}
+            isCreating={isCreatingExport === "onnx"}
+            onCreate={handleCreateExport}
+          />
+          <ExportOption
+            title="TensorRT"
+            format="tensorrt"
+            enabled={Boolean(
+              latestRun &&
+                latestRun.status === "completed" &&
+                exportCapabilities?.tensorrt_available,
+            )}
+            reason={exportCapabilities?.reasons.tensorrt}
+            isCreating={isCreatingExport === "tensorrt"}
+            onCreate={handleCreateExport}
+          />
+        </div>
+
+        {exportCapabilities?.weights_path ? (
+          <p className="export-source">Source weights: {exportCapabilities.weights_path}</p>
+        ) : (
+          <p className="empty-state">
+            Complete a training run with `ultralytics/weights/best.pt` to enable export.
+          </p>
+        )}
+
+        <div className="export-list" aria-label="Export artifacts">
+          {exports.length === 0 ? (
+            <p className="empty-state">Exported model artifacts will appear here.</p>
+          ) : (
+            exports.map((artifact) => (
+              <div className="export-row" key={artifact.id}>
+                <div>
+                  <strong>{artifact.format.toUpperCase()} export #{artifact.id}</strong>
+                  <span>{artifact.artifact_path || "No artifact path yet"}</span>
+                </div>
+                <span className={`run-status ${artifact.status}`}>{artifact.status}</span>
+                {artifact.error_message ? (
+                  <p className="run-error">{artifact.error_message}</p>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
       <section className="workbench-grid" aria-label="Annotation workbench">
         <aside className="panel side-panel">
           <div className="panel-heading compact-heading">
@@ -1603,6 +1736,33 @@ function StatusTile(props: { icon: ReactNode; label: string; value: string }) {
         <span>{props.label}</span>
         <strong>{props.value}</strong>
       </div>
+    </div>
+  );
+}
+
+function ExportOption(props: {
+  title: string;
+  format: string;
+  enabled: boolean;
+  reason?: string;
+  isCreating: boolean;
+  onCreate: (format: string) => void;
+}) {
+  const { title, format, enabled, reason, isCreating, onCreate } = props;
+  return (
+    <div className="export-option">
+      <div>
+        <strong>{title}</strong>
+        <span>{enabled ? "Ready" : reason ?? "Waiting for a completed run"}</span>
+      </div>
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={!enabled || isCreating}
+        onClick={() => onCreate(format)}
+      >
+        {isCreating ? "Exporting" : `Export ${format.toUpperCase()}`}
+      </button>
     </div>
   );
 }

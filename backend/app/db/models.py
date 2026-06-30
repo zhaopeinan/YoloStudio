@@ -136,6 +136,7 @@ class TrainingRun(TimestampMixin, Base):
     version: Mapped["DatasetVersion"] = relationship(back_populates="training_runs")
     metrics: Mapped[list["RunMetric"]] = relationship(back_populates="run")
     prediction_jobs: Mapped[list["PredictionJob"]] = relationship(back_populates="run")
+    exports: Mapped[list["ExportArtifact"]] = relationship(back_populates="run")
 
 
 class RunMetric(TimestampMixin, Base):
@@ -192,3 +193,20 @@ class Prediction(TimestampMixin, Base):
     failure_type: Mapped[str] = mapped_column(String(40), nullable=False)
 
     job: Mapped["PredictionJob"] = relationship(back_populates="predictions")
+
+
+class ExportArtifact(TimestampMixin, Base):
+    __tablename__ = "export_artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("training_runs.id"), nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    format: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    run: Mapped["TrainingRun"] = relationship(back_populates="exports")

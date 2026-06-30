@@ -21,5 +21,5 @@ def test_init_db_creates_foundation_tables(tmp_path: Path):
     init_db(engine)
 
     tables = set(inspect(engine).get_table_names())
-    assert {"projects", "datasets", "images"}.issubset(tables)
+    assert {"projects", "datasets", "images", "export_artifacts"}.issubset(tables)
     assert settings.workspace_root.exists()

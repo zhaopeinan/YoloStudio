@@ -10,6 +10,7 @@ from app.core.devices import detect_devices
 from app.core.settings import get_settings
 from app.datasets.router import images_router, router as datasets_router
 from app.db.session import init_db
+from app.exports.router import router as exports_router
 from app.prediction.router import router as prediction_router
 from app.quality.router import router as quality_router
 from app.training.router import router as training_router
@@ -40,6 +41,7 @@ app.include_router(quality_router)
 app.include_router(versions_router)
 app.include_router(training_router)
 app.include_router(prediction_router)
+app.include_router(exports_router)
 
 
 @app.get("/api/health")
