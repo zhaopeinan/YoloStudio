@@ -91,6 +91,44 @@ vi.mock("./api", () => ({
   }),
   getAnnotations: async () => ({ items: [] }),
   replaceAnnotations: async () => ({ items: [] }),
+  getQuality: async () => ({
+    dataset_id: 1,
+    image_count: 1,
+    annotated_image_count: 1,
+    unannotated_image_count: 0,
+    annotation_count: 1,
+    class_count: 1,
+    tiny_box_count: 0,
+    invalid_box_count: 0,
+    ready_for_training: true,
+    issues: [],
+  }),
+  listDatasetVersions: async () => ({
+    items: [
+      {
+        id: 1,
+        project_id: 1,
+        dataset_id: 1,
+        name: "smoke-export",
+        class_mapping: { "1": 0 },
+        split_counts: { train: 1, val: 0, test: 0 },
+        artifact_path: "/tmp/workspace/projects/1/versions/1",
+        frozen: true,
+        created_at: "2026-06-30T00:00:00",
+      },
+    ],
+  }),
+  createDatasetVersion: async () => ({
+    id: 2,
+    project_id: 1,
+    dataset_id: 1,
+    name: "mvp-quality-pass",
+    class_mapping: { "1": 0 },
+    split_counts: { train: 1, val: 0, test: 0 },
+    artifact_path: "/tmp/workspace/projects/1/versions/2",
+    frozen: true,
+    created_at: "2026-06-30T00:01:00",
+  }),
 }));
 
 describe("App", () => {
@@ -106,11 +144,15 @@ describe("App", () => {
     expect(screen.getByText("Class Library")).toBeInTheDocument();
     expect(screen.getByText("Image Browser")).toBeInTheDocument();
     expect(screen.getByText("Annotation")).toBeInTheDocument();
+    expect(screen.getByText("Quality Review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Dataset Version" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Import Dataset" }));
 
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
+    expect(await screen.findByText("Ready to export")).toBeInTheDocument();
+    expect(await screen.findByText("smoke-export")).toBeInTheDocument();
   });
 });

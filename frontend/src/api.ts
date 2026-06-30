@@ -110,6 +110,39 @@ export type AnnotationListResponse = {
   items: Annotation[];
 };
 
+export type DatasetQualitySummary = {
+  dataset_id: number;
+  image_count: number;
+  annotated_image_count: number;
+  unannotated_image_count: number;
+  annotation_count: number;
+  class_count: number;
+  tiny_box_count: number;
+  invalid_box_count: number;
+  ready_for_training: boolean;
+  issues: string[];
+};
+
+export type DatasetVersion = {
+  id: number;
+  project_id: number;
+  dataset_id: number;
+  name: string;
+  class_mapping: Record<string, number>;
+  split_counts: {
+    train: number;
+    val: number;
+    test: number;
+  };
+  artifact_path: string;
+  frozen: boolean;
+  created_at: string;
+};
+
+export type DatasetVersionListResponse = {
+  items: DatasetVersion[];
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -182,4 +215,22 @@ export function replaceAnnotations(
     method: "PUT",
     body: JSON.stringify({ annotations }),
   });
+}
+
+export function getQuality(datasetId: number): Promise<DatasetQualitySummary> {
+  return requestJson<DatasetQualitySummary>(`/api/datasets/${datasetId}/quality`);
+}
+
+export function createDatasetVersion(
+  datasetId: number,
+  name?: string,
+): Promise<DatasetVersion> {
+  return requestJson<DatasetVersion>(`/api/datasets/${datasetId}/versions`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function listDatasetVersions(datasetId: number): Promise<DatasetVersionListResponse> {
+  return requestJson<DatasetVersionListResponse>(`/api/datasets/${datasetId}/versions`);
 }

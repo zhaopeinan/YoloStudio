@@ -253,8 +253,17 @@ th {
   align-items: start;
 }
 
+.prep-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+}
+
 .side-panel,
-.annotation-panel {
+.annotation-panel,
+.prep-panel {
   min-width: 0;
 }
 
@@ -270,12 +279,15 @@ th {
 .class-list,
 .image-list,
 .box-list,
+.version-controls,
+.version-list,
 .box-editor {
   display: grid;
   gap: 10px;
 }
 
 .class-form label,
+.version-controls label,
 .box-editor label {
   color: #62727e;
   font-size: 13px;
@@ -359,6 +371,91 @@ input[type="color"] {
   color: #62727e;
   font-weight: 700;
   line-height: 1.45;
+}
+
+.readiness-row,
+.version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.readiness-row {
+  margin-bottom: 14px;
+  border: 1px solid #c8dee1;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #12343a;
+  background: #edf8f8;
+}
+
+.readiness-row span {
+  color: #4d6570;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.quality-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.issue-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.issue-list p {
+  margin: 0;
+  border: 1px solid #f0d5c2;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #7c2d12;
+  background: #fff8f3;
+  font-weight: 700;
+}
+
+.version-controls {
+  margin-bottom: 16px;
+}
+
+.version-row {
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.version-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.version-row strong,
+.version-row span {
+  min-width: 0;
+}
+
+.version-row div span {
+  overflow: hidden;
+  color: #62727e;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-row > span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: #12343a;
+  background: #dfeaec;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .annotation-layout {
@@ -452,7 +549,8 @@ input[type="color"] {
   }
 
   .status-grid,
-  .metrics-row {
+  .metrics-row,
+  .prep-grid {
     grid-template-columns: 1fr;
   }
 

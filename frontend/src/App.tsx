@@ -2,11 +2,13 @@ import {
   Activity,
   AlertTriangle,
   Box,
+  CheckCircle2,
   Database,
   FolderSearch,
   HardDrive,
   Image as ImageIcon,
   Library,
+  PackageCheck,
   Save,
   Trash2,
   Upload,
@@ -17,17 +19,22 @@ import type {
   Annotation,
   DatasetImage,
   DatasetImportResponse,
+  DatasetQualitySummary,
   DatasetScanSummary,
+  DatasetVersion,
   HealthResponse,
   ProjectClass,
   AnnotationWrite,
 } from "./api";
 import {
   createClass,
+  createDatasetVersion,
   getAnnotations,
   getHealth,
+  getQuality,
   importDataset,
   listClasses,
+  listDatasetVersions,
   listImages,
   replaceAnnotations,
   scanDataset,
@@ -69,6 +76,13 @@ export default function App() {
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   const [isSavingAnnotations, setIsSavingAnnotations] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [quality, setQuality] = useState<DatasetQualitySummary | null>(null);
+  const [qualityError, setQualityError] = useState<string | null>(null);
+  const [isLoadingQuality, setIsLoadingQuality] = useState(false);
+  const [versions, setVersions] = useState<DatasetVersion[]>([]);
+  const [versionName, setVersionName] = useState("");
+  const [versionError, setVersionError] = useState<string | null>(null);
+  const [isCreatingVersion, setIsCreatingVersion] = useState(false);
 
   useEffect(() => {
     getHealth()
@@ -128,24 +142,52 @@ export default function App() {
     setImportError(null);
     setClassError(null);
     setAnnotationError(null);
+    setQualityError(null);
+    setVersionError(null);
 
     try {
       const imported = await importDataset(datasetPath);
       setImportedDataset(imported);
 
-      const [classResponse, imageResponse] = await Promise.all([
+      const [classResponse, imageResponse, qualityResponse, versionResponse] = await Promise.all([
         listClasses(imported.project_id),
         listImages(imported.dataset_id),
+        getQuality(imported.dataset_id),
+        listDatasetVersions(imported.dataset_id),
       ]);
 
       setClasses(classResponse.items);
       setSelectedClassId(classResponse.items[0]?.id ?? null);
       setImages(imageResponse.items);
       setSelectedImageId(imageResponse.items[0]?.id ?? null);
+      setQuality(qualityResponse);
+      setVersions(versionResponse.items);
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Dataset import failed");
     } finally {
       setIsImporting(false);
+    }
+  }
+
+  async function refreshTrainingPrep(datasetId = importedDataset?.dataset_id) {
+    if (!datasetId) {
+      return;
+    }
+
+    setIsLoadingQuality(true);
+    setQualityError(null);
+
+    try {
+      const [qualityResponse, versionResponse] = await Promise.all([
+        getQuality(datasetId),
+        listDatasetVersions(datasetId),
+      ]);
+      setQuality(qualityResponse);
+      setVersions(versionResponse.items);
+    } catch (error) {
+      setQualityError(error instanceof Error ? error.message : "Quality refresh failed");
+    } finally {
+      setIsLoadingQuality(false);
     }
   }
 
@@ -167,6 +209,7 @@ export default function App() {
       setClasses((current) => [...current, created]);
       setSelectedClassId(created.id);
       setClassName("");
+      void refreshTrainingPrep();
     } catch (error) {
       setClassError(error instanceof Error ? error.message : "Class creation failed");
     } finally {
@@ -258,10 +301,34 @@ export default function App() {
             : image,
         ),
       );
+      void refreshTrainingPrep();
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "Saving annotations failed");
     } finally {
       setIsSavingAnnotations(false);
+    }
+  }
+
+  async function handleCreateDatasetVersion() {
+    if (!importedDataset || !quality?.ready_for_training) {
+      return;
+    }
+
+    setIsCreatingVersion(true);
+    setVersionError(null);
+
+    try {
+      const created = await createDatasetVersion(
+        importedDataset.dataset_id,
+        versionName.trim() || undefined,
+      );
+      setVersions((current) => [created, ...current]);
+      setVersionName("");
+      await refreshTrainingPrep(importedDataset.dataset_id);
+    } catch (error) {
+      setVersionError(error instanceof Error ? error.message : "Version export failed");
+    } finally {
+      setIsCreatingVersion(false);
     }
   }
 
@@ -388,6 +455,102 @@ export default function App() {
             {importedDataset.project_name} / {importedDataset.dataset_name}
           </div>
         ) : null}
+      </section>
+
+      <section className="prep-grid" aria-label="Training readiness">
+        <section className="panel prep-panel">
+          <div className="panel-heading compact-heading">
+            <div>
+              <p className="eyebrow">Training Prep</p>
+              <h2>Quality Review</h2>
+            </div>
+            {quality?.ready_for_training ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+          </div>
+
+          {quality ? (
+            <>
+              <div className="readiness-row">
+                <strong>{quality.ready_for_training ? "Ready to export" : "Needs attention"}</strong>
+                <span>{isLoadingQuality ? "Refreshing" : `${quality.annotation_count} boxes`}</span>
+              </div>
+
+              <div className="metrics-row quality-metrics">
+                <Metric label="Images" value={quality.image_count.toLocaleString()} />
+                <Metric
+                  label="Annotated"
+                  value={quality.annotated_image_count.toLocaleString()}
+                />
+                <Metric label="Classes" value={quality.class_count.toLocaleString()} />
+                <Metric label="Tiny boxes" value={quality.tiny_box_count.toLocaleString()} />
+              </div>
+
+              {quality.issues.length > 0 ? (
+                <div className="issue-list">
+                  {quality.issues.map((issue) => (
+                    <p key={issue}>{issue}</p>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-state">No blocking quality issues detected.</p>
+              )}
+            </>
+          ) : (
+            <p className="empty-state">Import a dataset to compute label quality and export readiness.</p>
+          )}
+
+          {qualityError ? <div className="error-banner">{qualityError}</div> : null}
+        </section>
+
+        <section className="panel prep-panel">
+          <div className="panel-heading compact-heading">
+            <div>
+              <p className="eyebrow">Frozen Dataset</p>
+              <h2>Version Export</h2>
+            </div>
+            <PackageCheck size={20} />
+          </div>
+
+          <div className="version-controls">
+            <label htmlFor="version-name">Version name</label>
+            <div className="input-row">
+              <input
+                id="version-name"
+                value={versionName}
+                disabled={!importedDataset}
+                onChange={(event) => setVersionName(event.target.value)}
+                placeholder="mvp-quality-pass"
+              />
+              <button
+                type="button"
+                disabled={!importedDataset || !quality?.ready_for_training || isCreatingVersion}
+                onClick={handleCreateDatasetVersion}
+              >
+                {isCreatingVersion ? "Exporting" : "Create Dataset Version"}
+              </button>
+            </div>
+          </div>
+
+          {versionError ? <div className="error-banner">{versionError}</div> : null}
+
+          <div className="version-list" aria-label="Dataset versions">
+            {versions.length === 0 ? (
+              <p className="empty-state">Exported YOLO versions will appear here.</p>
+            ) : (
+              versions.map((version) => (
+                <div className="version-row" key={version.id}>
+                  <div>
+                    <strong>{version.name}</strong>
+                    <span>{version.artifact_path}</span>
+                  </div>
+                  <span>
+                    {version.split_counts.train}/{version.split_counts.val}/
+                    {version.split_counts.test}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
       </section>
 
       <section className="workbench-grid" aria-label="Annotation workbench">
