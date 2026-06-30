@@ -61,3 +61,28 @@ With both servers running:
 7. Optionally fill `Track ID` and `Edge tags`.
 8. Click `Save Annotations`.
 9. Reselect or reload the image and confirm the saved box is still listed.
+
+## Quality review and dataset version export
+
+After importing a dataset and saving at least one annotation:
+
+1. Check `Quality Review` for image, annotated image, class, box, tiny-box, and issue counts.
+2. Confirm the panel says `Ready to export`.
+3. Enter an optional version name in `Version Export`.
+4. Click `Create Dataset Version`.
+5. Confirm the new version appears with train/val/test counts and an artifact path.
+
+The backend writes frozen YOLO artifacts under:
+
+```text
+workspace/projects/<project_id>/versions/<version_id>/
+  images/train|val|test/
+  labels/train|val|test/
+  data.yaml
+  manifest.json
+```
+
+Version export includes only annotated images. It freezes the project class library into a
+zero-based YOLO class map sorted by class ID, writes normalized `class x_center y_center width height`
+labels, and uses a deterministic 80/10/10 split with at least one validation image when there are
+two or more annotated images.
