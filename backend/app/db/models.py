@@ -30,6 +30,7 @@ class Project(TimestampMixin, Base):
     datasets: Mapped[list["Dataset"]] = relationship(back_populates="project")
     classes: Mapped[list["ClassDef"]] = relationship(back_populates="project")
     versions: Mapped[list["DatasetVersion"]] = relationship(back_populates="project")
+    training_runs: Mapped[list["TrainingRun"]] = relationship(back_populates="project")
 
 
 class Dataset(TimestampMixin, Base):
@@ -111,3 +112,39 @@ class DatasetVersion(TimestampMixin, Base):
 
     project: Mapped["Project"] = relationship(back_populates="versions")
     dataset: Mapped["Dataset"] = relationship(back_populates="versions")
+    training_runs: Mapped[list["TrainingRun"]] = relationship(back_populates="version")
+
+
+class TrainingRun(TimestampMixin, Base):
+    __tablename__ = "training_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("dataset_versions.id"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    device: Mapped[str] = mapped_column(String(40), nullable=False, default="cpu")
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    artifact_path: Mapped[str] = mapped_column(Text, nullable=False)
+    log_path: Mapped[str] = mapped_column(Text, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    project: Mapped["Project"] = relationship(back_populates="training_runs")
+    version: Mapped["DatasetVersion"] = relationship(back_populates="training_runs")
+    metrics: Mapped[list["RunMetric"]] = relationship(back_populates="run")
+
+
+class RunMetric(TimestampMixin, Base):
+    __tablename__ = "run_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("training_runs.id"), nullable=False, index=True)
+    epoch: Mapped[int | None] = mapped_column(Integer)
+    step: Mapped[int | None] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+
+    run: Mapped["TrainingRun"] = relationship(back_populates="metrics")
