@@ -181,6 +181,55 @@ export type TrainingRunCreate = {
   threshold_scan: boolean;
 };
 
+export type PredictionJob = {
+  id: number;
+  run_id: number;
+  project_id: number;
+  status: string;
+  image_scope: string;
+  confidence_threshold: number;
+  artifact_path: string;
+  log_path: string;
+  image_count: number;
+  prediction_count: number;
+  matched_count: number;
+  false_positive_count: number;
+  false_negative_count: number;
+  error_message: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PredictionJobListResponse = {
+  items: PredictionJob[];
+};
+
+export type Prediction = {
+  id: number;
+  run_id: number;
+  job_id: number;
+  image_id: number;
+  class_id: number;
+  x_center: number;
+  y_center: number;
+  width: number;
+  height: number;
+  confidence: number;
+  matched_annotation_id: number | null;
+  failure_type: string;
+};
+
+export type PredictionListResponse = {
+  items: Prediction[];
+};
+
+export type PredictionJobLogsResponse = {
+  job_id: number;
+  text: string;
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -286,4 +335,26 @@ export function createTrainingRun(body: TrainingRunCreate): Promise<TrainingRun>
 
 export function getTrainingRunLogs(runId: number): Promise<TrainingRunLogsResponse> {
   return requestJson<TrainingRunLogsResponse>(`/api/training/runs/${runId}/logs`);
+}
+
+export function createPredictionJob(
+  runId: number,
+  body: { image_scope: string; confidence_threshold: number },
+): Promise<PredictionJob> {
+  return requestJson<PredictionJob>(`/api/training/runs/${runId}/prediction-jobs`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function listPredictionJobs(runId: number): Promise<PredictionJobListResponse> {
+  return requestJson<PredictionJobListResponse>(`/api/training/runs/${runId}/prediction-jobs`);
+}
+
+export function listPredictions(jobId: number): Promise<PredictionListResponse> {
+  return requestJson<PredictionListResponse>(`/api/prediction-jobs/${jobId}/predictions`);
+}
+
+export function getPredictionJobLogs(jobId: number): Promise<PredictionJobLogsResponse> {
+  return requestJson<PredictionJobLogsResponse>(`/api/prediction-jobs/${jobId}/logs`);
 }

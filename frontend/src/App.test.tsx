@@ -169,6 +169,86 @@ vi.mock("./api", () => ({
     run_id: 1,
     text: "training queued\ntraining completed\n",
   }),
+  listPredictionJobs: async () => ({
+    items: [
+      {
+        id: 1,
+        run_id: 1,
+        project_id: 1,
+        status: "completed",
+        image_scope: "all",
+        confidence_threshold: 0.25,
+        artifact_path: "/tmp/workspace/projects/1/runs/1/predictions/1",
+        log_path: "/tmp/workspace/projects/1/runs/1/predictions/1/logs.txt",
+        image_count: 2,
+        prediction_count: 3,
+        matched_count: 1,
+        false_positive_count: 1,
+        false_negative_count: 1,
+        error_message: null,
+        started_at: "2026-06-30T00:03:00",
+        ended_at: "2026-06-30T00:04:00",
+        created_at: "2026-06-30T00:03:00",
+        updated_at: "2026-06-30T00:04:00",
+      },
+    ],
+  }),
+  createPredictionJob: async () => ({
+    id: 2,
+    run_id: 1,
+    project_id: 1,
+    status: "failed",
+    image_scope: "all",
+    confidence_threshold: 0.25,
+    artifact_path: "/tmp/workspace/projects/1/runs/1/predictions/2",
+    log_path: "/tmp/workspace/projects/1/runs/1/predictions/2/logs.txt",
+    image_count: 0,
+    prediction_count: 0,
+    matched_count: 0,
+    false_positive_count: 0,
+    false_negative_count: 0,
+    error_message: "Model weights were not found",
+    started_at: "2026-06-30T00:05:00",
+    ended_at: "2026-06-30T00:05:01",
+    created_at: "2026-06-30T00:05:00",
+    updated_at: "2026-06-30T00:05:01",
+  }),
+  listPredictions: async () => ({
+    items: [
+      {
+        id: 1,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 1,
+        x_center: 0.5,
+        y_center: 0.5,
+        width: 0.4,
+        height: 0.4,
+        confidence: 0.91,
+        matched_annotation_id: 1,
+        failure_type: "matched",
+      },
+      {
+        id: 2,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 1,
+        x_center: 0.1,
+        y_center: 0.1,
+        width: 0.1,
+        height: 0.1,
+        confidence: 0.77,
+        matched_annotation_id: null,
+        failure_type: "false_positive",
+      },
+    ],
+  }),
+  getPredictionJobLogs: async () => ({
+    job_id: 1,
+    text: "prediction queued\nprediction completed\n",
+  }),
 }));
 
 describe("App", () => {
@@ -189,6 +269,7 @@ describe("App", () => {
     expect(screen.getByText("Training Setup")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start Training Run" })).toBeInTheDocument();
     expect(screen.getByText("Run History")).toBeInTheDocument();
+    expect(screen.getByText("Prediction Analysis")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Import Dataset" }));
 
@@ -199,5 +280,7 @@ describe("App", () => {
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
+    expect(await screen.findByText("false_positive")).toBeInTheDocument();
+    expect(await screen.findByText("Matched")).toBeInTheDocument();
   });
 });

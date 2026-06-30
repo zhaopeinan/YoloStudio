@@ -10,6 +10,7 @@ import {
   Library,
   PackageCheck,
   Play,
+  Radar,
   Save,
   Trash2,
   Upload,
@@ -26,20 +27,26 @@ import type {
   HealthResponse,
   ProjectClass,
   AnnotationWrite,
+  Prediction,
+  PredictionJob,
   TrainingRun,
 } from "./api";
 import {
   createClass,
   createDatasetVersion,
+  createPredictionJob,
   createTrainingRun,
   getAnnotations,
   getHealth,
+  getPredictionJobLogs,
   getQuality,
   getTrainingRunLogs,
   importDataset,
   listClasses,
   listDatasetVersions,
   listImages,
+  listPredictionJobs,
+  listPredictions,
   listTrainingRuns,
   replaceAnnotations,
   scanDataset,
@@ -100,6 +107,13 @@ export default function App() {
   const [augmentationPreset, setAugmentationPreset] = useState("balanced");
   const [trainingTta, setTrainingTta] = useState(false);
   const [thresholdScan, setThresholdScan] = useState(false);
+  const [predictionJobs, setPredictionJobs] = useState<PredictionJob[]>([]);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [predictionLogs, setPredictionLogs] = useState<Record<number, string>>({});
+  const [predictionError, setPredictionError] = useState<string | null>(null);
+  const [isCreatingPrediction, setIsCreatingPrediction] = useState(false);
+  const [predictionScope, setPredictionScope] = useState("all");
+  const [predictionConfidence, setPredictionConfidence] = useState(0.25);
 
   useEffect(() => {
     getHealth()
@@ -181,6 +195,9 @@ export default function App() {
       setQuality(qualityResponse);
       setVersions(versionResponse.items);
       setRuns(runResponse.items);
+      if (runResponse.items[0]) {
+        await refreshPredictionJobs(runResponse.items[0].id);
+      }
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Dataset import failed");
     } finally {
@@ -222,8 +239,32 @@ export default function App() {
     try {
       const runResponse = await listTrainingRuns(projectId);
       setRuns(runResponse.items);
+      if (runResponse.items[0]) {
+        await refreshPredictionJobs(runResponse.items[0].id);
+      }
     } catch (error) {
       setTrainingError(error instanceof Error ? error.message : "Run refresh failed");
+    }
+  }
+
+  async function refreshPredictionJobs(runId = runs[0]?.id) {
+    if (!runId) {
+      setPredictionJobs([]);
+      setPredictions([]);
+      return;
+    }
+
+    try {
+      const jobsResponse = await listPredictionJobs(runId);
+      setPredictionJobs(jobsResponse.items);
+      if (jobsResponse.items[0]) {
+        const predictionsResponse = await listPredictions(jobsResponse.items[0].id);
+        setPredictions(predictionsResponse.items);
+      } else {
+        setPredictions([]);
+      }
+    } catch (error) {
+      setPredictionError(error instanceof Error ? error.message : "Prediction refresh failed");
     }
   }
 
@@ -405,6 +446,40 @@ export default function App() {
       setRunLogs((current) => ({ ...current, [runId]: response.text }));
     } catch (error) {
       setTrainingError(error instanceof Error ? error.message : "Run logs failed to load");
+    }
+  }
+
+  async function handleCreatePredictionJob() {
+    const run = runs[0];
+    if (!run) {
+      return;
+    }
+
+    setIsCreatingPrediction(true);
+    setPredictionError(null);
+
+    try {
+      const job = await createPredictionJob(run.id, {
+        image_scope: predictionScope,
+        confidence_threshold: predictionConfidence,
+      });
+      setPredictionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+      const predictionsResponse = await listPredictions(job.id);
+      setPredictions(predictionsResponse.items);
+      await loadPredictionLogs(job.id);
+    } catch (error) {
+      setPredictionError(error instanceof Error ? error.message : "Prediction job failed");
+    } finally {
+      setIsCreatingPrediction(false);
+    }
+  }
+
+  async function loadPredictionLogs(jobId: number) {
+    try {
+      const response = await getPredictionJobLogs(jobId);
+      setPredictionLogs((current) => ({ ...current, [jobId]: response.text }));
+    } catch (error) {
+      setPredictionError(error instanceof Error ? error.message : "Prediction logs failed to load");
     }
   }
 
@@ -790,6 +865,101 @@ export default function App() {
             )}
           </div>
         </section>
+      </section>
+
+      <section className="panel prediction-panel" aria-label="Prediction analysis">
+        <div className="panel-heading compact-heading">
+          <div>
+            <p className="eyebrow">Model Review</p>
+            <h2>Prediction Analysis</h2>
+          </div>
+          <Radar size={20} />
+        </div>
+
+        <div className="prediction-controls">
+          <label htmlFor="prediction-scope">Image scope</label>
+          <input
+            id="prediction-scope"
+            value={predictionScope}
+            onChange={(event) => setPredictionScope(event.target.value)}
+            disabled={runs.length === 0}
+          />
+          <label htmlFor="prediction-confidence">Confidence threshold</label>
+          <input
+            id="prediction-confidence"
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            value={predictionConfidence}
+            onChange={(event) => setPredictionConfidence(Number(event.target.value))}
+            disabled={runs.length === 0}
+          />
+          <button
+            type="button"
+            disabled={runs.length === 0 || isCreatingPrediction}
+            onClick={handleCreatePredictionJob}
+          >
+            <Radar size={16} />
+            {isCreatingPrediction ? "Running" : "Run Prediction Analysis"}
+          </button>
+        </div>
+
+        {predictionError ? <div className="error-banner">{predictionError}</div> : null}
+
+        {predictionJobs[0] ? (
+          <div className="prediction-summary">
+            <Metric label="Images" value={predictionJobs[0].image_count.toLocaleString()} />
+            <Metric label="Matched" value={predictionJobs[0].matched_count.toLocaleString()} />
+            <Metric label="False +" value={predictionJobs[0].false_positive_count.toLocaleString()} />
+            <Metric label="False -" value={predictionJobs[0].false_negative_count.toLocaleString()} />
+          </div>
+        ) : (
+          <p className="empty-state">Start a prediction job from a completed or failed run to review outputs.</p>
+        )}
+
+        <div className="prediction-layout">
+          <div className="prediction-list" aria-label="Prediction samples">
+            {predictions.length === 0 ? (
+              <p className="empty-state">Prediction and failure samples will appear here.</p>
+            ) : (
+              predictions.slice(0, 20).map((prediction) => (
+                <div className="prediction-row" key={prediction.id}>
+                  <div>
+                    <strong>{prediction.failure_type}</strong>
+                    <span>Image #{prediction.image_id} | Class #{prediction.class_id}</span>
+                  </div>
+                  <span>{prediction.confidence.toFixed(2)}</span>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="prediction-jobs" aria-label="Prediction jobs">
+            {predictionJobs.length === 0 ? null : (
+              predictionJobs.map((job) => (
+                <div className="run-row" key={job.id}>
+                  <div className="run-row-heading">
+                    <strong>Prediction #{job.id}</strong>
+                    <span className={`run-status ${job.status}`}>{job.status}</span>
+                  </div>
+                  <span>{job.artifact_path}</span>
+                  {job.error_message ? <p className="run-error">{job.error_message}</p> : null}
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => loadPredictionLogs(job.id)}
+                  >
+                    Load Prediction Logs
+                  </button>
+                  {predictionLogs[job.id] ? (
+                    <pre className="log-preview">{predictionLogs[job.id]}</pre>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </section>
 
       <section className="workbench-grid" aria-label="Annotation workbench">
