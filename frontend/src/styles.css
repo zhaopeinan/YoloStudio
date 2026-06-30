@@ -623,9 +623,9 @@ input[type="color"] {
 }
 
 .prediction-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   border: 1px solid #d9e3ea;
   border-radius: 8px;
@@ -661,6 +661,27 @@ input[type="color"] {
   background: #dfeaec;
   font-size: 12px;
   font-weight: 900;
+}
+
+.prediction-row button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.review-banner {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #c8dee1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #12343a;
+  background: #edf8f8;
+}
+
+.review-banner span {
+  color: #4d6570;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .annotation-layout {

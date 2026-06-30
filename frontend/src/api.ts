@@ -230,6 +230,29 @@ export type PredictionJobLogsResponse = {
   text: string;
 };
 
+export type PredictionReviewImage = {
+  id: number;
+  relative_path: string;
+  image_url: string;
+  platform: string | null;
+  altitude: number | null;
+  timestamp: number | null;
+};
+
+export type PredictionReviewAnnotation = Annotation & {
+  id: number;
+  image_id: number;
+  class_name: string;
+  class_color: string;
+};
+
+export type PredictionImageReview = {
+  image: PredictionReviewImage;
+  annotations: PredictionReviewAnnotation[];
+  predictions: Prediction[];
+  counts: Record<string, number>;
+};
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -357,4 +380,13 @@ export function listPredictions(jobId: number): Promise<PredictionListResponse> 
 
 export function getPredictionJobLogs(jobId: number): Promise<PredictionJobLogsResponse> {
   return requestJson<PredictionJobLogsResponse>(`/api/prediction-jobs/${jobId}/logs`);
+}
+
+export function getPredictionImageReview(
+  jobId: number,
+  imageId: number,
+): Promise<PredictionImageReview> {
+  return requestJson<PredictionImageReview>(
+    `/api/prediction-jobs/${jobId}/images/${imageId}/review`,
+  );
 }

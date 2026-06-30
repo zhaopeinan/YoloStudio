@@ -249,6 +249,48 @@ vi.mock("./api", () => ({
     job_id: 1,
     text: "prediction queued\nprediction completed\n",
   }),
+  getPredictionImageReview: async () => ({
+    image: {
+      id: 10,
+      relative_path: "iris/frame001.jpg",
+      image_url: "/api/images/10/file",
+      platform: "iris",
+      altitude: 12,
+      timestamp: 1,
+    },
+    annotations: [
+      {
+        id: 1,
+        image_id: 10,
+        class_id: 1,
+        class_name: "target",
+        class_color: "#ef4444",
+        x_center: 0.5,
+        y_center: 0.5,
+        width: 0.4,
+        height: 0.4,
+        track_id: null,
+        edge_tags: ["occluded"],
+      },
+    ],
+    predictions: [
+      {
+        id: 1,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 1,
+        x_center: 0.5,
+        y_center: 0.5,
+        width: 0.4,
+        height: 0.4,
+        confidence: 0.91,
+        matched_annotation_id: 1,
+        failure_type: "matched",
+      },
+    ],
+    counts: { matched: 1, false_positive: 0, false_negative: 0 },
+  }),
 }));
 
 describe("App", () => {
@@ -282,5 +324,9 @@ describe("App", () => {
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
     expect(await screen.findByText("false_positive")).toBeInTheDocument();
     expect(await screen.findByText("Matched")).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "Open Image" })[0]);
+
+    expect(await screen.findByText("Prediction overlay")).toBeInTheDocument();
   });
 });

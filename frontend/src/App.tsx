@@ -28,6 +28,7 @@ import type {
   ProjectClass,
   AnnotationWrite,
   Prediction,
+  PredictionImageReview,
   PredictionJob,
   TrainingRun,
 } from "./api";
@@ -39,6 +40,7 @@ import {
   getAnnotations,
   getHealth,
   getPredictionJobLogs,
+  getPredictionImageReview,
   getQuality,
   getTrainingRunLogs,
   importDataset,
@@ -114,6 +116,7 @@ export default function App() {
   const [isCreatingPrediction, setIsCreatingPrediction] = useState(false);
   const [predictionScope, setPredictionScope] = useState("all");
   const [predictionConfidence, setPredictionConfidence] = useState(0.25);
+  const [activeReview, setActiveReview] = useState<PredictionImageReview | null>(null);
 
   useEffect(() => {
     getHealth()
@@ -147,6 +150,7 @@ export default function App() {
     }
 
     setAnnotationError(null);
+    setActiveReview(null);
     getAnnotations(selectedImageId)
       .then((response) => {
         setAnnotations(response.items.map(toDraftBox));
@@ -480,6 +484,37 @@ export default function App() {
       setPredictionLogs((current) => ({ ...current, [jobId]: response.text }));
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "Prediction logs failed to load");
+    }
+  }
+
+  async function openPredictionImage(prediction: Prediction) {
+    setPredictionError(null);
+    const existingImage = images.find((image) => image.id === prediction.image_id);
+    if (existingImage) {
+      setSelectedImageId(existingImage.id);
+    }
+
+    try {
+      const review = await getPredictionImageReview(prediction.job_id, prediction.image_id);
+      setActiveReview(review);
+      setAnnotations(review.annotations.map(toDraftBox));
+      if (!existingImage) {
+        setImages((current) => [
+          ...current,
+          {
+            id: review.image.id,
+            relative_path: review.image.relative_path,
+            platform: review.image.platform,
+            altitude: review.image.altitude,
+            timestamp: review.image.timestamp,
+            annotation_count: review.annotations.length,
+            image_url: review.image.image_url,
+          },
+        ]);
+        setSelectedImageId(review.image.id);
+      }
+    } catch (error) {
+      setPredictionError(error instanceof Error ? error.message : "Prediction review failed");
     }
   }
 
@@ -930,6 +965,13 @@ export default function App() {
                     <span>Image #{prediction.image_id} | Class #{prediction.class_id}</span>
                   </div>
                   <span>{prediction.confidence.toFixed(2)}</span>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => openPredictionImage(prediction)}
+                  >
+                    Open Image
+                  </button>
                 </div>
               ))
             )}
@@ -1041,7 +1083,10 @@ export default function App() {
                   key={image.id}
                   type="button"
                   className={image.id === selectedImageId ? "image-row selected" : "image-row"}
-                  onClick={() => setSelectedImageId(image.id)}
+                  onClick={() => {
+                    setActiveReview(null);
+                    setSelectedImageId(image.id);
+                  }}
                 >
                   <strong>{image.relative_path}</strong>
                   <span>
@@ -1085,6 +1130,11 @@ export default function App() {
                         color={resolveClassColor(annotation, classById)}
                       />
                     ))}
+                    {activeReview && activeReview.image.id === selectedImage.id
+                      ? activeReview.predictions.map((prediction) => (
+                          <PredictionRect key={prediction.id} prediction={prediction} />
+                        ))
+                      : null}
                     {dragState ? <DragRect dragState={dragState} color={selectedClass?.color} /> : null}
                   </svg>
                 </div>
@@ -1104,6 +1154,17 @@ export default function App() {
                 </div>
 
                 {annotationError ? <div className="error-banner">{annotationError}</div> : null}
+
+                {activeReview && activeReview.image.id === selectedImage.id ? (
+                  <div className="review-banner">
+                    <strong>Prediction overlay</strong>
+                    <span>
+                      matched {activeReview.counts.matched ?? 0} | false+{" "}
+                      {activeReview.counts.false_positive ?? 0} | false-{" "}
+                      {activeReview.counts.false_negative ?? 0}
+                    </span>
+                  </div>
+                ) : null}
 
                 {annotations.length === 0 ? (
                   <p className="empty-state">
@@ -1280,6 +1341,30 @@ function DragRect(props: { dragState: DragState; color?: string }) {
       stroke={color}
       strokeDasharray="0.018 0.012"
       strokeWidth={0.004}
+      vectorEffect="non-scaling-stroke"
+    />
+  );
+}
+
+function PredictionRect(props: { prediction: Prediction }) {
+  const { prediction } = props;
+  const color =
+    prediction.failure_type === "matched"
+      ? "#16a34a"
+      : prediction.failure_type === "false_negative"
+        ? "#f97316"
+        : "#dc2626";
+
+  return (
+    <rect
+      x={prediction.x_center - prediction.width / 2}
+      y={prediction.y_center - prediction.height / 2}
+      width={prediction.width}
+      height={prediction.height}
+      fill="transparent"
+      stroke={color}
+      strokeDasharray={prediction.failure_type === "matched" ? "0" : "0.02 0.012"}
+      strokeWidth={0.006}
       vectorEffect="non-scaling-stroke"
     />
   );
