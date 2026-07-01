@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.classes.schemas import ClassCreate, ClassList, ClassRead
+from app.classes.schemas import ClassCreate, ClassList, ClassRead, ClassUpdate
 from app.db.models import ClassDef, Project
 from app.db.session import get_db
 
@@ -70,6 +70,39 @@ def create_project_class(
         active=1,
     )
     db.add(class_def)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Class name already exists for project") from exc
+    db.refresh(class_def)
+    return _read_class(class_def)
+
+
+@router.patch("/{project_id}/classes/{class_id}", response_model=ClassRead)
+def update_project_class(
+    project_id: int,
+    class_id: int,
+    request: ClassUpdate,
+    db: Session = Depends(get_db),
+) -> ClassRead:
+    if db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project was not found")
+
+    class_def = db.get(ClassDef, class_id)
+    if class_def is None or class_def.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Class was not found")
+
+    if request.name is not None:
+        name = request.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Class name cannot be empty")
+        class_def.name = name
+    if request.color is not None:
+        class_def.color = request.color
+    if "description" in request.model_fields_set:
+        class_def.description = request.description
+
     try:
         db.commit()
     except IntegrityError as exc:

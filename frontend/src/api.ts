@@ -532,6 +532,17 @@ export function createClass(
   });
 }
 
+export function updateClass(
+  projectId: number,
+  classId: number,
+  body: { name?: string; color?: string; description?: string | null },
+): Promise<ProjectClass> {
+  return requestJson<ProjectClass>(`/api/projects/${projectId}/classes/${classId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
 export function getAnnotations(imageId: number): Promise<AnnotationListResponse> {
   return requestJson<AnnotationListResponse>(`/api/images/${imageId}/annotations`);
 }

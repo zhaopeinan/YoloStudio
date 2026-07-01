@@ -9,6 +9,12 @@ class ClassCreate(BaseModel):
     description: str | None = None
 
 
+class ClassUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    color: str | None = Field(default=None, max_length=24)
+    description: str | None = None
+
+
 class ClassRead(BaseModel):
     id: int
     project_id: int

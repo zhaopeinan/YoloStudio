@@ -352,6 +352,20 @@ const apiMock = vi.hoisted(() => {
     description: null,
     active: true,
   }));
+  const updateClass = vi.fn(
+    async (
+      _projectId: number,
+      classId: number,
+      body: { name?: string; color?: string; description?: string | null },
+    ) => ({
+      id: classId,
+      project_id: 1,
+      name: body.name ?? "target",
+      color: body.color ?? "#ef4444",
+      description: body.description ?? null,
+      active: true,
+    }),
+  );
   const getQuality = vi.fn(async () => defaultQuality());
   const listQualityIssues = vi.fn(async () => defaultQualityIssues());
   const refreshImageDimensions = vi.fn(async () => ({
@@ -495,6 +509,7 @@ const apiMock = vi.hoisted(() => {
     defaultClasses,
     listClasses,
     createClass,
+    updateClass,
     getTrainingRunSummary,
     getExportCapabilities,
     listRunExports,
@@ -549,6 +564,7 @@ vi.mock("./api", () => ({
   listImages: apiMock.listImages,
   listClasses: apiMock.listClasses,
   createClass: apiMock.createClass,
+  updateClass: apiMock.updateClass,
   getAnnotations: apiMock.getAnnotations,
   replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: apiMock.getQuality,
@@ -686,6 +702,21 @@ describe("App", () => {
       items: apiMock.defaultClasses(),
     }));
     apiMock.createClass.mockClear();
+    apiMock.updateClass.mockReset();
+    apiMock.updateClass.mockImplementation(
+      async (
+        _projectId: number,
+        classId: number,
+        body: { name?: string; color?: string; description?: string | null },
+      ) => ({
+        id: classId,
+        project_id: 1,
+        name: body.name ?? "target",
+        color: body.color ?? "#ef4444",
+        description: body.description ?? null,
+        active: true,
+      }),
+    );
     apiMock.createDatasetVersion.mockClear();
     apiMock.createTrainingRun.mockClear();
     apiMock.cancelTrainingRun.mockClear();
@@ -967,6 +998,44 @@ describe("App", () => {
     expect(within(readiness).getByText("Ready | Class library")).toBeInTheDocument();
     expect(within(readiness).getByText("Ready | Class selected")).toBeInTheDocument();
     expect(screen.getByText("Drag over the image to add a bounding box.")).toBeInTheDocument();
+  });
+
+  it("edits a project class and refreshes dependent annotation labels", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
+    await user.click(await screen.findByText("iris/frame002.jpg"));
+    expect(
+      await screen.findByText("target", { selector: ".box-editor-title strong" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit target" }));
+    await user.clear(screen.getByLabelText("Edit class name target"));
+    await user.type(screen.getByLabelText("Edit class name target"), "vehicle");
+    fireEvent.change(screen.getByLabelText("Edit class color target"), {
+      target: { value: "#22c55e" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(apiMock.updateClass).toHaveBeenCalledWith(1, 1, {
+      name: "vehicle",
+      color: "#22c55e",
+    });
+
+    const classLibrary = screen.getByLabelText("Available classes");
+    expect(await within(classLibrary).findByRole("button", { name: "vehicle" })).toHaveClass(
+      "selected",
+    );
+    expect(screen.queryByRole("button", { name: "target" })).not.toBeInTheDocument();
+
+    const versionSubset = screen.getByLabelText("Version class subset");
+    expect(within(versionSubset).getByRole("checkbox", { name: "vehicle" })).toBeChecked();
+
+    expect(
+      screen.getByText("vehicle", { selector: ".box-editor-title strong" }),
+    ).toBeInTheDocument();
   });
 
   it("auto-refreshes active training runs and prediction jobs until idle", async () => {

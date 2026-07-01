@@ -4,6 +4,7 @@ import {
   Box,
   CheckCircle2,
   Database,
+  Edit3,
   FolderSearch,
   HardDrive,
   Image as ImageIcon,
@@ -74,6 +75,7 @@ import {
   replaceAnnotations,
   refreshImageDimensions,
   scanDataset,
+  updateClass,
 } from "./api";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
@@ -164,6 +166,10 @@ export default function App() {
   const [versionClassIds, setVersionClassIds] = useState<number[]>([]);
   const [classError, setClassError] = useState<string | null>(null);
   const [isCreatingClass, setIsCreatingClass] = useState(false);
+  const [editingClassId, setEditingClassId] = useState<number | null>(null);
+  const [classEditName, setClassEditName] = useState("");
+  const [classEditColor, setClassEditColor] = useState(defaultClassColor);
+  const [isUpdatingClass, setIsUpdatingClass] = useState(false);
   const [images, setImages] = useState<DatasetImage[]>([]);
   const [imagePage, setImagePage] = useState({ limit: imagePageSize, offset: 0, total: 0 });
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
@@ -753,6 +759,44 @@ export default function App() {
       setClassError(error instanceof Error ? error.message : "Class creation failed");
     } finally {
       setIsCreatingClass(false);
+    }
+  }
+
+  function beginEditClass(classItem: ProjectClass) {
+    setEditingClassId(classItem.id);
+    setClassEditName(classItem.name);
+    setClassEditColor(classItem.color || defaultClassColor);
+    setClassError(null);
+  }
+
+  function cancelEditClass() {
+    setEditingClassId(null);
+    setClassEditName("");
+    setClassEditColor(defaultClassColor);
+  }
+
+  async function handleUpdateClass(classId: number) {
+    if (!importedDataset || classEditName.trim().length === 0) {
+      return;
+    }
+
+    setIsUpdatingClass(true);
+    setClassError(null);
+
+    try {
+      const updated = await updateClass(importedDataset.project_id, classId, {
+        name: classEditName.trim(),
+        color: classEditColor,
+      });
+      setClasses((current) =>
+        current.map((classItem) => (classItem.id === updated.id ? updated : classItem)),
+      );
+      cancelEditClass();
+      void refreshTrainingPrep();
+    } catch (error) {
+      setClassError(error instanceof Error ? error.message : "Class update failed");
+    } finally {
+      setIsUpdatingClass(false);
     }
   }
 
@@ -2168,19 +2212,63 @@ export default function App() {
             {classes.length === 0 ? (
               <p className="empty-state">Import a dataset, then create a class to draw boxes.</p>
             ) : (
-              classes.map((classItem) => (
-                <button
-                  key={classItem.id}
-                  type="button"
-                  className={
-                    classItem.id === selectedClassId ? "class-chip selected" : "class-chip"
-                  }
-                  onClick={() => setSelectedClassId(classItem.id)}
-                >
-                  <span style={{ background: classItem.color }} />
-                  {classItem.name}
-                </button>
-              ))
+              classes.map((classItem) =>
+                editingClassId === classItem.id ? (
+                  <div className="class-edit-row" key={classItem.id}>
+                    <input
+                      value={classEditName}
+                      onChange={(event) => setClassEditName(event.target.value)}
+                      aria-label={`Edit class name ${classItem.name}`}
+                    />
+                    <input
+                      type="color"
+                      value={classEditColor}
+                      onChange={(event) => setClassEditColor(event.target.value)}
+                      aria-label={`Edit class color ${classItem.name}`}
+                    />
+                    <div className="class-row-actions">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateClass(classItem.id)}
+                        disabled={isUpdatingClass || classEditName.trim().length === 0}
+                      >
+                        <Save size={15} />
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={cancelEditClass}
+                        disabled={isUpdatingClass}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="class-row" key={classItem.id}>
+                    <button
+                      type="button"
+                      className={
+                        classItem.id === selectedClassId ? "class-chip selected" : "class-chip"
+                      }
+                      onClick={() => setSelectedClassId(classItem.id)}
+                    >
+                      <span style={{ background: classItem.color }} />
+                      {classItem.name}
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Edit ${classItem.name}`}
+                      title={`Edit ${classItem.name}`}
+                      onClick={() => beginEditClass(classItem)}
+                    >
+                      <Edit3 size={16} />
+                    </button>
+                  </div>
+                ),
+              )
             )}
           </div>
         </aside>
@@ -2527,8 +2615,8 @@ export default function App() {
                           style={{ background: resolveClassColor(annotation, classById) }}
                         />
                         <strong>
-                          {annotation.class_name ??
-                            classById.get(annotation.class_id)?.name ??
+                          {classById.get(annotation.class_id)?.name ??
+                            annotation.class_name ??
                             `Class ${annotation.class_id}`}
                         </strong>
                         <button
@@ -2886,7 +2974,7 @@ function isActivePredictionJob(status: string) {
 }
 
 function resolveClassColor(annotation: DraftBox, classById: Map<number, ProjectClass>) {
-  return annotation.class_color ?? classById.get(annotation.class_id)?.color ?? defaultClassColor;
+  return classById.get(annotation.class_id)?.color ?? annotation.class_color ?? defaultClassColor;
 }
 
 function BoxRect(props: { annotation: DraftBox; color: string }) {

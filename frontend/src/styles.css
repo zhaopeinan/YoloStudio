@@ -383,9 +383,40 @@ input[type="color"] {
   text-align: left;
 }
 
+.class-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 8px;
+}
+
 .class-chip {
   min-height: 40px;
   font-weight: 800;
+}
+
+.class-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  gap: 8px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 8px;
+  background: #f8fafb;
+}
+
+.class-edit-row .class-row-actions {
+  grid-column: 1 / -1;
+}
+
+.class-row-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.class-row-actions button {
+  min-height: 34px;
+  padding: 0 10px;
 }
 
 .class-chip span,
