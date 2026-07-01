@@ -49,6 +49,13 @@ def create_import_folder(path: Path) -> None:
     )
 
 
+def create_labeled_yolo_zip(path: Path) -> None:
+    with ZipFile(path, "w") as archive:
+        archive.writestr("dataset/data.yaml", "names:\n  0: target\n  1: decoy\n")
+        archive.writestr("dataset/images/train/frame001.png", PNG_1X1)
+        archive.writestr("dataset/labels/train/frame001.txt", "0 0.5 0.5 0.4 0.4\n")
+
+
 @contextmanager
 def isolated_client(tmp_path: Path) -> Generator[TestClient, None, None]:
     settings = Settings(workspace_root=tmp_path / "workspace")
@@ -111,6 +118,53 @@ def test_import_dataset_persists_images_and_serves_files(tmp_path: Path):
         assert file_response.status_code == 200
         assert file_response.headers["content-type"] == "image/png"
         assert file_response.content == PNG_1X1
+
+
+def test_import_dataset_loads_yolo_classes_and_labels(tmp_path: Path):
+    zip_path = tmp_path / "labeled.zip"
+    create_labeled_yolo_zip(zip_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "Labeled Import Project",
+                "dataset_name": "labeled",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+
+        classes_response = client.get(f"/api/projects/{payload['project_id']}/classes")
+        assert classes_response.status_code == 200
+        classes = classes_response.json()["items"]
+        assert [class_item["name"] for class_item in classes] == ["target", "decoy"]
+
+        images_response = client.get(f"/api/datasets/{payload['dataset_id']}/images")
+        assert images_response.status_code == 200
+        images = images_response.json()["items"]
+        assert len(images) == 1
+        assert images[0]["annotation_count"] == 1
+
+        annotations_response = client.get(f"/api/images/{images[0]['id']}/annotations")
+        assert annotations_response.status_code == 200
+        annotations = annotations_response.json()["items"]
+        assert annotations == [
+            {
+                "id": annotations[0]["id"],
+                "image_id": images[0]["id"],
+                "class_id": classes[0]["id"],
+                "class_name": "target",
+                "class_color": classes[0]["color"],
+                "x_center": 0.5,
+                "y_center": 0.5,
+                "width": 0.4,
+                "height": 0.4,
+                "track_id": None,
+                "edge_tags": [],
+            }
+        ]
 
 
 def test_import_dataset_accepts_folder_and_serves_files(tmp_path: Path):
