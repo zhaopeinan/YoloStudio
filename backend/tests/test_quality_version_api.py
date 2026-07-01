@@ -82,6 +82,7 @@ def test_dataset_quality_reports_training_readiness(tmp_path: Path):
         assert payload["class_count"] == 1
         assert payload["tiny_box_count"] == 2
         assert payload["invalid_box_count"] == 0
+        assert payload["unknown_class_reference_count"] == 0
         assert payload["ready_for_training"] is True
         assert payload["issues"] == [
             "1 image has no annotations.",

@@ -485,6 +485,7 @@ def import_dataset(
 
         group_counts: dict[str, int] = defaultdict(int)
         metadata_counts: dict[str, int] = defaultdict(int)
+        import_warnings: list[dict] = []
         for group, _ in bundle.metadata_by_file:
             metadata_counts[group] += 1
 
@@ -515,9 +516,11 @@ def import_dataset(
             )
             db.add(image)
             db.flush()
+            unknown_class_counts: dict[int, int] = defaultdict(int)
             for source_annotation in _annotations_for_source_image(bundle, source_image):
                 class_def = class_by_index.get(source_annotation.class_index)
                 if class_def is None:
+                    unknown_class_counts[source_annotation.class_index] += 1
                     continue
                 db.add(
                     Annotation(
@@ -530,9 +533,22 @@ def import_dataset(
                         edge_tags=[],
                     )
                 )
+            for class_index, count in sorted(unknown_class_counts.items()):
+                import_warnings.append(
+                    {
+                        "type": "unknown_class_reference",
+                        "image_id": image.id,
+                        "image_path": str(relative_path),
+                        "source_image": source_image.name,
+                        "class_index": class_index,
+                        "count": count,
+                    }
+                )
             group_counts[source_image.group] += 1
 
         dataset.image_count = sum(group_counts.values())
+        if import_warnings:
+            dataset.metadata_ = {**dataset.metadata_, "import_warnings": import_warnings}
         db.commit()
         db.refresh(project)
         db.refresh(dataset)

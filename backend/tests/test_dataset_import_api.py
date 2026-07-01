@@ -56,6 +56,13 @@ def create_labeled_yolo_zip(path: Path) -> None:
         archive.writestr("dataset/labels/train/frame001.txt", "0 0.5 0.5 0.4 0.4\n")
 
 
+def create_unknown_class_yolo_zip(path: Path) -> None:
+    with ZipFile(path, "w") as archive:
+        archive.writestr("dataset/data.yaml", "names: [target]\n")
+        archive.writestr("dataset/images/train/frame001.png", PNG_1X1)
+        archive.writestr("dataset/labels/train/frame001.txt", "2 0.5 0.5 0.4 0.4\n")
+
+
 @contextmanager
 def isolated_client(tmp_path: Path) -> Generator[TestClient, None, None]:
     settings = Settings(workspace_root=tmp_path / "workspace")
@@ -165,6 +172,46 @@ def test_import_dataset_loads_yolo_classes_and_labels(tmp_path: Path):
                 "edge_tags": [],
             }
         ]
+
+
+def test_import_dataset_reports_unknown_yolo_class_references(tmp_path: Path):
+    zip_path = tmp_path / "unknown-class.zip"
+    create_unknown_class_yolo_zip(zip_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "Unknown Class Project",
+                "dataset_name": "unknown-class",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+
+        images_response = client.get(f"/api/datasets/{payload['dataset_id']}/images")
+        assert images_response.status_code == 200
+        images = images_response.json()["items"]
+        assert len(images) == 1
+        assert images[0]["annotation_count"] == 0
+
+        quality_response = client.get(f"/api/datasets/{payload['dataset_id']}/quality")
+        assert quality_response.status_code == 200
+        quality = quality_response.json()
+        assert quality["unknown_class_reference_count"] == 1
+        assert "1 label references unknown class indexes." in quality["issues"]
+
+        issues_response = client.get(f"/api/datasets/{payload['dataset_id']}/quality/issues")
+        assert issues_response.status_code == 200
+        issues = issues_response.json()["items"]
+        unknown_issue = next(
+            issue for issue in issues if issue["issue_type"] == "unknown_class_reference"
+        )
+        assert unknown_issue["image_id"] == images[0]["id"]
+        assert unknown_issue["image_path"] == images[0]["relative_path"]
+        assert unknown_issue["class_name"] == "YOLO class 2"
+        assert unknown_issue["message"] == "1 label row references unknown class index 2."
 
 
 def test_import_dataset_accepts_folder_and_serves_files(tmp_path: Path):

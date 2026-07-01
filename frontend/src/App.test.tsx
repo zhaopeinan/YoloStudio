@@ -464,6 +464,7 @@ vi.mock("./api", () => ({
     class_count: 1,
     tiny_box_count: 0,
     invalid_box_count: 0,
+    unknown_class_reference_count: 0,
     ready_for_training: true,
     issues: [],
   }),

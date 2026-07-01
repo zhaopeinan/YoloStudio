@@ -128,12 +128,13 @@ export type DatasetQualitySummary = {
   class_count: number;
   tiny_box_count: number;
   invalid_box_count: number;
+  unknown_class_reference_count: number;
   ready_for_training: boolean;
   issues: string[];
 };
 
 export type DatasetQualityIssue = {
-  issue_type: "unannotated_image" | "tiny_box" | "invalid_box";
+  issue_type: "unannotated_image" | "tiny_box" | "invalid_box" | "unknown_class_reference";
   severity: "warning" | "error";
   message: string;
   image_id: number;

@@ -10,7 +10,12 @@ from app.quality.schemas import DatasetQualityIssue, DatasetQualityIssueList, Da
 
 
 router = APIRouter(prefix="/api/datasets", tags=["quality"])
-QUALITY_ISSUE_TYPES = {"unannotated_image", "tiny_box", "invalid_box"}
+QUALITY_ISSUE_TYPES = {
+    "unannotated_image",
+    "tiny_box",
+    "invalid_box",
+    "unknown_class_reference",
+}
 
 
 def is_invalid_box(annotation: Annotation) -> bool:
@@ -34,6 +39,16 @@ def is_tiny_box(annotation: Annotation, image: Image) -> bool:
     if image.width is None or image.height is None:
         return False
     return annotation.width * image.width < 10 or annotation.height * image.height < 10
+
+
+def _import_warnings(dataset: Dataset, warning_type: str | None = None) -> list[dict]:
+    warnings = dataset.metadata_.get("import_warnings", [])
+    if not isinstance(warnings, list):
+        return []
+    typed_warnings = [warning for warning in warnings if isinstance(warning, dict)]
+    if warning_type is None:
+        return typed_warnings
+    return [warning for warning in typed_warnings if warning.get("type") == warning_type]
 
 
 def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary:
@@ -80,6 +95,10 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     invalid_box_count = sum(1 for annotation, _ in rows if is_invalid_box(annotation))
     tiny_box_count = sum(1 for annotation, image in rows if is_tiny_box(annotation, image))
     unannotated_image_count = image_count - annotated_image_count
+    unknown_class_reference_count = sum(
+        int(warning.get("count") or 0)
+        for warning in _import_warnings(dataset, "unknown_class_reference")
+    )
 
     issues: list[str] = []
     if image_count == 0:
@@ -97,6 +116,9 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     if tiny_box_count > 0:
         noun = "box is" if tiny_box_count == 1 else "boxes are"
         issues.append(f"{tiny_box_count} {noun} smaller than 10x10 pixels.")
+    if unknown_class_reference_count > 0:
+        noun = "label references" if unknown_class_reference_count == 1 else "label references"
+        issues.append(f"{unknown_class_reference_count} {noun} unknown class indexes.")
 
     ready_for_training = (
         image_count > 0 and class_count > 0 and annotation_count > 0 and invalid_box_count == 0
@@ -110,6 +132,7 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
         class_count=class_count,
         tiny_box_count=tiny_box_count,
         invalid_box_count=invalid_box_count,
+        unknown_class_reference_count=unknown_class_reference_count,
         ready_for_training=ready_for_training,
         issues=issues,
     )
@@ -209,6 +232,30 @@ def build_quality_issues(
                     annotation,
                     image,
                     class_def,
+                )
+            )
+
+    if issue_type in {"all", "unknown_class_reference"}:
+        images_by_id = {
+            image.id: image
+            for image in db.scalars(select(Image).where(Image.dataset_id == dataset_id)).all()
+        }
+        for warning in _import_warnings(dataset, "unknown_class_reference"):
+            image_id = warning.get("image_id")
+            image = images_by_id.get(image_id) if isinstance(image_id, int) else None
+            class_index = warning.get("class_index")
+            count = int(warning.get("count") or 0)
+            image_path = str(warning.get("image_path") or warning.get("source_image") or "")
+            issues.append(
+                DatasetQualityIssue(
+                    issue_type="unknown_class_reference",
+                    severity="error",
+                    message=f"{count} label row references unknown class index {class_index}.",
+                    image_id=image.id if image is not None else 0,
+                    image_path=image.relative_path if image is not None else image_path,
+                    image_url=f"/api/images/{image.id}/file" if image is not None else "",
+                    class_id=None,
+                    class_name=f"YOLO class {class_index}",
                 )
             )
 
