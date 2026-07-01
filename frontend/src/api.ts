@@ -132,6 +132,30 @@ export type DatasetQualitySummary = {
   issues: string[];
 };
 
+export type DatasetQualityIssue = {
+  issue_type: "unannotated_image" | "tiny_box" | "invalid_box";
+  severity: "warning" | "error";
+  message: string;
+  image_id: number;
+  image_path: string;
+  image_url: string;
+  annotation_id: number | null;
+  class_id: number | null;
+  class_name: string | null;
+  x_center: number | null;
+  y_center: number | null;
+  width: number | null;
+  height: number | null;
+};
+
+export type DatasetQualityIssueListResponse = {
+  dataset_id: number;
+  limit: number;
+  offset: number;
+  total: number;
+  items: DatasetQualityIssue[];
+};
+
 export type DatasetVersion = {
   id: number;
   project_id: number;
@@ -450,6 +474,10 @@ export function replaceAnnotations(
 
 export function getQuality(datasetId: number): Promise<DatasetQualitySummary> {
   return requestJson<DatasetQualitySummary>(`/api/datasets/${datasetId}/quality`);
+}
+
+export function listQualityIssues(datasetId: number): Promise<DatasetQualityIssueListResponse> {
+  return requestJson<DatasetQualityIssueListResponse>(`/api/datasets/${datasetId}/quality/issues`);
 }
 
 export function createDatasetVersion(

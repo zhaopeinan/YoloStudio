@@ -232,6 +232,29 @@ const apiMock = vi.hoisted(() => {
       },
     ],
   }));
+  const listQualityIssues = vi.fn(async () => ({
+    dataset_id: 1,
+    limit: 50,
+    offset: 0,
+    total: 1,
+    items: [
+      {
+        issue_type: "tiny_box",
+        severity: "warning",
+        message: "Box is smaller than 10x10 pixels.",
+        image_id: 11,
+        image_path: "iris/frame002.jpg",
+        image_url: "/api/images/11/file",
+        annotation_id: 101,
+        class_id: 1,
+        class_name: "target",
+        x_center: 0.6,
+        y_center: 0.55,
+        width: 0.25,
+        height: 0.2,
+      },
+    ],
+  }));
   const getTrainingRunSummary = vi.fn(async (runId: number) => ({
     run_id: runId,
     metric_series: [
@@ -349,6 +372,7 @@ const apiMock = vi.hoisted(() => {
     getPredictionJobLogs,
     createPredictionThresholdScan,
     listPredictions,
+    listQualityIssues,
     getTrainingRunSummary,
     getExportCapabilities,
     listRunExports,
@@ -441,6 +465,7 @@ vi.mock("./api", () => ({
     ready_for_training: true,
     issues: [],
   }),
+  listQualityIssues: apiMock.listQualityIssues,
   listDatasetVersions: async () => ({
     items: [
       {
@@ -577,6 +602,7 @@ describe("App", () => {
     apiMock.getPredictionJobLogs.mockClear();
     apiMock.createPredictionThresholdScan.mockClear();
     apiMock.listPredictions.mockClear();
+    apiMock.listQualityIssues.mockClear();
     apiMock.getTrainingRunSummary.mockClear();
     apiMock.getExportCapabilities.mockClear();
     apiMock.listRunExports.mockClear();
@@ -626,6 +652,10 @@ describe("App", () => {
     });
     expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
+    expect(await screen.findByText("tiny box")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Issue" }));
+    expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "target" }));
     await user.click(screen.getByRole("checkbox", { name: "target" }));

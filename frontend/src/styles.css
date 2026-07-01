@@ -469,6 +469,51 @@ input[type="color"] {
   font-weight: 700;
 }
 
+.quality-issue-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.quality-issue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f8fafb;
+}
+
+.quality-issue-row.error {
+  border-color: #f0d5c2;
+  background: #fff8f3;
+}
+
+.quality-issue-row div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.quality-issue-row strong {
+  text-transform: capitalize;
+}
+
+.quality-issue-row span,
+.quality-issue-row small {
+  overflow: hidden;
+  color: #4d6570;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quality-issue-row button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .version-controls {
   margin-bottom: 16px;
 }

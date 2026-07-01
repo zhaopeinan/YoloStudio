@@ -14,3 +14,27 @@ class DatasetQualitySummary(BaseModel):
     invalid_box_count: int
     ready_for_training: bool
     issues: list[str]
+
+
+class DatasetQualityIssue(BaseModel):
+    issue_type: str
+    severity: str
+    message: str
+    image_id: int
+    image_path: str
+    image_url: str
+    annotation_id: int | None = None
+    class_id: int | None = None
+    class_name: str | None = None
+    x_center: float | None = None
+    y_center: float | None = None
+    width: float | None = None
+    height: float | None = None
+
+
+class DatasetQualityIssueList(BaseModel):
+    dataset_id: int
+    limit: int
+    offset: int
+    total: int
+    items: list[DatasetQualityIssue]

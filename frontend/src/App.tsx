@@ -22,6 +22,7 @@ import type {
   Annotation,
   DatasetImage,
   DatasetImportResponse,
+  DatasetQualityIssue,
   DatasetQualitySummary,
   DatasetScanSummary,
   DatasetVersion,
@@ -63,6 +64,7 @@ import {
   listImages,
   listPredictionJobs,
   listPredictions,
+  listQualityIssues,
   listRunExports,
   listTrainingRuns,
   replaceAnnotations,
@@ -146,6 +148,7 @@ export default function App() {
   const [isSavingAnnotations, setIsSavingAnnotations] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [quality, setQuality] = useState<DatasetQualitySummary | null>(null);
+  const [qualityIssues, setQualityIssues] = useState<DatasetQualityIssue[]>([]);
   const [qualityError, setQualityError] = useState<string | null>(null);
   const [isLoadingQuality, setIsLoadingQuality] = useState(false);
   const [versions, setVersions] = useState<DatasetVersion[]>([]);
@@ -310,15 +313,23 @@ export default function App() {
     setAnnotationError(null);
     setQualityError(null);
     setVersionError(null);
+    setQualityIssues([]);
 
     try {
       const imported = await importDataset(datasetPath);
       setImportedDataset(imported);
 
-      const [classResponse, imageResponse, qualityResponse, versionResponse] = await Promise.all([
+      const [
+        classResponse,
+        imageResponse,
+        qualityResponse,
+        qualityIssueResponse,
+        versionResponse,
+      ] = await Promise.all([
         listClasses(imported.project_id),
         listImages(imported.dataset_id),
         getQuality(imported.dataset_id),
+        listQualityIssues(imported.dataset_id),
         listDatasetVersions(imported.dataset_id),
       ]);
       const runResponse = await listTrainingRuns(imported.project_id);
@@ -329,6 +340,7 @@ export default function App() {
       setImages(imageResponse.items);
       setSelectedImageId(imageResponse.items[0]?.id ?? null);
       setQuality(qualityResponse);
+      setQualityIssues(qualityIssueResponse.items);
       setVersions(versionResponse.items);
       setRuns(runResponse.items);
       if (runResponse.items[0]) {
@@ -351,11 +363,13 @@ export default function App() {
     setQualityError(null);
 
     try {
-      const [qualityResponse, versionResponse] = await Promise.all([
+      const [qualityResponse, qualityIssueResponse, versionResponse] = await Promise.all([
         getQuality(datasetId),
+        listQualityIssues(datasetId),
         listDatasetVersions(datasetId),
       ]);
       setQuality(qualityResponse);
+      setQualityIssues(qualityIssueResponse.items);
       setVersions(versionResponse.items);
       if (importedDataset) {
         const runResponse = await listTrainingRuns(importedDataset.project_id);
@@ -933,6 +947,30 @@ export default function App() {
     }
   }
 
+  function openQualityIssue(issue: DatasetQualityIssue) {
+    setActiveReview(null);
+    setShowGroundTruthLayer(true);
+    setShowPredictionLayer(false);
+    setImages((current) => {
+      if (current.some((image) => image.id === issue.image_id)) {
+        return current;
+      }
+      return [
+        ...current,
+        {
+          id: issue.image_id,
+          relative_path: issue.image_path,
+          platform: null,
+          altitude: null,
+          timestamp: null,
+          annotation_count: issue.issue_type === "unannotated_image" ? 0 : 1,
+          image_url: issue.image_url,
+        },
+      ];
+    });
+    setSelectedImageId(issue.image_id);
+  }
+
   return (
     <main className="app-shell">
       <section className="topbar" aria-label="Application status">
@@ -1094,6 +1132,33 @@ export default function App() {
               ) : (
                 <p className="empty-state">No blocking quality issues detected.</p>
               )}
+
+              {qualityIssues.length > 0 ? (
+                <div className="quality-issue-list" aria-label="Quality issue samples">
+                  {qualityIssues.map((issue) => (
+                    <div
+                      className={`quality-issue-row ${issue.severity}`}
+                      key={`${issue.issue_type}-${issue.image_id}-${issue.annotation_id ?? "image"}`}
+                    >
+                      <div>
+                        <strong>{formatIssueType(issue.issue_type)}</strong>
+                        <span>{issue.message}</span>
+                        <small>
+                          {issue.image_path}
+                          {issue.class_name ? ` | ${issue.class_name}` : ""}
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => openQualityIssue(issue)}
+                      >
+                        Open Issue
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </>
           ) : (
             <p className="empty-state">Import a dataset to compute label quality and export readiness.</p>
@@ -2434,6 +2499,10 @@ function mergeTags(existing: string[] | undefined, tags: string[]) {
 }
 
 function formatFailureType(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+function formatIssueType(value: string) {
   return value.replace(/_/g, " ");
 }
 

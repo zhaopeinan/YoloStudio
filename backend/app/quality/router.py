@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import Annotation, ClassDef, Dataset, Image
 from app.db.session import get_db
-from app.quality.schemas import DatasetQualitySummary
+from app.quality.schemas import DatasetQualityIssue, DatasetQualityIssueList, DatasetQualitySummary
 
 
 router = APIRouter(prefix="/api/datasets", tags=["quality"])
+QUALITY_ISSUE_TYPES = {"unannotated_image", "tiny_box", "invalid_box"}
 
 
 def is_invalid_box(annotation: Annotation) -> bool:
@@ -114,6 +115,124 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     )
 
 
+def _annotation_issue(
+    issue_type: str,
+    severity: str,
+    message: str,
+    annotation: Annotation,
+    image: Image,
+    class_def: ClassDef,
+) -> DatasetQualityIssue:
+    return DatasetQualityIssue(
+        issue_type=issue_type,
+        severity=severity,
+        message=message,
+        image_id=image.id,
+        image_path=image.relative_path,
+        image_url=f"/api/images/{image.id}/file",
+        annotation_id=annotation.id,
+        class_id=annotation.class_id,
+        class_name=class_def.name,
+        x_center=annotation.x_center,
+        y_center=annotation.y_center,
+        width=annotation.width,
+        height=annotation.height,
+    )
+
+
+def build_quality_issues(
+    db: Session,
+    dataset_id: int,
+    issue_type: str = "all",
+    limit: int = 50,
+    offset: int = 0,
+) -> DatasetQualityIssueList:
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset was not found")
+    if issue_type != "all" and issue_type not in QUALITY_ISSUE_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported quality issue type")
+
+    issues: list[DatasetQualityIssue] = []
+    if issue_type in {"all", "unannotated_image"}:
+        annotation_counts = (
+            select(Annotation.image_id, func.count(Annotation.id).label("annotation_count"))
+            .group_by(Annotation.image_id)
+            .subquery()
+        )
+        images = db.scalars(
+            select(Image)
+            .outerjoin(annotation_counts, Image.id == annotation_counts.c.image_id)
+            .where(
+                Image.dataset_id == dataset_id,
+                func.coalesce(annotation_counts.c.annotation_count, 0) == 0,
+            )
+            .order_by(Image.id)
+        ).all()
+        issues.extend(
+            DatasetQualityIssue(
+                issue_type="unannotated_image",
+                severity="warning",
+                message="Image has no saved annotations.",
+                image_id=image.id,
+                image_path=image.relative_path,
+                image_url=f"/api/images/{image.id}/file",
+            )
+            for image in images
+        )
+
+    rows = db.execute(
+        select(Annotation, Image, ClassDef)
+        .join(Image, Annotation.image_id == Image.id)
+        .join(ClassDef, Annotation.class_id == ClassDef.id)
+        .where(Image.dataset_id == dataset_id)
+        .order_by(Image.id, Annotation.id)
+    ).all()
+    for annotation, image, class_def in rows:
+        if issue_type in {"all", "invalid_box"} and is_invalid_box(annotation):
+            issues.append(
+                _annotation_issue(
+                    "invalid_box",
+                    "error",
+                    "Box geometry falls outside normalized image bounds.",
+                    annotation,
+                    image,
+                    class_def,
+                )
+            )
+        if issue_type in {"all", "tiny_box"} and is_tiny_box(annotation, image):
+            issues.append(
+                _annotation_issue(
+                    "tiny_box",
+                    "warning",
+                    "Box is smaller than 10x10 pixels.",
+                    annotation,
+                    image,
+                    class_def,
+                )
+            )
+
+    total = len(issues)
+    return DatasetQualityIssueList(
+        dataset_id=dataset_id,
+        limit=limit,
+        offset=offset,
+        total=total,
+        items=issues[offset : offset + limit],
+    )
+
+
 @router.get("/{dataset_id}/quality", response_model=DatasetQualitySummary)
 def get_dataset_quality(dataset_id: int, db: Session = Depends(get_db)) -> DatasetQualitySummary:
     return build_quality_summary(db, dataset_id)
+
+
+@router.get("/{dataset_id}/quality/issues", response_model=DatasetQualityIssueList)
+def get_dataset_quality_issues(
+    dataset_id: int,
+    issue_type: str = Query("all"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> DatasetQualityIssueList:
+    return build_quality_issues(db, dataset_id, issue_type, limit, offset)

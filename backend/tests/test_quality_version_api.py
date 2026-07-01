@@ -88,6 +88,35 @@ def test_dataset_quality_reports_training_readiness(tmp_path: Path):
             "2 boxes are smaller than 10x10 pixels.",
         ]
 
+        issues_response = client.get(f"/api/datasets/{dataset['dataset_id']}/quality/issues")
+
+        assert issues_response.status_code == 200
+        issues_payload = issues_response.json()
+        assert issues_payload["dataset_id"] == dataset["dataset_id"]
+        assert issues_payload["limit"] == 50
+        assert issues_payload["offset"] == 0
+        assert issues_payload["total"] == 3
+        assert [item["issue_type"] for item in issues_payload["items"]] == [
+            "unannotated_image",
+            "tiny_box",
+            "tiny_box",
+        ]
+        tiny_issue = issues_payload["items"][1]
+        assert tiny_issue["image_id"] == image_id
+        assert tiny_issue["annotation_id"] == annotation_response.json()["items"][0]["id"]
+        assert tiny_issue["class_name"] == "drone"
+        assert tiny_issue["message"] == "Box is smaller than 10x10 pixels."
+        assert tiny_issue["image_url"].startswith("/api/images/")
+
+        tiny_only_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/quality/issues?issue_type=tiny_box&limit=1"
+        )
+
+        assert tiny_only_response.status_code == 200
+        assert tiny_only_response.json()["total"] == 2
+        assert len(tiny_only_response.json()["items"]) == 1
+        assert tiny_only_response.json()["items"][0]["issue_type"] == "tiny_box"
+
 
 def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
     zip_path = tmp_path / "sample.zip"
