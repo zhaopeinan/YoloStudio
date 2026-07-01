@@ -248,6 +248,17 @@ export default function App() {
     [classes, selectedClassId],
   );
 
+  const annotationReadinessSteps = useMemo(
+    () => [
+      { label: "Dataset loaded", complete: Boolean(importedDataset) },
+      { label: "Class library", complete: classes.length > 0 },
+      { label: "Image selected", complete: Boolean(selectedImage) },
+      { label: "Class selected", complete: Boolean(selectedClass) },
+    ],
+    [classes.length, importedDataset, selectedClass, selectedImage],
+  );
+  const annotationReady = annotationReadinessSteps.every((step) => step.complete);
+
   const classById = useMemo(() => {
     return new Map(classes.map((classItem) => [classItem.id, classItem]));
   }, [classes]);
@@ -2282,6 +2293,17 @@ export default function App() {
             <Box size={20} />
           </div>
 
+          <div className="annotation-readiness" aria-label="Annotation readiness">
+            {annotationReadinessSteps.map((step) => (
+              <span
+                key={step.label}
+                className={step.complete ? "readiness-step complete" : "readiness-step"}
+              >
+                {step.complete ? "Ready" : "Needed"} | {step.label}
+              </span>
+            ))}
+          </div>
+
           {selectedImage ? (
             <div className="annotation-layout">
               <div className="viewer-wrap">
@@ -2432,7 +2454,9 @@ export default function App() {
 
                 {annotations.length === 0 ? (
                   <p className="empty-state">
-                    Select a class, then drag over the image to add a bounding box.
+                    {annotationReady
+                      ? "Drag over the image to add a bounding box."
+                      : annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
                   </p>
                 ) : (
                   annotations.map((annotation, index) => (
@@ -2577,7 +2601,9 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <p className="empty-state">Import a dataset and select an image to begin annotation.</p>
+            <p className="empty-state">
+              {annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
+            </p>
           )}
         </section>
       </section>
@@ -3159,6 +3185,27 @@ function formatPercent(value: number) {
 
 function formatDimensionRefresh(summary: DatasetDimensionRefreshSummary) {
   return `${summary.scanned_count} scanned, ${summary.updated_count} updated, ${summary.missing_count} still missing`;
+}
+
+function annotationGuidance(
+  dataset: DatasetImportResponse | null,
+  classCount: number,
+  selectedImage: DatasetImage | null,
+  selectedClass: ProjectClass | null,
+) {
+  if (!dataset) {
+    return "Load or import a dataset to begin annotation.";
+  }
+  if (classCount === 0) {
+    return "Create a project class before drawing boxes.";
+  }
+  if (!selectedImage) {
+    return "Select an image in the browser to begin annotation.";
+  }
+  if (!selectedClass) {
+    return "Select a class before drawing boxes.";
+  }
+  return "Drag over the image to add a bounding box.";
 }
 
 function Metric(props: { label: string; value: string }) {

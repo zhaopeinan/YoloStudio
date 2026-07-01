@@ -302,6 +302,27 @@ const apiMock = vi.hoisted(() => {
       },
     ],
   });
+  const defaultClasses = () => [
+    {
+      id: 1,
+      project_id: 1,
+      name: "target",
+      color: "#ef4444",
+      description: null,
+      active: true,
+    },
+  ];
+  const listClasses = vi.fn(async () => ({
+    items: defaultClasses(),
+  }));
+  const createClass = vi.fn(async () => ({
+    id: 2,
+    project_id: 1,
+    name: "vehicle",
+    color: "#22c55e",
+    description: null,
+    active: true,
+  }));
   const getQuality = vi.fn(async () => defaultQuality());
   const listQualityIssues = vi.fn(async () => defaultQualityIssues());
   const refreshImageDimensions = vi.fn(async () => ({
@@ -442,6 +463,9 @@ const apiMock = vi.hoisted(() => {
     refreshImageDimensions,
     defaultQuality,
     defaultQualityIssues,
+    defaultClasses,
+    listClasses,
+    createClass,
     getTrainingRunSummary,
     getExportCapabilities,
     listRunExports,
@@ -494,26 +518,8 @@ vi.mock("./api", () => ({
   }),
   importDataset: apiMock.importDataset,
   listImages: apiMock.listImages,
-  listClasses: async () => ({
-    items: [
-      {
-        id: 1,
-        project_id: 1,
-        name: "target",
-        color: "#ef4444",
-        description: null,
-        active: true,
-      },
-    ],
-  }),
-  createClass: async () => ({
-    id: 2,
-    project_id: 1,
-    name: "vehicle",
-    color: "#22c55e",
-    description: null,
-    active: true,
-  }),
+  listClasses: apiMock.listClasses,
+  createClass: apiMock.createClass,
   getAnnotations: apiMock.getAnnotations,
   replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: apiMock.getQuality,
@@ -646,6 +652,11 @@ describe("App", () => {
     apiMock.importDataset.mockClear();
     apiMock.listProjects.mockClear();
     apiMock.listImages.mockClear();
+    apiMock.listClasses.mockReset();
+    apiMock.listClasses.mockImplementation(async () => ({
+      items: apiMock.defaultClasses(),
+    }));
+    apiMock.createClass.mockClear();
     apiMock.createDatasetVersion.mockClear();
     apiMock.createTrainingRun.mockClear();
     apiMock.cancelTrainingRun.mockClear();
@@ -846,6 +857,46 @@ describe("App", () => {
       ]),
     );
   }, 15000);
+
+  it("shows annotation readiness before a dataset is loaded", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
+    const readiness = screen.getByLabelText("Annotation readiness");
+
+    expect(within(readiness).getByText("Needed | Dataset loaded")).toBeInTheDocument();
+    expect(within(readiness).getByText("Needed | Class library")).toBeInTheDocument();
+    expect(within(readiness).getByText("Needed | Image selected")).toBeInTheDocument();
+    expect(within(readiness).getByText("Needed | Class selected")).toBeInTheDocument();
+    expect(screen.getByText("Load or import a dataset to begin annotation.")).toBeInTheDocument();
+  });
+
+  it("guides empty class libraries and selects a created class", async () => {
+    const user = userEvent.setup();
+    apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+
+    const readiness = screen.getByLabelText("Annotation readiness");
+    expect(within(readiness).getByText("Ready | Dataset loaded")).toBeInTheDocument();
+    expect(within(readiness).getByText("Needed | Class library")).toBeInTheDocument();
+    expect(within(readiness).getByText("Ready | Image selected")).toBeInTheDocument();
+    expect(within(readiness).getByText("Needed | Class selected")).toBeInTheDocument();
+    expect(screen.getByText("Create a project class before drawing boxes.")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Class name"), "vehicle");
+    await user.click(screen.getByRole("button", { name: "Create Class" }));
+
+    expect(apiMock.createClass).toHaveBeenCalledWith(1, {
+      name: "vehicle",
+      color: "#ef4444",
+    });
+    expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
+    expect(within(readiness).getByText("Ready | Class library")).toBeInTheDocument();
+    expect(within(readiness).getByText("Ready | Class selected")).toBeInTheDocument();
+    expect(screen.getByText("Drag over the image to add a bounding box.")).toBeInTheDocument();
+  });
 
   it("auto-refreshes active training runs and prediction jobs until idle", async () => {
     apiMock.trainingRunsResponseQueue.push(
