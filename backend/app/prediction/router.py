@@ -11,6 +11,7 @@ from app.prediction.runner import (
     create_prediction_job,
     execute_prediction_job,
     predict_images,
+    read_prediction_job_filters,
     read_prediction_logs,
 )
 from app.prediction.schemas import (
@@ -52,6 +53,7 @@ def _read_job(job: PredictionJob, db: Session) -> PredictionJobRead:
         status=job.status,
         image_scope=job.image_scope,
         confidence_threshold=job.confidence_threshold,
+        image_filters=read_prediction_job_filters(job),
         artifact_path=job.artifact_path,
         log_path=job.log_path,
         image_count=job.image_count,
@@ -102,6 +104,7 @@ def create_run_prediction_job(
         run,
         image_scope=request.image_scope,
         confidence_threshold=request.confidence_threshold,
+        image_filters=request.image_filters,
     )
     job = execute_prediction_job(db, job, run, predictor=predict_images)
     return _read_job(job, db)
@@ -129,6 +132,7 @@ def create_run_prediction_threshold_scan(
             run,
             image_scope=request.image_scope,
             confidence_threshold=threshold,
+            image_filters=request.image_filters,
         )
         job = execute_prediction_job(db, job, run, predictor=predict_images)
         jobs.append(_read_job(job, db))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from types import SimpleNamespace
 from pathlib import Path
@@ -401,6 +402,127 @@ def test_prediction_job_maps_yolo_classes_and_detects_class_confusion(
                 "count": 1,
             },
         ]
+
+
+def test_prediction_job_runs_on_filtered_image_set(tmp_path: Path, monkeypatch):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        run = _create_completed_run(client, zip_path, monkeypatch)
+        first_image_id, second_image_id = run["image_ids"]
+        first_platform = run["image_platform_by_id"][first_image_id]
+        seen_image_ids: list[int] = []
+
+        def fake_predict_images(_run, images, _confidence_threshold):
+            seen_image_ids.extend(image.id for image in images)
+            return {
+                image.id: [
+                    {
+                        "class_id": run["class_id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "confidence": 0.91,
+                    }
+                ]
+                for image in images
+            }
+
+        monkeypatch.setattr("app.prediction.router.predict_images", fake_predict_images)
+
+        create_response = client.post(
+            f"/api/training/runs/{run['id']}/prediction-jobs",
+            json={
+                "image_scope": "all",
+                "confidence_threshold": 0.25,
+                "image_filters": {"platform": first_platform},
+            },
+        )
+
+        assert create_response.status_code == 200
+        job = create_response.json()
+        assert job["status"] == "completed"
+        assert job["image_count"] == 1
+        assert job["prediction_count"] == 1
+        assert seen_image_ids == [first_image_id]
+        assert second_image_id not in seen_image_ids
+
+        predictions_response = client.get(f"/api/prediction-jobs/{job['id']}/predictions")
+
+        assert predictions_response.status_code == 200
+        predictions = predictions_response.json()["items"]
+        assert [prediction["image_id"] for prediction in predictions] == [first_image_id]
+
+        artifact = json.loads((Path(job["artifact_path"]) / "predictions.json").read_text())
+
+        assert artifact["image_filters"] == {
+            "platform": first_platform,
+            "label_status": "all",
+            "class_id": None,
+            "edge_tag": None,
+            "failure_type": "all",
+            "altitude_min": None,
+            "altitude_max": None,
+        }
+        assert artifact["image_ids"] == [first_image_id]
+        assert [row["image_id"] for row in artifact["predictions"]] == [first_image_id]
+
+
+def test_prediction_job_filters_by_annotation_state_and_tags(tmp_path: Path, monkeypatch):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        run = _create_completed_run(client, zip_path, monkeypatch)
+        first_image_id, second_image_id = run["image_ids"]
+
+        tagged_response = client.put(
+            f"/api/images/{second_image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": run["class_id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "edge_tags": ["occluded"],
+                    }
+                ]
+            },
+        )
+        assert tagged_response.status_code == 200
+        seen_image_ids: list[int] = []
+
+        def fake_predict_images(_run, images, _confidence_threshold):
+            seen_image_ids.extend(image.id for image in images)
+            return {image.id: [] for image in images}
+
+        monkeypatch.setattr("app.prediction.router.predict_images", fake_predict_images)
+
+        create_response = client.post(
+            f"/api/training/runs/{run['id']}/prediction-jobs",
+            json={
+                "image_scope": "all",
+                "confidence_threshold": 0.25,
+                "image_filters": {
+                    "label_status": "annotated",
+                    "class_id": run["class_id"],
+                    "edge_tag": "occluded",
+                },
+            },
+        )
+
+        assert create_response.status_code == 200
+        job = create_response.json()
+        assert job["image_count"] == 1
+        assert job["image_filters"]["label_status"] == "annotated"
+        assert job["image_filters"]["class_id"] == run["class_id"]
+        assert job["image_filters"]["edge_tag"] == "occluded"
+        assert seen_image_ids == [second_image_id]
+        assert first_image_id not in seen_image_ids
 
 
 def test_prediction_threshold_scan_creates_multiple_jobs_and_summary_points(

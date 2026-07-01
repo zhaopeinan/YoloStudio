@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import exists, select, text
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
@@ -17,6 +17,7 @@ from app.db.models import (
     TrainingRun,
 )
 from app.prediction.matching import Box, annotation_box, iou
+from app.prediction.schemas import PredictionImageFilters
 
 
 def _now() -> datetime:
@@ -44,6 +45,7 @@ def create_prediction_job(
     run: TrainingRun,
     image_scope: str,
     confidence_threshold: float,
+    image_filters: PredictionImageFilters | None = None,
 ) -> PredictionJob:
     job = PredictionJob(
         run_id=run.id,
@@ -61,6 +63,7 @@ def create_prediction_job(
     job.artifact_path = str(artifact_root)
     job.log_path = str(artifact_root / "logs.txt")
     Path(job.log_path).write_text(_log_line("prediction queued"))
+    _write_prediction_job_metadata(job, image_filters)
     db.commit()
     db.refresh(job)
     return job
@@ -78,14 +81,132 @@ def _manifest_image_ids(version: DatasetVersion, image_scope: str) -> list[int]:
     return ids
 
 
-def list_job_images(db: Session, run: TrainingRun, image_scope: str) -> list[Image]:
+def _normalize_image_filters(
+    image_filters: PredictionImageFilters | dict | None,
+) -> dict[str, str | int | float | None]:
+    if image_filters is None:
+        return {
+            "platform": None,
+            "label_status": "all",
+            "class_id": None,
+            "edge_tag": None,
+            "failure_type": "all",
+            "altitude_min": None,
+            "altitude_max": None,
+        }
+    if isinstance(image_filters, PredictionImageFilters):
+        return image_filters.model_dump()
+    return PredictionImageFilters.model_validate(image_filters).model_dump()
+
+
+def _has_active_image_filters(image_filters: PredictionImageFilters | dict | None) -> bool:
+    filters = _normalize_image_filters(image_filters)
+    return any(
+        [
+            filters["platform"],
+            filters["label_status"] != "all",
+            filters["class_id"] is not None,
+            filters["edge_tag"],
+            filters["failure_type"] != "all",
+            filters["altitude_min"] is not None,
+            filters["altitude_max"] is not None,
+        ]
+    )
+
+
+def _prediction_job_metadata_path(job: PredictionJob) -> Path:
+    return Path(job.artifact_path) / "job_config.json"
+
+
+def _write_prediction_job_metadata(
+    job: PredictionJob,
+    image_filters: PredictionImageFilters | dict | None,
+) -> None:
+    path = _prediction_job_metadata_path(job)
+    path.write_text(
+        json.dumps(
+            {
+                "image_filters": _normalize_image_filters(image_filters),
+                "uses_image_filters": _has_active_image_filters(image_filters),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+
+def read_prediction_job_filters(job: PredictionJob) -> PredictionImageFilters | None:
+    path = _prediction_job_metadata_path(job)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+    filters = payload.get("image_filters")
+    if not isinstance(filters, dict) or not payload.get("uses_image_filters"):
+        return None
+    return PredictionImageFilters.model_validate(filters)
+
+
+def _apply_image_filters(
+    query,
+    image_filters: PredictionImageFilters | dict | None,
+):
+    filters = _normalize_image_filters(image_filters)
+    if filters["platform"]:
+        query = query.where(Image.platform == filters["platform"])
+    if filters["altitude_min"] is not None:
+        query = query.where(Image.altitude >= filters["altitude_min"])
+    if filters["altitude_max"] is not None:
+        query = query.where(Image.altitude <= filters["altitude_max"])
+    if filters["label_status"] == "annotated":
+        query = query.where(exists().where(Annotation.image_id == Image.id))
+    elif filters["label_status"] == "unannotated":
+        query = query.where(~exists().where(Annotation.image_id == Image.id))
+    if filters["class_id"] is not None:
+        query = query.where(
+            exists().where(
+                Annotation.image_id == Image.id,
+                Annotation.class_id == filters["class_id"],
+            )
+        )
+    if filters["edge_tag"]:
+        query = query.where(
+            exists().where(
+                Annotation.image_id == Image.id,
+                text(
+                    "EXISTS (SELECT 1 FROM json_each(annotations.edge_tags) "
+                    "WHERE json_each.value = :edge_tag)"
+                ).bindparams(edge_tag=filters["edge_tag"]),
+            )
+        )
+    if filters["failure_type"] != "all":
+        query = query.where(
+            exists().where(
+                Prediction.image_id == Image.id,
+                Prediction.failure_type == filters["failure_type"],
+            )
+        )
+    return query
+
+
+def list_job_images(
+    db: Session,
+    run: TrainingRun,
+    image_scope: str,
+    image_filters: PredictionImageFilters | dict | None = None,
+) -> list[Image]:
     version = db.get(DatasetVersion, run.version_id)
     if version is None:
         return []
     image_ids = _manifest_image_ids(version, image_scope)
     if not image_ids:
         return []
-    return db.scalars(select(Image).where(Image.id.in_(image_ids)).order_by(Image.id)).all()
+    query = select(Image).where(Image.id.in_(image_ids))
+    if image_filters is not None:
+        query = _apply_image_filters(query, image_filters)
+    return db.scalars(query.order_by(Image.id)).all()
 
 
 def run_uses_tta(run: TrainingRun) -> bool:
@@ -195,6 +316,7 @@ def persist_predictions(
     run: TrainingRun,
     images: list[Image],
     predictions_by_image: dict[int, list[dict]],
+    image_filters: PredictionImageFilters | dict | None = None,
     iou_threshold: float = 0.5,
 ) -> None:
     image_ids = [image.id for image in images]
@@ -291,20 +413,26 @@ def persist_predictions(
     job.false_negative_count = sum(1 for row in rows if row.failure_type == "false_negative")
     (Path(job.artifact_path) / "predictions.json").write_text(
         json.dumps(
-            [
-                {
-                    "image_id": row.image_id,
-                    "class_id": row.class_id,
-                    "x_center": row.x_center,
-                    "y_center": row.y_center,
-                    "width": row.width,
-                    "height": row.height,
-                    "confidence": row.confidence,
-                    "matched_annotation_id": row.matched_annotation_id,
-                    "failure_type": row.failure_type,
-                }
-                for row in rows
-            ],
+            {
+                "image_scope": job.image_scope,
+                "image_filters": _normalize_image_filters(image_filters),
+                "uses_image_filters": _has_active_image_filters(image_filters),
+                "image_ids": image_ids,
+                "predictions": [
+                    {
+                        "image_id": row.image_id,
+                        "class_id": row.class_id,
+                        "x_center": row.x_center,
+                        "y_center": row.y_center,
+                        "width": row.width,
+                        "height": row.height,
+                        "confidence": row.confidence,
+                        "matched_annotation_id": row.matched_annotation_id,
+                        "failure_type": row.failure_type,
+                    }
+                    for row in rows
+                ],
+            },
             indent=2,
         )
         + "\n"
@@ -319,11 +447,17 @@ def execute_prediction_job(db: Session, job: PredictionJob, run: TrainingRun, pr
     db.refresh(job)
     append_prediction_log(job, "prediction running")
 
-    images = list_job_images(db, run, job.image_scope)
+    image_filters = read_prediction_job_filters(job)
+    images = list_job_images(db, run, job.image_scope, image_filters)
+    if image_filters is not None:
+        append_prediction_log(
+            job,
+            f"prediction image filters: {json.dumps(image_filters.model_dump(), sort_keys=True)}",
+        )
     try:
         prediction_fn = predictor or predict_images
         predictions = prediction_fn(run, images, job.confidence_threshold)
-        persist_predictions(db, job, run, images, predictions)
+        persist_predictions(db, job, run, images, predictions, image_filters)
         job.status = "completed"
         job.ended_at = _now()
         db.commit()

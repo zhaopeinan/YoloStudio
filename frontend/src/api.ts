@@ -358,6 +358,7 @@ export type PredictionJob = {
   status: string;
   image_scope: string;
   confidence_threshold: number;
+  image_filters: DatasetImageFilters | null;
   artifact_path: string;
   log_path: string;
   image_count: number;
@@ -642,7 +643,7 @@ export function getTrainingRunSummary(runId: number): Promise<RunExperimentSumma
 
 export function createPredictionJob(
   runId: number,
-  body: { image_scope: string; confidence_threshold: number },
+  body: { image_scope: string; confidence_threshold: number; image_filters?: DatasetImageFilters },
 ): Promise<PredictionJob> {
   return requestJson<PredictionJob>(`/api/training/runs/${runId}/prediction-jobs`, {
     method: "POST",
@@ -652,7 +653,7 @@ export function createPredictionJob(
 
 export function createPredictionThresholdScan(
   runId: number,
-  body: { image_scope: string; thresholds: number[] },
+  body: { image_scope: string; thresholds: number[]; image_filters?: DatasetImageFilters },
 ): Promise<PredictionThresholdScanResponse> {
   return requestJson<PredictionThresholdScanResponse>(
     `/api/training/runs/${runId}/prediction-threshold-scan`,

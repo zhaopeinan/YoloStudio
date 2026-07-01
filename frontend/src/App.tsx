@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   Annotation,
   DatasetDimensionRefreshSummary,
+  DatasetImageFilters,
   DatasetImage,
   DatasetImportResponse,
   DatasetQualityIssue,
@@ -242,6 +243,7 @@ export default function App() {
   const [isCreatingThresholdScan, setIsCreatingThresholdScan] = useState(false);
   const [predictionScope, setPredictionScope] = useState("all");
   const [predictionConfidence, setPredictionConfidence] = useState(0.25);
+  const [useImageFiltersForPrediction, setUseImageFiltersForPrediction] = useState(false);
   const [predictionThresholds, setPredictionThresholds] = useState(
     "0.15, 0.25, 0.35, 0.5, 0.65",
   );
@@ -319,6 +321,20 @@ export default function App() {
     qualityAutoTagIssueTypes.has(qualityIssueType) &&
     hasApplicableQualityIssues &&
     !isApplyingQualityTags;
+  const activePredictionImageFilters = useMemo(
+    () =>
+      useImageFiltersForPrediction
+        ? activeImageFilterRequest(toImageFilterRequest(imageFilters))
+        : undefined,
+    [imageFilters, useImageFiltersForPrediction],
+  );
+  const predictionImageFilterSummary = useMemo(
+    () =>
+      activePredictionImageFilters
+        ? formatImageFilterSummary(activePredictionImageFilters, classById)
+        : "All images in selected scope",
+    [activePredictionImageFilters, classById],
+  );
 
   useEffect(() => {
     if (!selectedImageId) {
@@ -1132,6 +1148,7 @@ export default function App() {
       const job = await createPredictionJob(run.id, {
         image_scope: predictionScope,
         confidence_threshold: predictionConfidence,
+        image_filters: activePredictionImageFilters,
       });
       setPredictionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
       await loadFilteredPredictions(job.id);
@@ -1165,6 +1182,7 @@ export default function App() {
       const response = await createPredictionThresholdScan(run.id, {
         image_scope: predictionScope,
         thresholds,
+        image_filters: activePredictionImageFilters,
       });
       setPredictionJobs((current) => mergePredictionJobs(response.items, current));
       const latestJob = response.items[response.items.length - 1];
@@ -1927,6 +1945,17 @@ export default function App() {
             onChange={(event) => setPredictionConfidence(Number(event.target.value))}
             disabled={runs.length === 0}
           />
+          <label className="prediction-filter-toggle" htmlFor="use-image-filters-prediction">
+            <input
+              id="use-image-filters-prediction"
+              type="checkbox"
+              checked={useImageFiltersForPrediction}
+              onChange={(event) => setUseImageFiltersForPrediction(event.target.checked)}
+              disabled={runs.length === 0}
+            />
+            Use image filters
+          </label>
+          <span className="prediction-filter-summary">{predictionImageFilterSummary}</span>
           <button
             type="button"
             disabled={runs.length === 0 || isCreatingPrediction}
@@ -2166,6 +2195,7 @@ export default function App() {
                     <strong>Prediction #{job.id}</strong>
                     <span className={`run-status ${job.status}`}>{job.status}</span>
                   </div>
+                  <span>{job.image_filters ? formatImageFilterSummary(job.image_filters, classById) : "All images in selected scope"}</span>
                   <span>{job.artifact_path}</span>
                   {job.error_message ? <p className="run-error">{job.error_message}</p> : null}
                   <button
@@ -2944,6 +2974,49 @@ function toImageFilterRequest(filters: {
     altitude_min: filters.altitude_min === "" ? undefined : Number(filters.altitude_min),
     altitude_max: filters.altitude_max === "" ? undefined : Number(filters.altitude_max),
   };
+}
+
+function activeImageFilterRequest(filters: DatasetImageFilters): DatasetImageFilters | undefined {
+  if (
+    !filters.platform &&
+    (filters.label_status ?? "all") === "all" &&
+    filters.class_id === undefined &&
+    !filters.edge_tag &&
+    (filters.failure_type ?? "all") === "all" &&
+    filters.altitude_min === undefined &&
+    filters.altitude_max === undefined
+  ) {
+    return undefined;
+  }
+  return filters;
+}
+
+function formatImageFilterSummary(
+  filters: DatasetImageFilters,
+  classById: Map<number, ProjectClass>,
+) {
+  const parts: string[] = [];
+  if (filters.platform) {
+    parts.push(`platform ${filters.platform}`);
+  }
+  if (filters.label_status && filters.label_status !== "all") {
+    parts.push(filters.label_status);
+  }
+  if (filters.class_id !== undefined) {
+    parts.push(`class ${classById.get(filters.class_id)?.name ?? filters.class_id}`);
+  }
+  if (filters.edge_tag) {
+    parts.push(`tag ${filters.edge_tag}`);
+  }
+  if (filters.failure_type && filters.failure_type !== "all") {
+    parts.push(formatFailureType(filters.failure_type));
+  }
+  if (filters.altitude_min !== undefined || filters.altitude_max !== undefined) {
+    const minimum = filters.altitude_min ?? 0;
+    const maximum = filters.altitude_max ?? "max";
+    parts.push(`alt ${minimum}-${maximum}`);
+  }
+  return parts.length > 0 ? `Image filters: ${parts.join(" | ")}` : "All images in selected scope";
 }
 
 function toPredictionFilterRequest(filters: ReturnType<typeof defaultPredictionFilters>): PredictionFilters {

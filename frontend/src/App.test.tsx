@@ -45,6 +45,7 @@ const apiMock = vi.hoisted(() => {
     status: "completed",
     image_scope: "all",
     confidence_threshold: 0.25,
+    image_filters: null,
     artifact_path: "/tmp/workspace/projects/1/runs/1/predictions/1",
     log_path: "/tmp/workspace/projects/1/runs/1/predictions/1/logs.txt",
     image_count: 2,
@@ -253,16 +254,71 @@ const apiMock = vi.hoisted(() => {
     text: `prediction log for job ${jobId}\n`,
   }));
   const createPredictionThresholdScan = vi.fn(
-    async (_runId: number, body: { image_scope: string; thresholds: number[] }) => ({
+    async (
+      _runId: number,
+      body: {
+        image_scope: string;
+        thresholds: number[];
+        image_filters?: {
+          platform?: string;
+          label_status?: "all" | "annotated" | "unannotated";
+          class_id?: number;
+          edge_tag?: string;
+          failure_type?: "all" | "matched" | "false_positive" | "false_negative" | "class_confusion";
+          altitude_min?: number;
+          altitude_max?: number;
+        };
+      },
+    ) => ({
       items: body.thresholds.map((threshold, index) => ({
         ...completedPredictionJob,
         id: 10 + index,
         confidence_threshold: threshold,
+        image_filters: body.image_filters ?? null,
         artifact_path: `/tmp/workspace/projects/1/runs/1/predictions/${10 + index}`,
         log_path: `/tmp/workspace/projects/1/runs/1/predictions/${10 + index}/logs.txt`,
         created_at: `2026-06-30T00:0${index}:00`,
         updated_at: `2026-06-30T00:0${index}:30`,
       })),
+    }),
+  );
+  const createPredictionJob = vi.fn(
+    async (
+      _runId: number,
+      body: {
+        image_scope: string;
+        confidence_threshold: number;
+        image_filters?: {
+          platform?: string;
+          label_status?: "all" | "annotated" | "unannotated";
+          class_id?: number;
+          edge_tag?: string;
+          failure_type?: "all" | "matched" | "false_positive" | "false_negative" | "class_confusion";
+          altitude_min?: number;
+          altitude_max?: number;
+        };
+      },
+    ) => ({
+      id: 2,
+      run_id: 1,
+      project_id: 1,
+      status: "failed",
+      image_scope: body.image_scope,
+      confidence_threshold: body.confidence_threshold,
+      image_filters: body.image_filters ?? null,
+      artifact_path: "/tmp/workspace/projects/1/runs/1/predictions/2",
+      log_path: "/tmp/workspace/projects/1/runs/1/predictions/2/logs.txt",
+      image_count: 0,
+      prediction_count: 0,
+      matched_count: 0,
+      false_positive_count: 0,
+      false_negative_count: 0,
+      class_confusion_count: 0,
+      error_message: "Model weights were not found",
+      started_at: "2026-06-30T00:05:00",
+      ended_at: "2026-06-30T00:05:01",
+      created_at: "2026-06-30T00:05:00",
+      updated_at: "2026-06-30T00:05:01",
     }),
   );
   const listPredictions = vi.fn(async () => ({
@@ -527,6 +583,7 @@ const apiMock = vi.hoisted(() => {
     replaceAnnotations,
     getTrainingRunLogs,
     getPredictionJobLogs,
+    createPredictionJob,
     createPredictionThresholdScan,
     listPredictions,
     getQuality,
@@ -622,27 +679,7 @@ vi.mock("./api", () => ({
   getTrainingRunLogs: apiMock.getTrainingRunLogs,
   getTrainingRunSummary: apiMock.getTrainingRunSummary,
   listPredictionJobs: apiMock.listPredictionJobs,
-  createPredictionJob: async () => ({
-    id: 2,
-    run_id: 1,
-    project_id: 1,
-    status: "failed",
-    image_scope: "all",
-    confidence_threshold: 0.25,
-    artifact_path: "/tmp/workspace/projects/1/runs/1/predictions/2",
-    log_path: "/tmp/workspace/projects/1/runs/1/predictions/2/logs.txt",
-    image_count: 0,
-    prediction_count: 0,
-    matched_count: 0,
-    false_positive_count: 0,
-    false_negative_count: 0,
-    class_confusion_count: 0,
-    error_message: "Model weights were not found",
-    started_at: "2026-06-30T00:05:00",
-    ended_at: "2026-06-30T00:05:01",
-    created_at: "2026-06-30T00:05:00",
-    updated_at: "2026-06-30T00:05:01",
-  }),
+  createPredictionJob: apiMock.createPredictionJob,
   createPredictionThresholdScan: apiMock.createPredictionThresholdScan,
   listPredictions: apiMock.listPredictions,
   getPredictionJobLogs: apiMock.getPredictionJobLogs,
@@ -771,6 +808,7 @@ describe("App", () => {
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
     apiMock.getPredictionJobLogs.mockClear();
+    apiMock.createPredictionJob.mockClear();
     apiMock.createPredictionThresholdScan.mockClear();
     apiMock.listPredictions.mockClear();
     apiMock.getQuality.mockReset();
@@ -962,12 +1000,42 @@ describe("App", () => {
       timestamp_min: undefined,
       timestamp_max: undefined,
     });
+    await user.click(screen.getByRole("checkbox", { name: "Use image filters" }));
+    expect(
+      await screen.findByText(
+        "Image filters: annotated | tag occluded | false negative",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Run Prediction Analysis" }));
+    expect(apiMock.createPredictionJob).toHaveBeenCalledWith(1, {
+      image_scope: "all",
+      confidence_threshold: 0.25,
+      image_filters: {
+        platform: undefined,
+        label_status: "annotated",
+        class_id: undefined,
+        edge_tag: "occluded",
+        failure_type: "false_negative",
+        altitude_min: undefined,
+        altitude_max: undefined,
+      },
+    });
+    expect(await screen.findByText("Prediction #2")).toBeInTheDocument();
     const thresholdInput = screen.getByLabelText("Scan thresholds");
     fireEvent.change(thresholdInput, { target: { value: "0.1, 0.25, 0.55" } });
     await user.click(screen.getByRole("button", { name: "Run Threshold Scan" }));
     expect(apiMock.createPredictionThresholdScan).toHaveBeenCalledWith(1, {
       image_scope: "all",
       thresholds: [0.1, 0.25, 0.55],
+      image_filters: {
+        platform: undefined,
+        label_status: "annotated",
+        class_id: undefined,
+        edge_tag: "occluded",
+        failure_type: "false_negative",
+        altitude_min: undefined,
+        altitude_max: undefined,
+      },
     });
     expect(await screen.findByText("Prediction #12")).toBeInTheDocument();
     expect(await screen.findByText("Model Export")).toBeInTheDocument();

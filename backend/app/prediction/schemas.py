@@ -5,14 +5,29 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 
+class PredictionImageFilters(BaseModel):
+    platform: str | None = Field(default=None, max_length=80)
+    label_status: str = Field(default="all", pattern="^(all|annotated|unannotated)$")
+    class_id: int | None = Field(default=None, ge=1)
+    edge_tag: str | None = Field(default=None, max_length=80)
+    failure_type: str = Field(
+        default="all",
+        pattern="^(all|matched|false_positive|false_negative|class_confusion)$",
+    )
+    altitude_min: float | None = None
+    altitude_max: float | None = None
+
+
 class PredictionJobCreate(BaseModel):
     image_scope: str = Field(default="all", pattern="^(all|train|val|test)$")
     confidence_threshold: float = Field(default=0.25, ge=0, le=1)
+    image_filters: PredictionImageFilters | None = None
 
 
 class PredictionThresholdScanCreate(BaseModel):
     image_scope: str = Field(default="all", pattern="^(all|train|val|test)$")
     thresholds: list[float] = Field(..., min_length=1, max_length=20)
+    image_filters: PredictionImageFilters | None = None
 
     @field_validator("thresholds")
     @classmethod
@@ -32,6 +47,7 @@ class PredictionJobRead(BaseModel):
     status: str
     image_scope: str
     confidence_threshold: float
+    image_filters: PredictionImageFilters | None
     artifact_path: str
     log_path: str
     image_count: int
