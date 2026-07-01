@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -731,7 +731,9 @@ describe("App", () => {
     });
     expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
-    expect(await screen.findByText("Duplicate boxes")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Quality metrics")).getByText("Duplicate boxes"),
+    ).toBeInTheDocument();
     expect(await screen.findByText("tiny box")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open Issue" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
@@ -933,11 +935,17 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
 
     expect(await screen.findByText("Needs attention")).toBeInTheDocument();
-    expect(await screen.findByText("Duplicate boxes")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Quality metrics")).getByText("Duplicate boxes"),
+    ).toBeInTheDocument();
     expect(await screen.findByText("duplicate box")).toBeInTheDocument();
     expect(
       await screen.findByText("Box duplicates annotation 1 on the same image and class."),
     ).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Quality issue type"), "duplicate_box");
+
+    expect(apiMock.listQualityIssues).toHaveBeenLastCalledWith(1, "duplicate_box");
 
     await user.click(screen.getByRole("button", { name: "Open Issue" }));
 
@@ -978,7 +986,9 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
 
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
-    expect(await screen.findByText("Missing metadata")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Quality metrics")).getByText("Missing metadata"),
+    ).toBeInTheDocument();
     expect(await screen.findByText("missing metadata")).toBeInTheDocument();
     expect(
       await screen.findByText("Image is missing source metadata row, altitude, timestamp."),
@@ -1023,7 +1033,9 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
 
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
-    expect(await screen.findByText("Missing dimensions")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Quality metrics")).getByText("Missing dimensions"),
+    ).toBeInTheDocument();
     expect(await screen.findByText("missing image dimensions")).toBeInTheDocument();
     expect(
       await screen.findByText("Image width or height could not be read."),
@@ -1048,7 +1060,9 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
-    expect(await screen.findByText("Missing dimensions")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Quality metrics")).getByText("Missing dimensions"),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Refresh Dimensions" }));
 

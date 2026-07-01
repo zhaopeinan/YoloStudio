@@ -24,6 +24,7 @@ import type {
   DatasetImage,
   DatasetImportResponse,
   DatasetQualityIssue,
+  DatasetQualityIssueType,
   DatasetQualitySummary,
   DatasetScanSummary,
   DatasetVersion,
@@ -82,6 +83,16 @@ const defaultClassColor = "#ef4444";
 const monitorRefreshMs = 2500;
 const activeRunStatuses = new Set(["queued", "preparing", "running"]);
 const activePredictionStatuses = new Set(["queued", "running"]);
+const qualityIssueTypeOptions: Array<{ value: DatasetQualityIssueType; label: string }> = [
+  { value: "all", label: "All issues" },
+  { value: "unannotated_image", label: "Unannotated images" },
+  { value: "tiny_box", label: "Tiny boxes" },
+  { value: "invalid_box", label: "Invalid boxes" },
+  { value: "duplicate_box", label: "Duplicate boxes" },
+  { value: "missing_metadata", label: "Missing metadata" },
+  { value: "missing_image_dimensions", label: "Missing dimensions" },
+  { value: "unknown_class_reference", label: "Unknown class references" },
+];
 const edgeTagPresets = [
   "occluded",
   "camouflaged",
@@ -169,6 +180,7 @@ export default function App() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [quality, setQuality] = useState<DatasetQualitySummary | null>(null);
   const [qualityIssues, setQualityIssues] = useState<DatasetQualityIssue[]>([]);
+  const [qualityIssueType, setQualityIssueType] = useState<DatasetQualityIssueType>("all");
   const [qualityError, setQualityError] = useState<string | null>(null);
   const [isLoadingQuality, setIsLoadingQuality] = useState(false);
   const [dimensionRefresh, setDimensionRefresh] =
@@ -377,7 +389,7 @@ export default function App() {
         listClasses(dataset.project_id),
         listImages(dataset.dataset_id),
         getQuality(dataset.dataset_id),
-        listQualityIssues(dataset.dataset_id),
+        listQualityIssues(dataset.dataset_id, qualityIssueType),
         listDatasetVersions(dataset.dataset_id),
       ]);
     const runResponse = await listTrainingRuns(dataset.project_id);
@@ -442,7 +454,7 @@ export default function App() {
     try {
       const [qualityResponse, qualityIssueResponse, versionResponse] = await Promise.all([
         getQuality(datasetId),
-        listQualityIssues(datasetId),
+        listQualityIssues(datasetId, qualityIssueType),
         listDatasetVersions(datasetId),
       ]);
       setQuality(qualityResponse);
@@ -456,6 +468,23 @@ export default function App() {
       setQualityError(error instanceof Error ? error.message : "Quality refresh failed");
     } finally {
       setIsLoadingQuality(false);
+    }
+  }
+
+  async function refreshQualityIssueSamples(
+    issueType: DatasetQualityIssueType,
+    datasetId = importedDataset?.dataset_id,
+  ) {
+    if (!datasetId) {
+      return;
+    }
+
+    setQualityError(null);
+    try {
+      const response = await listQualityIssues(datasetId, issueType);
+      setQualityIssues(response.items);
+    } catch (error) {
+      setQualityError(error instanceof Error ? error.message : "Quality issues failed to load");
     }
   }
 
@@ -1283,7 +1312,7 @@ export default function App() {
                 <span>{isLoadingQuality ? "Refreshing" : `${quality.annotation_count} boxes`}</span>
               </div>
 
-              <div className="metrics-row quality-metrics">
+              <div className="metrics-row quality-metrics" aria-label="Quality metrics">
                 <Metric label="Images" value={quality.image_count.toLocaleString()} />
                 <Metric
                   label="Annotated"
@@ -1319,6 +1348,25 @@ export default function App() {
                 <p className="summary-line">{formatDimensionRefresh(dimensionRefresh)}</p>
               ) : null}
 
+              <label className="quality-issue-filter" htmlFor="quality-issue-type">
+                Quality issue type
+                <select
+                  id="quality-issue-type"
+                  value={qualityIssueType}
+                  onChange={(event) => {
+                    const nextType = event.target.value as DatasetQualityIssueType;
+                    setQualityIssueType(nextType);
+                    void refreshQualityIssueSamples(nextType);
+                  }}
+                >
+                  {qualityIssueTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               {qualityIssues.length > 0 ? (
                 <div className="quality-issue-list" aria-label="Quality issue samples">
                   {qualityIssues.map((issue) => (
@@ -1344,7 +1392,9 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-              ) : null}
+              ) : (
+                <p className="empty-state">No samples for the selected quality issue type.</p>
+              )}
             </>
           ) : (
             <p className="empty-state">Import a dataset to compute label quality and export readiness.</p>

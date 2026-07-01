@@ -165,14 +165,7 @@ export type DatasetQualitySummary = {
 };
 
 export type DatasetQualityIssue = {
-  issue_type:
-    | "unannotated_image"
-    | "tiny_box"
-    | "invalid_box"
-    | "duplicate_box"
-    | "missing_metadata"
-    | "missing_image_dimensions"
-    | "unknown_class_reference";
+  issue_type: Exclude<DatasetQualityIssueType, "all">;
   severity: "warning" | "error";
   message: string;
   image_id: number;
@@ -186,6 +179,16 @@ export type DatasetQualityIssue = {
   width: number | null;
   height: number | null;
 };
+
+export type DatasetQualityIssueType =
+  | "all"
+  | "unannotated_image"
+  | "tiny_box"
+  | "invalid_box"
+  | "duplicate_box"
+  | "missing_metadata"
+  | "missing_image_dimensions"
+  | "unknown_class_reference";
 
 export type DatasetQualityIssueListResponse = {
   dataset_id: number;
@@ -538,8 +541,14 @@ export function getQuality(datasetId: number): Promise<DatasetQualitySummary> {
   return requestJson<DatasetQualitySummary>(`/api/datasets/${datasetId}/quality`);
 }
 
-export function listQualityIssues(datasetId: number): Promise<DatasetQualityIssueListResponse> {
-  return requestJson<DatasetQualityIssueListResponse>(`/api/datasets/${datasetId}/quality/issues`);
+export function listQualityIssues(
+  datasetId: number,
+  issueType: DatasetQualityIssueType = "all",
+): Promise<DatasetQualityIssueListResponse> {
+  const params = new URLSearchParams({ issue_type: issueType });
+  return requestJson<DatasetQualityIssueListResponse>(
+    `/api/datasets/${datasetId}/quality/issues?${params}`,
+  );
 }
 
 export function createDatasetVersion(

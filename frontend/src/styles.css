@@ -506,6 +506,12 @@ input[type="color"] {
   font-weight: 700;
 }
 
+.quality-issue-filter {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
 .quality-issue-list {
   display: grid;
   gap: 8px;
