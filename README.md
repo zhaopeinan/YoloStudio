@@ -273,11 +273,14 @@ curl http://127.0.0.1:8000/api/prediction-jobs/1/logs
 2. Per-class matched, false-positive, false-negative, and class-confusion counts from the latest completed prediction job.
 3. A class-level confusion matrix for matched and class-confusion predictions.
 4. Threshold scan rows across completed prediction jobs at different confidence thresholds.
+5. A `Run Comparison` table across recent project runs with status, model, epochs, mAP50, box loss,
+   latest prediction counts, best threshold/F1, and artifact path.
 
 The dashboard is populated through:
 
 ```bash
 curl http://127.0.0.1:8000/api/training/runs/1/summary
+curl http://127.0.0.1:8000/api/projects/1/training/summary
 ```
 
 ## Model export

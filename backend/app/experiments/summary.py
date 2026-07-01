@@ -12,7 +12,9 @@ from app.experiments.schemas import (
     ConfusionCell,
     MetricPoint,
     MetricSeries,
+    ProjectExperimentSummary,
     RunExperimentSummary,
+    RunComparisonRow,
     ThresholdPoint,
     ThresholdRecommendation,
 )
@@ -30,6 +32,57 @@ def build_run_experiment_summary(db: Session, run: TrainingRun) -> RunExperiment
         threshold_recommendation=_threshold_recommendation(threshold_scan),
         latest_prediction_job_id=latest_job.id if latest_job else None,
     )
+
+
+def build_project_experiment_summary(db: Session, project_id: int) -> ProjectExperimentSummary:
+    runs = db.scalars(
+        select(TrainingRun)
+        .where(TrainingRun.project_id == project_id)
+        .order_by(TrainingRun.id.desc())
+        .limit(50)
+    ).all()
+    return ProjectExperimentSummary(
+        project_id=project_id,
+        runs=[_comparison_row(db, run) for run in runs],
+    )
+
+
+def _comparison_row(db: Session, run: TrainingRun) -> RunComparisonRow:
+    latest_job = _latest_completed_prediction_job(db, run.id)
+    threshold_scan = _threshold_scan(db, run.id)
+    recommendation = _threshold_recommendation(threshold_scan)
+    return RunComparisonRow(
+        run_id=run.id,
+        status=run.status,
+        model=str((run.config or {}).get("model") or "model"),
+        epochs=_optional_int((run.config or {}).get("epochs")),
+        device=run.device,
+        artifact_path=run.artifact_path,
+        map50=_latest_metric_value(db, run.id, "metrics/mAP50(B)"),
+        box_loss=_latest_metric_value(db, run.id, "train/box_loss"),
+        latest_prediction_job_id=latest_job.id if latest_job else None,
+        matched=latest_job.matched_count if latest_job else 0,
+        false_positive=latest_job.false_positive_count if latest_job else 0,
+        false_negative=latest_job.false_negative_count if latest_job else 0,
+        class_confusion=_prediction_count(db, latest_job.id, "class_confusion")
+        if latest_job
+        else 0,
+        best_threshold=recommendation.confidence_threshold if recommendation else None,
+        best_f1=recommendation.f1 if recommendation else None,
+    )
+
+
+def _optional_int(value) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _latest_metric_value(db: Session, run_id: int, name: str) -> float | None:
+    metric = db.scalar(
+        select(RunMetric)
+        .where(RunMetric.run_id == run_id, RunMetric.name == name)
+        .order_by(RunMetric.id.desc())
+    )
+    return metric.value if metric else None
 
 
 def _metric_series(db: Session, run_id: int) -> list[MetricSeries]:

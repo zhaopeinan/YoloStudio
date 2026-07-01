@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from app.core.settings import Settings, get_settings
 from app.db.models import DatasetVersion, Project, TrainingRun
 from app.db.session import get_db
-from app.experiments.schemas import RunExperimentSummary
-from app.experiments.summary import build_run_experiment_summary
+from app.experiments.schemas import ProjectExperimentSummary, RunExperimentSummary
+from app.experiments.summary import build_project_experiment_summary, build_run_experiment_summary
 from app.training.runner import (
     cancel_training_run,
     create_queued_run,
@@ -69,6 +69,16 @@ def list_project_training_runs(project_id: int, db: Session = Depends(get_db)) -
         select(TrainingRun).where(TrainingRun.project_id == project_id).order_by(TrainingRun.id.desc())
     ).all()
     return TrainingRunList(items=[_read_run(db, run) for run in runs])
+
+
+@router.get("/projects/{project_id}/training/summary", response_model=ProjectExperimentSummary)
+def get_project_training_summary(
+    project_id: int,
+    db: Session = Depends(get_db),
+) -> ProjectExperimentSummary:
+    if db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project was not found")
+    return build_project_experiment_summary(db, project_id)
 
 
 @router.get("/training/runs/{run_id}", response_model=TrainingRunRead)

@@ -324,6 +324,29 @@ export type RunExperimentSummary = {
   latest_prediction_job_id: number | null;
 };
 
+export type RunComparisonRow = {
+  run_id: number;
+  status: string;
+  model: string;
+  epochs: number | null;
+  device: string;
+  artifact_path: string;
+  map50: number | null;
+  box_loss: number | null;
+  latest_prediction_job_id: number | null;
+  matched: number;
+  false_positive: number;
+  false_negative: number;
+  class_confusion: number;
+  best_threshold: number | null;
+  best_f1: number | null;
+};
+
+export type ProjectExperimentSummary = {
+  project_id: number;
+  runs: RunComparisonRow[];
+};
+
 export type TrainingAugmentationConfig = {
   mosaic: number;
   mixup: number;
@@ -639,6 +662,10 @@ export function getTrainingRunLogs(runId: number): Promise<TrainingRunLogsRespon
 
 export function getTrainingRunSummary(runId: number): Promise<RunExperimentSummary> {
   return requestJson<RunExperimentSummary>(`/api/training/runs/${runId}/summary`);
+}
+
+export function getProjectTrainingSummary(projectId: number): Promise<ProjectExperimentSummary> {
+  return requestJson<ProjectExperimentSummary>(`/api/projects/${projectId}/training/summary`);
 }
 
 export function createPredictionJob(

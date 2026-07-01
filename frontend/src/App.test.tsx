@@ -549,6 +549,45 @@ const apiMock = vi.hoisted(() => {
     },
     latest_prediction_job_id: 1,
   }));
+  const getProjectTrainingSummary = vi.fn(async () => ({
+    project_id: 1,
+    runs: [
+      {
+        run_id: 2,
+        status: "queued",
+        model: "custom-drone.pt",
+        epochs: 12,
+        device: "cpu",
+        artifact_path: "/tmp/workspace/projects/1/runs/2",
+        map50: null,
+        box_loss: null,
+        latest_prediction_job_id: null,
+        matched: 0,
+        false_positive: 0,
+        false_negative: 0,
+        class_confusion: 0,
+        best_threshold: null,
+        best_f1: null,
+      },
+      {
+        run_id: 1,
+        status: "completed",
+        model: "custom-drone.pt",
+        epochs: 12,
+        device: "mps",
+        artifact_path: "/tmp/workspace/projects/1/runs/1",
+        map50: 0.42,
+        box_loss: 1.12,
+        latest_prediction_job_id: 1,
+        matched: 2,
+        false_positive: 1,
+        false_negative: 1,
+        class_confusion: 1,
+        best_threshold: 0.25,
+        best_f1: 2 / 3,
+      },
+    ],
+  }));
   const getExportCapabilities = vi.fn(async () => ({
     pt_available: true,
     onnx_available: false,
@@ -629,6 +668,7 @@ const apiMock = vi.hoisted(() => {
     createClass,
     updateClass,
     getTrainingRunSummary,
+    getProjectTrainingSummary,
     getExportCapabilities,
     listRunExports,
     createRunExport,
@@ -710,6 +750,7 @@ vi.mock("./api", () => ({
   cancelTrainingRun: apiMock.cancelTrainingRun,
   getTrainingRunLogs: apiMock.getTrainingRunLogs,
   getTrainingRunSummary: apiMock.getTrainingRunSummary,
+  getProjectTrainingSummary: apiMock.getProjectTrainingSummary,
   listPredictionJobs: apiMock.listPredictionJobs,
   createPredictionJob: apiMock.createPredictionJob,
   createPredictionThresholdScan: apiMock.createPredictionThresholdScan,
@@ -863,6 +904,7 @@ describe("App", () => {
       missing_count: 0,
     }));
     apiMock.getTrainingRunSummary.mockClear();
+    apiMock.getProjectTrainingSummary.mockClear();
     apiMock.getExportCapabilities.mockClear();
     apiMock.listRunExports.mockClear();
     apiMock.createRunExport.mockClear();
@@ -1003,7 +1045,19 @@ describe("App", () => {
       }),
     );
     expect(await screen.findByText("Experiment Dashboard")).toBeInTheDocument();
-    expect(await screen.findByText("mAP50")).toBeInTheDocument();
+    expect(apiMock.getProjectTrainingSummary).toHaveBeenCalledWith(1);
+    const comparisonPanel = (await screen.findByText("Run Comparison")).closest(
+      ".run-comparison-panel",
+    ) as HTMLElement;
+    expect(within(comparisonPanel).getByText("#2")).toBeInTheDocument();
+    expect(within(comparisonPanel).getByText("#1")).toBeInTheDocument();
+    expect(within(comparisonPanel).getAllByText("custom-drone.pt")).toHaveLength(2);
+    expect(within(comparisonPanel).getByText("0.420")).toBeInTheDocument();
+    expect(within(comparisonPanel).getByText("1.120")).toBeInTheDocument();
+    expect(within(comparisonPanel).getByText("67%")).toBeInTheDocument();
+    expect(within(comparisonPanel).getByText("0.25")).toBeInTheDocument();
+    expect(within(comparisonPanel).getByText("runs/1")).toBeInTheDocument();
+    expect((await screen.findAllByText("mAP50")).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText("box_loss")).toBeInTheDocument();
     expect(await screen.findByText("Class Outcomes")).toBeInTheDocument();
     expect(await screen.findByText("Threshold Scan")).toBeInTheDocument();

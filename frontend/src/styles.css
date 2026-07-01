@@ -979,6 +979,10 @@ input[type="color"] {
   min-width: 360px;
 }
 
+.run-comparison-panel table {
+  min-width: 980px;
+}
+
 .compact-table-wrap th,
 .compact-table-wrap td {
   padding: 8px 7px;

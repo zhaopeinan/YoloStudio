@@ -38,6 +38,7 @@ import type {
   ExportArtifact,
   ExportCapabilities,
   HealthResponse,
+  ProjectExperimentSummary,
   ProjectClass,
   ProjectSummary,
   AnnotationWrite,
@@ -68,6 +69,7 @@ import {
   getHealth,
   getPredictionJobLogs,
   getPredictionImageReview,
+  getProjectTrainingSummary,
   getQuality,
   getTrainingRunLogs,
   getTrainingRunSummary,
@@ -239,6 +241,8 @@ export default function App() {
   const [runs, setRuns] = useState<TrainingRun[]>([]);
   const [runLogs, setRunLogs] = useState<Record<number, string>>({});
   const [runSummary, setRunSummary] = useState<RunExperimentSummary | null>(null);
+  const [projectExperimentSummary, setProjectExperimentSummary] =
+    useState<ProjectExperimentSummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
   const [trainingNotice, setTrainingNotice] = useState<string | null>(null);
@@ -406,6 +410,7 @@ export default function App() {
       setExportCapabilities(null);
       setExports([]);
       setRunSummary(null);
+      setProjectExperimentSummary(null);
       return;
     }
 
@@ -503,9 +508,11 @@ export default function App() {
     setExports([]);
     if (runResponse.items[0]) {
       await refreshRunSummary(runResponse.items[0].id);
+      await refreshProjectTrainingSummary(dataset.project_id);
       await refreshPredictionJobs(runResponse.items[0].id);
     } else {
       setRunSummary(null);
+      setProjectExperimentSummary(null);
     }
   }
 
@@ -777,10 +784,27 @@ export default function App() {
       setRuns(runResponse.items);
       if (runResponse.items[0]) {
         await refreshRunSummary(runResponse.items[0].id);
+        await refreshProjectTrainingSummary(projectId);
         await refreshPredictionJobs(runResponse.items[0].id);
+      } else {
+        setProjectExperimentSummary(null);
       }
     } catch (error) {
       setTrainingError(error instanceof Error ? error.message : "Run refresh failed");
+    }
+  }
+
+  async function refreshProjectTrainingSummary(projectId = importedDataset?.project_id) {
+    if (!projectId) {
+      setProjectExperimentSummary(null);
+      return;
+    }
+
+    try {
+      setProjectExperimentSummary(await getProjectTrainingSummary(projectId));
+      setSummaryError(null);
+    } catch (error) {
+      setSummaryError(error instanceof Error ? error.message : "Project summary failed to load");
     }
   }
 
@@ -2134,7 +2158,10 @@ export default function App() {
           </div>
 
           {summaryError ? <div className="error-banner">{summaryError}</div> : null}
-          <ExperimentDashboard summary={runSummary} />
+          <ExperimentDashboard
+            summary={runSummary}
+            projectSummary={projectExperimentSummary}
+          />
         </section>
       </section>
 
@@ -3711,14 +3738,18 @@ function AugmentationNumber(props: {
   );
 }
 
-function ExperimentDashboard(props: { summary: RunExperimentSummary | null }) {
-  const { summary } = props;
+function ExperimentDashboard(props: {
+  summary: RunExperimentSummary | null;
+  projectSummary: ProjectExperimentSummary | null;
+}) {
+  const { summary, projectSummary } = props;
   const hasData =
     summary &&
     (summary.metric_series.length > 0 ||
       summary.class_outcomes.length > 0 ||
       summary.confusion_matrix.length > 0 ||
       summary.threshold_scan.length > 0);
+  const hasComparison = Boolean(projectSummary?.runs.length);
 
   return (
     <div className="experiment-dashboard" aria-label="Experiment dashboard">
@@ -3737,6 +3768,8 @@ function ExperimentDashboard(props: { summary: RunExperimentSummary | null }) {
         <p className="empty-state">Metrics, class outcomes, and threshold scans will appear here.</p>
       ) : (
         <>
+          <RunComparisonTable rows={projectSummary?.runs ?? []} />
+
           <div className="curve-grid">
             {summary.metric_series.slice(0, 4).map((series) => (
               <MetricCurve key={series.name} series={series} />
@@ -3753,6 +3786,57 @@ function ExperimentDashboard(props: { summary: RunExperimentSummary | null }) {
             recommendation={summary.threshold_recommendation}
           />
         </>
+      )}
+      {!hasData && hasComparison ? <RunComparisonTable rows={projectSummary?.runs ?? []} /> : null}
+    </div>
+  );
+}
+
+function RunComparisonTable(props: { rows: ProjectExperimentSummary["runs"] }) {
+  return (
+    <div className="analysis-panel run-comparison-panel">
+      <strong>Run Comparison</strong>
+      {props.rows.length === 0 ? (
+        <p className="empty-state">Completed runs will appear here for comparison.</p>
+      ) : (
+        <div className="compact-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Status</th>
+                <th>Model</th>
+                <th>Epochs</th>
+                <th>mAP50</th>
+                <th>Box loss</th>
+                <th>Matched</th>
+                <th>False +</th>
+                <th>False -</th>
+                <th>Best F1</th>
+                <th>Best Conf</th>
+                <th>Artifact</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.rows.map((row) => (
+                <tr key={row.run_id}>
+                  <td>#{row.run_id}</td>
+                  <td>{row.status}</td>
+                  <td title={row.model}>{row.model}</td>
+                  <td>{row.epochs ?? "n/a"}</td>
+                  <td>{row.map50 === null ? "n/a" : row.map50.toFixed(3)}</td>
+                  <td>{row.box_loss === null ? "n/a" : row.box_loss.toFixed(3)}</td>
+                  <td>{row.matched}</td>
+                  <td>{row.false_positive}</td>
+                  <td>{row.false_negative}</td>
+                  <td>{row.best_f1 === null ? "n/a" : formatPercent(row.best_f1)}</td>
+                  <td>{row.best_threshold === null ? "n/a" : row.best_threshold.toFixed(2)}</td>
+                  <td title={row.artifact_path}>{formatArtifactTail(row.artifact_path)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -3913,6 +3997,11 @@ function shortMetricName(name: string) {
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+function formatArtifactTail(path: string) {
+  const parts = path.split("/").filter(Boolean);
+  return parts.slice(-2).join("/") || path;
 }
 
 function formatDimensionRefresh(summary: DatasetDimensionRefreshSummary) {

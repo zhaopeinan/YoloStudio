@@ -60,3 +60,26 @@ class RunExperimentSummary(BaseModel):
     threshold_scan: list[ThresholdPoint]
     threshold_recommendation: ThresholdRecommendation | None
     latest_prediction_job_id: int | None
+
+
+class RunComparisonRow(BaseModel):
+    run_id: int
+    status: str
+    model: str
+    epochs: int | None
+    device: str
+    artifact_path: str
+    map50: float | None
+    box_loss: float | None
+    latest_prediction_job_id: int | None
+    matched: int
+    false_positive: int
+    false_negative: int
+    class_confusion: int
+    best_threshold: float | None
+    best_f1: float | None
+
+
+class ProjectExperimentSummary(BaseModel):
+    project_id: int
+    runs: list[RunComparisonRow]
