@@ -112,6 +112,22 @@ const apiMock = vi.hoisted(() => {
     frozen: true,
     created_at: "2026-06-30T00:01:00",
   }));
+  const createTrainingRun = vi.fn(async () => ({
+    id: 2,
+    project_id: 1,
+    version_id: 1,
+    status: "queued",
+    device: "cpu",
+    config: { model: "yolov8n.pt", epochs: 50 },
+    artifact_path: "/tmp/workspace/projects/1/runs/2",
+    log_path: "/tmp/workspace/projects/1/runs/2/logs.txt",
+    error_message: null,
+    latest_metrics: {},
+    started_at: null,
+    ended_at: null,
+    created_at: "2026-06-30T00:02:00",
+    updated_at: "2026-06-30T00:02:00",
+  }));
   const getAnnotations = vi.fn(async (imageId: number) => ({
     items:
       imageId === 11
@@ -268,6 +284,7 @@ const apiMock = vi.hoisted(() => {
     listPredictionJobs,
     listImages,
     createDatasetVersion,
+    createTrainingRun,
     getAnnotations,
     replaceAnnotations,
     getTrainingRunLogs,
@@ -381,22 +398,7 @@ vi.mock("./api", () => ({
   }),
   createDatasetVersion: apiMock.createDatasetVersion,
   listTrainingRuns: apiMock.listTrainingRuns,
-  createTrainingRun: async () => ({
-    id: 2,
-    project_id: 1,
-    version_id: 1,
-    status: "queued",
-    device: "cpu",
-    config: { model: "yolov8n.pt", epochs: 50 },
-    artifact_path: "/tmp/workspace/projects/1/runs/2",
-    log_path: "/tmp/workspace/projects/1/runs/2/logs.txt",
-    error_message: null,
-    latest_metrics: {},
-    started_at: null,
-    ended_at: null,
-    created_at: "2026-06-30T00:02:00",
-    updated_at: "2026-06-30T00:02:00",
-  }),
+  createTrainingRun: apiMock.createTrainingRun,
   getTrainingRunLogs: apiMock.getTrainingRunLogs,
   getTrainingRunSummary: apiMock.getTrainingRunSummary,
   listPredictionJobs: apiMock.listPredictionJobs,
@@ -534,6 +536,7 @@ describe("App", () => {
     apiMock.predictionJobsResponseQueue.length = 0;
     apiMock.listImages.mockClear();
     apiMock.createDatasetVersion.mockClear();
+    apiMock.createTrainingRun.mockClear();
     apiMock.getAnnotations.mockClear();
     apiMock.replaceAnnotations.mockClear();
     apiMock.listTrainingRuns.mockClear();
@@ -596,6 +599,25 @@ describe("App", () => {
     expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
+    const mixupInput = screen.getByLabelText("MixUp");
+    await user.clear(mixupInput);
+    await user.type(mixupInput, "0.2");
+    const copyPasteInput = screen.getByLabelText("Copy-Paste");
+    await user.clear(copyPasteInput);
+    await user.type(copyPasteInput, "0.35");
+    await user.click(screen.getByRole("checkbox", { name: "GridMask" }));
+    await user.click(screen.getByRole("button", { name: "Start Training Run" }));
+    expect(apiMock.createTrainingRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        augmentation_preset: "balanced",
+        augmentation: expect.objectContaining({
+          mosaic: 1,
+          mixup: 0.2,
+          copy_paste: 0.35,
+          gridmask: true,
+        }),
+      }),
+    );
     expect(await screen.findByText("Experiment Dashboard")).toBeInTheDocument();
     expect(await screen.findByText("mAP50")).toBeInTheDocument();
     expect(await screen.findByText("box_loss")).toBeInTheDocument();

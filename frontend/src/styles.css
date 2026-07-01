@@ -551,9 +551,26 @@ input[type="color"] {
   gap: 10px;
 }
 
-.training-number-grid label {
+.training-number-grid label,
+.augmentation-panel label,
+.augmentation-grid label {
   display: grid;
   gap: 6px;
+}
+
+.augmentation-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.augmentation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .toggle-row {
@@ -1171,6 +1188,7 @@ input[type="color"] {
   .prep-grid,
   .training-grid,
   .training-number-grid,
+  .augmentation-grid,
   .prediction-controls,
   .prediction-summary,
   .prediction-layout,

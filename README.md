@@ -114,7 +114,7 @@ After a dataset version exists:
 
 1. Open `Training Setup`.
 2. Choose a model preset such as `yolov8n.pt`, or enter a local `.pt` path.
-3. Set epochs, image size, batch size, device, augmentation preset, TTA, and threshold scan flags.
+3. Set epochs, image size, batch size, device, augmentation strategy, TTA, and threshold scan flags.
 4. Click `Start Training Run`.
 5. Check `Run History` for status, artifact path, latest metrics, errors, and logs.
 6. While a run is `queued`, `preparing`, or `running`, the frontend shows `Auto refresh on` and
@@ -138,6 +138,15 @@ Real training uses Ultralytics when it is installed in the backend Python enviro
 cd backend
 python -m pip install ultralytics
 ```
+
+The training config persists both a strategy name and structured augmentation values:
+
+- `mosaic`, `mixup`, and `copy_paste` for small/dense targets
+- `hsv_h`, `hsv_s`, `hsv_v`, `translate`, `scale`, `fliplr`, and `erasing`
+- `gridmask` as a local strategy flag recorded in `config.json`
+
+Ultralytics-supported augmentation fields are passed into `model.train()`. `gridmask` is tracked in
+the run config for strategy review and future trainer adapters.
 
 If Ultralytics is not installed, the run is still persisted and moves to `failed` with a clear log
 message. This lets the UI and run history be tested without downloading model weights.

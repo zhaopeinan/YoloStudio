@@ -37,6 +37,7 @@ import type {
   PredictionImageReview,
   PredictionJob,
   RunExperimentSummary,
+  TrainingAugmentationConfig,
   TrainingRun,
 } from "./api";
 import {
@@ -70,6 +71,19 @@ const defaultClassColor = "#ef4444";
 const monitorRefreshMs = 2500;
 const activeRunStatuses = new Set(["queued", "preparing", "running"]);
 const activePredictionStatuses = new Set(["queued", "running"]);
+const defaultAugmentation: TrainingAugmentationConfig = {
+  mosaic: 1,
+  mixup: 0,
+  copy_paste: 0,
+  hsv_h: 0.015,
+  hsv_s: 0.7,
+  hsv_v: 0.4,
+  translate: 0.1,
+  scale: 0.5,
+  fliplr: 0.5,
+  erasing: 0.4,
+  gridmask: false,
+};
 
 type DraftBox = Annotation & {
   local_id: string;
@@ -133,6 +147,7 @@ export default function App() {
   const [trainingBatchSize, setTrainingBatchSize] = useState(8);
   const [trainingDevice, setTrainingDevice] = useState("");
   const [augmentationPreset, setAugmentationPreset] = useState("balanced");
+  const [augmentation, setAugmentation] = useState<TrainingAugmentationConfig>(defaultAugmentation);
   const [trainingTta, setTrainingTta] = useState(false);
   const [thresholdScan, setThresholdScan] = useState(false);
   const [predictionJobs, setPredictionJobs] = useState<PredictionJob[]>([]);
@@ -381,6 +396,13 @@ export default function App() {
         ? current.filter((existing) => existing !== classId)
         : [...current, classId],
     );
+  }
+
+  function setAugmentationValue(
+    field: keyof Omit<TrainingAugmentationConfig, "gridmask">,
+    value: number,
+  ) {
+    setAugmentation((current) => ({ ...current, [field]: value }));
   }
 
   async function refreshTrainingRuns(projectId = importedDataset?.project_id) {
@@ -695,6 +717,7 @@ export default function App() {
         batch_size: trainingBatchSize,
         device: trainingDevice.trim() || undefined,
         augmentation_preset: augmentationPreset,
+        augmentation,
         tta: trainingTta,
         threshold_scan: thresholdScan,
       });
@@ -1114,8 +1137,11 @@ export default function App() {
                   disabled={versions.length === 0}
                 />
               </label>
+            </div>
+
+            <div className="augmentation-panel" aria-label="Augmentation strategy">
               <label htmlFor="augmentation-preset">
-                Augmentation
+                Strategy name
                 <input
                   id="augmentation-preset"
                   value={augmentationPreset}
@@ -1123,9 +1149,68 @@ export default function App() {
                   disabled={versions.length === 0}
                 />
               </label>
+              <div className="augmentation-grid">
+                <AugmentationNumber
+                  id="aug-mosaic"
+                  label="Mosaic"
+                  value={augmentation.mosaic}
+                  disabled={versions.length === 0}
+                  onChange={(value) => setAugmentationValue("mosaic", value)}
+                />
+                <AugmentationNumber
+                  id="aug-mixup"
+                  label="MixUp"
+                  value={augmentation.mixup}
+                  disabled={versions.length === 0}
+                  onChange={(value) => setAugmentationValue("mixup", value)}
+                />
+                <AugmentationNumber
+                  id="aug-copy-paste"
+                  label="Copy-Paste"
+                  value={augmentation.copy_paste}
+                  disabled={versions.length === 0}
+                  onChange={(value) => setAugmentationValue("copy_paste", value)}
+                />
+                <AugmentationNumber
+                  id="aug-erasing"
+                  label="Erasing"
+                  value={augmentation.erasing}
+                  disabled={versions.length === 0}
+                  onChange={(value) => setAugmentationValue("erasing", value)}
+                />
+                <AugmentationNumber
+                  id="aug-scale"
+                  label="Scale"
+                  max={2}
+                  value={augmentation.scale}
+                  disabled={versions.length === 0}
+                  onChange={(value) => setAugmentationValue("scale", value)}
+                />
+                <AugmentationNumber
+                  id="aug-fliplr"
+                  label="Flip LR"
+                  value={augmentation.fliplr}
+                  disabled={versions.length === 0}
+                  onChange={(value) => setAugmentationValue("fliplr", value)}
+                />
+              </div>
             </div>
 
             <div className="toggle-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={augmentation.gridmask}
+                  onChange={(event) =>
+                    setAugmentation((current) => ({
+                      ...current,
+                      gridmask: event.target.checked,
+                    }))
+                  }
+                  disabled={versions.length === 0}
+                />
+                GridMask
+              </label>
               <label>
                 <input
                   type="checkbox"
@@ -2146,6 +2231,32 @@ function ExportOption(props: {
         {isCreating ? "Exporting" : `Export ${format.toUpperCase()}`}
       </button>
     </div>
+  );
+}
+
+function AugmentationNumber(props: {
+  id: string;
+  label: string;
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+  max?: number;
+}) {
+  const { id, label, value, disabled, onChange, max = 1 } = props;
+  return (
+    <label htmlFor={id}>
+      {label}
+      <input
+        id={id}
+        type="number"
+        min={0}
+        max={max}
+        step={0.05}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+    </label>
   );
 }
 

@@ -34,15 +34,34 @@ def run_artifact_root(settings: Settings, project_id: int, run_id: int) -> Path:
 
 
 def build_run_config(request) -> dict:
+    augmentation = request.augmentation.model_dump()
     return {
         "model": request.model,
         "epochs": request.epochs,
         "image_size": request.image_size,
         "batch_size": request.batch_size,
         "augmentation_preset": request.augmentation_preset,
+        "augmentation": augmentation,
         "tta": request.tta,
         "threshold_scan": request.threshold_scan,
     }
+
+
+def ultralytics_augmentation_kwargs(config: dict) -> dict:
+    augmentation = dict(config.get("augmentation") or {})
+    supported_keys = {
+        "mosaic",
+        "mixup",
+        "copy_paste",
+        "hsv_h",
+        "hsv_s",
+        "hsv_v",
+        "translate",
+        "scale",
+        "fliplr",
+        "erasing",
+    }
+    return {key: value for key, value in augmentation.items() if key in supported_keys}
 
 
 def resolve_device(requested_device: str | None) -> str:
@@ -206,6 +225,7 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
             project=str(artifact_root),
             name="ultralytics",
             exist_ok=True,
+            **ultralytics_augmentation_kwargs(config),
         )
         metrics = getattr(results, "results_dict", {}) or {}
         for name, value in metrics.items():

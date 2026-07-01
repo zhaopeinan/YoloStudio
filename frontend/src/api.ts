@@ -225,6 +225,20 @@ export type RunExperimentSummary = {
   latest_prediction_job_id: number | null;
 };
 
+export type TrainingAugmentationConfig = {
+  mosaic: number;
+  mixup: number;
+  copy_paste: number;
+  hsv_h: number;
+  hsv_s: number;
+  hsv_v: number;
+  translate: number;
+  scale: number;
+  fliplr: number;
+  erasing: number;
+  gridmask: boolean;
+};
+
 export type TrainingRunCreate = {
   version_id: number;
   model: string;
@@ -233,6 +247,7 @@ export type TrainingRunCreate = {
   batch_size: number;
   device?: string;
   augmentation_preset: string;
+  augmentation: TrainingAugmentationConfig;
   tta: boolean;
   threshold_scan: boolean;
 };

@@ -79,6 +79,19 @@ def test_start_training_run_persists_status_artifacts_and_logs(tmp_path: Path, m
                 "batch_size": 1,
                 "device": "cpu",
                 "augmentation_preset": "small-target",
+                "augmentation": {
+                    "mosaic": 0.8,
+                    "mixup": 0.15,
+                    "copy_paste": 0.25,
+                    "hsv_h": 0.02,
+                    "hsv_s": 0.6,
+                    "hsv_v": 0.35,
+                    "translate": 0.12,
+                    "scale": 0.7,
+                    "fliplr": 0.4,
+                    "erasing": 0.2,
+                    "gridmask": True,
+                },
                 "tta": True,
                 "threshold_scan": True,
             },
@@ -96,12 +109,18 @@ def test_start_training_run_persists_status_artifacts_and_logs(tmp_path: Path, m
         assert run["status"] == "completed"
         assert run["device"] == "cpu"
         assert run["config"]["epochs"] == 2
+        assert run["config"]["augmentation_preset"] == "small-target"
+        assert run["config"]["augmentation"]["mosaic"] == 0.8
+        assert run["config"]["augmentation"]["mixup"] == 0.15
+        assert run["config"]["augmentation"]["copy_paste"] == 0.25
+        assert run["config"]["augmentation"]["gridmask"] is True
         assert run["config"]["tta"] is True
         assert run["error_message"] is None
         assert run["latest_metrics"] == {"metrics/mAP50(B)": 0.42}
 
         artifact_root = Path(run["artifact_path"])
         assert (artifact_root / "config.json").exists()
+        assert '"gridmask": true' in (artifact_root / "config.json").read_text()
         assert (artifact_root / "logs.txt").read_text().splitlines()[-1].endswith(
             "training completed"
         )
@@ -116,6 +135,41 @@ def test_start_training_run_persists_status_artifacts_and_logs(tmp_path: Path, m
 
         assert logs_response.status_code == 200
         assert "fake trainer started" in logs_response.json()["text"]
+
+
+def test_ultralytics_augmentation_kwargs_excludes_local_strategy_flags():
+    from app.training.runner import ultralytics_augmentation_kwargs
+
+    kwargs = ultralytics_augmentation_kwargs(
+        {
+            "augmentation": {
+                "mosaic": 0.8,
+                "mixup": 0.15,
+                "copy_paste": 0.25,
+                "hsv_h": 0.02,
+                "hsv_s": 0.6,
+                "hsv_v": 0.35,
+                "translate": 0.12,
+                "scale": 0.7,
+                "fliplr": 0.4,
+                "erasing": 0.2,
+                "gridmask": True,
+            }
+        }
+    )
+
+    assert kwargs == {
+        "mosaic": 0.8,
+        "mixup": 0.15,
+        "copy_paste": 0.25,
+        "hsv_h": 0.02,
+        "hsv_s": 0.6,
+        "hsv_v": 0.35,
+        "translate": 0.12,
+        "scale": 0.7,
+        "fliplr": 0.4,
+        "erasing": 0.2,
+    }
 
 
 def test_training_run_rejects_when_another_run_is_active(tmp_path: Path, monkeypatch):
