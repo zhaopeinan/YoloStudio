@@ -147,6 +147,14 @@ def _prediction_box(row: dict) -> Box:
     )
 
 
+def _merge_tags(existing_tags: list[str] | None, new_tags: list[str]) -> list[str]:
+    merged = list(existing_tags or [])
+    for tag in new_tags:
+        if tag not in merged:
+            merged.append(tag)
+    return merged
+
+
 def persist_predictions(
     db: Session,
     job: PredictionJob,
@@ -206,6 +214,7 @@ def persist_predictions(
         for annotation in image_annotations:
             if annotation.id in matched_annotations:
                 continue
+            annotation.edge_tags = _merge_tags(annotation.edge_tags, ["false_negative"])
             rows.append(
                 Prediction(
                     run_id=run.id,

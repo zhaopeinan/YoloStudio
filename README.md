@@ -202,6 +202,11 @@ After a training run exists:
 12. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
 13. Click `Save Annotations` when the correction draft looks right.
 
+Prediction jobs automatically add the `false_negative` edge tag to missed ground-truth boxes.
+Use the Image Browser `Edge tag` filter with `false_negative` to build a follow-up annotation queue
+from model misses. The manual `reviewed_prediction` tag is still only added when an operator clicks
+`Mark reviewed` and saves the annotation changes.
+
 For threshold tuning, enter comma-separated confidence values in `Scan thresholds`, such as
 `0.15, 0.25, 0.35, 0.5, 0.65`, then click `Run Threshold Scan`. The backend creates one
 prediction job for each value and the Experiment Dashboard automatically refreshes the
