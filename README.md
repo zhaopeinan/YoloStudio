@@ -177,6 +177,21 @@ curl http://127.0.0.1:8000/api/prediction-jobs/1/images/1/review
 curl http://127.0.0.1:8000/api/prediction-jobs/1/logs
 ```
 
+## Experiment dashboard
+
+`Run History` includes an `Experiment Dashboard` for the latest run. It summarizes:
+
+1. Training metric series stored in `run_metrics`.
+2. Per-class matched, false-positive, and false-negative counts from the latest completed prediction job.
+3. A class-level confusion matrix for matched predictions.
+4. Threshold scan rows across completed prediction jobs at different confidence thresholds.
+
+The dashboard is populated through:
+
+```bash
+curl http://127.0.0.1:8000/api/training/runs/1/summary
+```
+
 ## Model export
 
 After a completed training run exists:

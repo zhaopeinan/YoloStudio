@@ -606,6 +606,143 @@ input[type="color"] {
   white-space: pre-wrap;
 }
 
+.experiment-dashboard {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  border-top: 1px solid #dfe7ec;
+  padding-top: 16px;
+}
+
+.dashboard-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-heading div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dashboard-heading span,
+.curve-title span,
+.matrix-cell span {
+  color: #62727e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.curve-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.curve-card,
+.analysis-panel {
+  min-width: 0;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.curve-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.curve-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.curve-card svg {
+  width: 100%;
+  height: 82px;
+  margin-top: 8px;
+}
+
+.curve-card line {
+  stroke: #d5e0e7;
+  stroke-width: 1;
+}
+
+.curve-card polyline {
+  fill: none;
+  stroke: #1f6f78;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.curve-card circle {
+  fill: #e85d3f;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.85fr);
+  gap: 10px;
+}
+
+.analysis-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-table-wrap {
+  overflow-x: auto;
+}
+
+.compact-table-wrap table {
+  min-width: 360px;
+}
+
+.compact-table-wrap th,
+.compact-table-wrap td {
+  padding: 8px 7px;
+}
+
+.matrix-list {
+  display: grid;
+  gap: 8px;
+}
+
+.matrix-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #dfe7ec;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+}
+
+.matrix-cell span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-cell strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #12343a;
+  background: #dfeaec;
+}
+
 .prediction-panel,
 .export-panel {
   margin-top: 16px;
@@ -935,12 +1072,14 @@ input[type="color"] {
   .prep-grid,
   .training-grid,
   .training-number-grid,
-	  .prediction-controls,
-	  .prediction-summary,
-	  .prediction-layout,
-	  .export-grid {
-	    grid-template-columns: 1fr;
-	  }
+  .prediction-controls,
+  .prediction-summary,
+  .prediction-layout,
+  .export-grid,
+  .curve-grid,
+  .analysis-grid {
+    grid-template-columns: 1fr;
+  }
 
   .workbench-grid,
   .annotation-layout {

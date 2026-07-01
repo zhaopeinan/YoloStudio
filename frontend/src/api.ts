@@ -169,6 +169,53 @@ export type TrainingRunLogsResponse = {
   text: string;
 };
 
+export type MetricPoint = {
+  epoch: number | null;
+  step: number | null;
+  value: number;
+};
+
+export type MetricSeries = {
+  name: string;
+  points: MetricPoint[];
+  latest: number | null;
+};
+
+export type ClassOutcome = {
+  class_id: number;
+  class_name: string;
+  matched: number;
+  false_positive: number;
+  false_negative: number;
+};
+
+export type ConfusionCell = {
+  actual_class_id: number;
+  actual_class_name: string;
+  predicted_class_id: number;
+  predicted_class_name: string;
+  count: number;
+};
+
+export type ThresholdPoint = {
+  job_id: number;
+  confidence_threshold: number;
+  matched: number;
+  false_positive: number;
+  false_negative: number;
+  precision: number;
+  recall: number;
+};
+
+export type RunExperimentSummary = {
+  run_id: number;
+  metric_series: MetricSeries[];
+  class_outcomes: ClassOutcome[];
+  confusion_matrix: ConfusionCell[];
+  threshold_scan: ThresholdPoint[];
+  latest_prediction_job_id: number | null;
+};
+
 export type TrainingRunCreate = {
   version_id: number;
   model: string;
@@ -385,6 +432,10 @@ export function createTrainingRun(body: TrainingRunCreate): Promise<TrainingRun>
 
 export function getTrainingRunLogs(runId: number): Promise<TrainingRunLogsResponse> {
   return requestJson<TrainingRunLogsResponse>(`/api/training/runs/${runId}/logs`);
+}
+
+export function getTrainingRunSummary(runId: number): Promise<RunExperimentSummary> {
+  return requestJson<RunExperimentSummary>(`/api/training/runs/${runId}/summary`);
 }
 
 export function createPredictionJob(

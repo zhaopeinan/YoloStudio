@@ -84,6 +84,57 @@ const apiMock = vi.hoisted(() => {
     job_id: jobId,
     text: `prediction log for job ${jobId}\n`,
   }));
+  const getTrainingRunSummary = vi.fn(async (runId: number) => ({
+    run_id: runId,
+    metric_series: [
+      {
+        name: "metrics/mAP50(B)",
+        latest: 0.42,
+        points: [
+          { epoch: 1, step: null, value: 0.21 },
+          { epoch: 2, step: null, value: 0.42 },
+        ],
+      },
+      {
+        name: "train/box_loss",
+        latest: 1.12,
+        points: [
+          { epoch: 1, step: null, value: 1.68 },
+          { epoch: 2, step: null, value: 1.12 },
+        ],
+      },
+    ],
+    class_outcomes: [
+      {
+        class_id: 1,
+        class_name: "target",
+        matched: 1,
+        false_positive: 1,
+        false_negative: 1,
+      },
+    ],
+    confusion_matrix: [
+      {
+        actual_class_id: 1,
+        actual_class_name: "target",
+        predicted_class_id: 1,
+        predicted_class_name: "target",
+        count: 1,
+      },
+    ],
+    threshold_scan: [
+      {
+        job_id: 1,
+        confidence_threshold: 0.25,
+        matched: 2,
+        false_positive: 1,
+        false_negative: 1,
+        precision: 2 / 3,
+        recall: 2 / 3,
+      },
+    ],
+    latest_prediction_job_id: 1,
+  }));
   const getExportCapabilities = vi.fn(async () => ({
     pt_available: true,
     onnx_available: false,
@@ -141,6 +192,7 @@ const apiMock = vi.hoisted(() => {
     listPredictionJobs,
     getTrainingRunLogs,
     getPredictionJobLogs,
+    getTrainingRunSummary,
     getExportCapabilities,
     listRunExports,
     createRunExport,
@@ -291,6 +343,7 @@ vi.mock("./api", () => ({
     updated_at: "2026-06-30T00:02:00",
   }),
   getTrainingRunLogs: apiMock.getTrainingRunLogs,
+  getTrainingRunSummary: apiMock.getTrainingRunSummary,
   listPredictionJobs: apiMock.listPredictionJobs,
   createPredictionJob: async () => ({
     id: 2,
@@ -428,6 +481,7 @@ describe("App", () => {
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
     apiMock.getPredictionJobLogs.mockClear();
+    apiMock.getTrainingRunSummary.mockClear();
     apiMock.getExportCapabilities.mockClear();
     apiMock.listRunExports.mockClear();
     apiMock.createRunExport.mockClear();
@@ -466,8 +520,14 @@ describe("App", () => {
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
+    expect(await screen.findByText("Experiment Dashboard")).toBeInTheDocument();
+    expect(await screen.findByText("mAP50")).toBeInTheDocument();
+    expect(await screen.findByText("box_loss")).toBeInTheDocument();
+    expect(await screen.findByText("Class Outcomes")).toBeInTheDocument();
+    expect(await screen.findByText("Threshold Scan")).toBeInTheDocument();
+    expect(await screen.findAllByText("67%")).toHaveLength(2);
     expect(await screen.findByText("false_positive")).toBeInTheDocument();
-    expect(await screen.findByText("Matched")).toBeInTheDocument();
+    expect((await screen.findAllByText("Matched")).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText("Model Export")).toBeInTheDocument();
     expect(await screen.findByText(".pt Weights")).toBeInTheDocument();
     expect(await screen.findByText("Ultralytics is not installed")).toBeInTheDocument();

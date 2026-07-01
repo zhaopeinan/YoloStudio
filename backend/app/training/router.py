@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.core.settings import Settings, get_settings
 from app.db.models import DatasetVersion, Project, TrainingRun
 from app.db.session import get_db
+from app.experiments.schemas import RunExperimentSummary
+from app.experiments.summary import build_run_experiment_summary
 from app.training.runner import (
     create_queued_run,
     execute_training_run,
@@ -82,3 +84,14 @@ def get_training_run_logs(run_id: int, db: Session = Depends(get_db)) -> Trainin
     if run is None:
         raise HTTPException(status_code=404, detail="Training run was not found")
     return TrainingRunLogs(run_id=run.id, text=read_run_logs(run))
+
+
+@router.get("/training/runs/{run_id}/summary", response_model=RunExperimentSummary)
+def get_training_run_summary(
+    run_id: int,
+    db: Session = Depends(get_db),
+) -> RunExperimentSummary:
+    run = db.get(TrainingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+    return build_run_experiment_summary(db, run)

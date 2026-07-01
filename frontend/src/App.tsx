@@ -30,9 +30,13 @@ import type {
   HealthResponse,
   ProjectClass,
   AnnotationWrite,
+  ClassOutcome,
+  ConfusionCell,
+  MetricSeries,
   Prediction,
   PredictionImageReview,
   PredictionJob,
+  RunExperimentSummary,
   TrainingRun,
 } from "./api";
 import {
@@ -48,6 +52,7 @@ import {
   getPredictionImageReview,
   getQuality,
   getTrainingRunLogs,
+  getTrainingRunSummary,
   importDataset,
   listClasses,
   listDatasetVersions,
@@ -108,6 +113,8 @@ export default function App() {
   const [isCreatingVersion, setIsCreatingVersion] = useState(false);
   const [runs, setRuns] = useState<TrainingRun[]>([]);
   const [runLogs, setRunLogs] = useState<Record<number, string>>({});
+  const [runSummary, setRunSummary] = useState<RunExperimentSummary | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [trainingModel, setTrainingModel] = useState("yolov8n.pt");
@@ -226,10 +233,12 @@ export default function App() {
     if (!latestRunId) {
       setExportCapabilities(null);
       setExports([]);
+      setRunSummary(null);
       return;
     }
 
     void refreshExports(latestRunId);
+    void refreshRunSummary(latestRunId);
   }, [latestRunId]);
 
   async function handleScan(event: FormEvent<HTMLFormElement>) {
@@ -274,6 +283,7 @@ export default function App() {
       setVersions(versionResponse.items);
       setRuns(runResponse.items);
       if (runResponse.items[0]) {
+        await refreshRunSummary(runResponse.items[0].id);
         await refreshPredictionJobs(runResponse.items[0].id);
       }
     } catch (error) {
@@ -318,6 +328,7 @@ export default function App() {
       const runResponse = await listTrainingRuns(projectId);
       setRuns(runResponse.items);
       if (runResponse.items[0]) {
+        await refreshRunSummary(runResponse.items[0].id);
         await refreshPredictionJobs(runResponse.items[0].id);
       }
     } catch (error) {
@@ -344,8 +355,10 @@ export default function App() {
         ) {
           await loadPredictionLogs(jobsResponse.items[0].id);
         }
+        await refreshRunSummary(runId);
       } else {
         setPredictions([]);
+        await refreshRunSummary(runId);
       }
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "Prediction refresh failed");
@@ -369,6 +382,20 @@ export default function App() {
       setExportError(null);
     } catch (error) {
       setExportError(error instanceof Error ? error.message : "Export refresh failed");
+    }
+  }
+
+  async function refreshRunSummary(runId = runs[0]?.id) {
+    if (!runId) {
+      setRunSummary(null);
+      return;
+    }
+
+    try {
+      setRunSummary(await getTrainingRunSummary(runId));
+      setSummaryError(null);
+    } catch (error) {
+      setSummaryError(error instanceof Error ? error.message : "Run summary failed to load");
     }
   }
 
@@ -568,6 +595,7 @@ export default function App() {
       });
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
       await refreshTrainingRuns(importedDataset.project_id);
+      await refreshRunSummary(run.id);
       await loadRunLogs(run.id);
     } catch (error) {
       setTrainingError(error instanceof Error ? error.message : "Training run failed to start");
@@ -602,6 +630,7 @@ export default function App() {
       setPredictionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
       const predictionsResponse = await listPredictions(job.id);
       setPredictions(predictionsResponse.items);
+      await refreshRunSummary(run.id);
       await loadPredictionLogs(job.id);
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "Prediction job failed");
@@ -1053,6 +1082,9 @@ export default function App() {
               ))
             )}
           </div>
+
+          {summaryError ? <div className="error-banner">{summaryError}</div> : null}
+          <ExperimentDashboard summary={runSummary} />
         </section>
       </section>
 
@@ -1765,6 +1797,185 @@ function ExportOption(props: {
       </button>
     </div>
   );
+}
+
+function ExperimentDashboard(props: { summary: RunExperimentSummary | null }) {
+  const { summary } = props;
+  const hasData =
+    summary &&
+    (summary.metric_series.length > 0 ||
+      summary.class_outcomes.length > 0 ||
+      summary.confusion_matrix.length > 0 ||
+      summary.threshold_scan.length > 0);
+
+  return (
+    <div className="experiment-dashboard" aria-label="Experiment dashboard">
+      <div className="dashboard-heading">
+        <div>
+          <strong>Experiment Dashboard</strong>
+          <span>
+            {summary?.latest_prediction_job_id
+              ? `Latest prediction #${summary.latest_prediction_job_id}`
+              : "Waiting for run evidence"}
+          </span>
+        </div>
+      </div>
+
+      {!hasData ? (
+        <p className="empty-state">Metrics, class outcomes, and threshold scans will appear here.</p>
+      ) : (
+        <>
+          <div className="curve-grid">
+            {summary.metric_series.slice(0, 4).map((series) => (
+              <MetricCurve key={series.name} series={series} />
+            ))}
+          </div>
+
+          <div className="analysis-grid">
+            <ClassOutcomeTable rows={summary.class_outcomes} />
+            <ConfusionMatrix cells={summary.confusion_matrix} />
+          </div>
+
+          <ThresholdScanTable rows={summary.threshold_scan} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function MetricCurve(props: { series: MetricSeries }) {
+  const { series } = props;
+  const values = series.points.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = series.points.map((point, index) => {
+    const x = series.points.length <= 1 ? 50 : (index / (series.points.length - 1)) * 100;
+    const y = 88 - ((point.value - min) / range) * 72;
+    return `${x},${y}`;
+  });
+
+  return (
+    <div className="curve-card">
+      <div className="curve-title">
+        <strong title={series.name}>{shortMetricName(series.name)}</strong>
+        <span>{series.latest === null ? "n/a" : series.latest.toFixed(3)}</span>
+      </div>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="88" x2="100" y2="88" />
+        {points.length > 1 ? <polyline points={points.join(" ")} /> : null}
+        {points.map((point, index) => {
+          const [x, y] = point.split(",");
+          return <circle key={`${point}-${index}`} cx={x} cy={y} r="2.3" />;
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function ClassOutcomeTable(props: { rows: ClassOutcome[] }) {
+  return (
+    <div className="analysis-panel">
+      <strong>Class Outcomes</strong>
+      {props.rows.length === 0 ? (
+        <p className="empty-state">Run prediction analysis to populate class outcomes.</p>
+      ) : (
+        <div className="compact-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Class</th>
+                <th>Match</th>
+                <th>False +</th>
+                <th>False -</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.rows.map((row) => (
+                <tr key={row.class_id}>
+                  <td>{row.class_name}</td>
+                  <td>{row.matched}</td>
+                  <td>{row.false_positive}</td>
+                  <td>{row.false_negative}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfusionMatrix(props: { cells: ConfusionCell[] }) {
+  return (
+    <div className="analysis-panel">
+      <strong>Confusion Matrix</strong>
+      {props.cells.length === 0 ? (
+        <p className="empty-state">Matched predictions will populate the matrix.</p>
+      ) : (
+        <div className="matrix-list">
+          {props.cells.map((cell) => (
+            <div
+              className="matrix-cell"
+              key={`${cell.actual_class_id}-${cell.predicted_class_id}`}
+            >
+              <span>
+                {`${cell.actual_class_name} -> ${cell.predicted_class_name}`}
+              </span>
+              <strong>{cell.count}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThresholdScanTable(props: { rows: RunExperimentSummary["threshold_scan"] }) {
+  return (
+    <div className="analysis-panel threshold-panel">
+      <strong>Threshold Scan</strong>
+      {props.rows.length === 0 ? (
+        <p className="empty-state">Run prediction jobs at different confidence thresholds.</p>
+      ) : (
+        <div className="compact-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Conf</th>
+                <th>Precision</th>
+                <th>Recall</th>
+                <th>Matched</th>
+                <th>False +</th>
+                <th>False -</th>
+              </tr>
+            </thead>
+            <tbody>
+              {props.rows.map((row) => (
+                <tr key={row.job_id}>
+                  <td>{row.confidence_threshold.toFixed(2)}</td>
+                  <td>{formatPercent(row.precision)}</td>
+                  <td>{formatPercent(row.recall)}</td>
+                  <td>{row.matched}</td>
+                  <td>{row.false_positive}</td>
+                  <td>{row.false_negative}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function shortMetricName(name: string) {
+  return name.replace("metrics/", "").replace("train/", "").replace("(B)", "");
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
 }
 
 function Metric(props: { label: string; value: string }) {
