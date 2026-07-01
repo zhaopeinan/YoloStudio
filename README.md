@@ -152,10 +152,12 @@ The training config persists both a strategy name and structured augmentation va
 
 - `mosaic`, `mixup`, and `copy_paste` for small/dense targets
 - `hsv_h`, `hsv_s`, `hsv_v`, `translate`, `scale`, `fliplr`, and `erasing`
-- `gridmask` as a local strategy flag recorded in `config.json`
+- `gridmask` to generate a run-local masked training dataset for occlusion robustness
 
-Ultralytics-supported augmentation fields are passed into `model.train()`. `gridmask` is tracked in
-the run config for strategy review and future trainer adapters.
+Ultralytics-supported augmentation fields are passed into `model.train()`. When `gridmask` is
+enabled, the backend derives `runs/<run_id>/gridmask_dataset/`, applies deterministic masks to the
+copied images, preserves YOLO label files, rewrites that dataset's `data.yaml`, and trains from the
+derived path. The frozen dataset version stays unchanged.
 
 If Ultralytics is not installed, the run is still persisted and moves to `failed` with a clear log
 message. This lets the UI and run history be tested without downloading model weights.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from app.db.session import SessionLocal
 
 ACTIVE_STATUSES = {"queued", "preparing", "running"}
 DEFAULT_THRESHOLD_SCAN_VALUES = (0.15, 0.25, 0.35, 0.5, 0.65)
+GRIDMASK_IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 
 
 def _now() -> datetime:
@@ -63,6 +65,74 @@ def ultralytics_augmentation_kwargs(config: dict) -> dict:
         "erasing",
     }
     return {key: value for key, value in augmentation.items() if key in supported_keys}
+
+
+def _rewrite_data_yaml(source: Path, destination: Path, dataset_root: Path) -> None:
+    lines = source.read_text().splitlines()
+    rewritten = [f"path: {dataset_root}"]
+    rewritten.extend(line for line in lines if not line.startswith("path:"))
+    destination.write_text("\n".join(rewritten) + "\n")
+
+
+def _gridmask_image(source: Path, destination: Path) -> None:
+    try:
+        from PIL import Image, ImageDraw
+    except Exception as exc:
+        raise RuntimeError("Pillow is required to apply GridMask augmentation") from exc
+
+    with Image.open(source) as image:
+        output = image.convert("RGB") if image.mode not in {"RGB", "RGBA"} else image.copy()
+        width, height = output.size
+        spacing = max(16, min(width, height) // 6)
+        cutout = max(4, spacing // 3)
+        draw = ImageDraw.Draw(output)
+        for x in range(0, width, spacing):
+            draw.rectangle((x, 0, min(width, x + cutout), height), fill=0)
+        for y in range(0, height, spacing):
+            draw.rectangle((0, y, width, min(height, y + cutout)), fill=0)
+        output.save(destination)
+
+
+def build_gridmask_dataset(version_root: Path, run_artifact_root: Path) -> Path:
+    if not version_root.exists():
+        raise RuntimeError("Dataset version artifact path was not found")
+
+    target_root = run_artifact_root / "gridmask_dataset"
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    target_root.mkdir(parents=True, exist_ok=True)
+
+    for child in version_root.iterdir():
+        if child.name in {"images", "data.yaml"}:
+            continue
+        destination = target_root / child.name
+        if child.is_dir():
+            shutil.copytree(child, destination)
+        else:
+            shutil.copy2(child, destination)
+
+    source_images = version_root / "images"
+    target_images = target_root / "images"
+    if not source_images.exists():
+        raise RuntimeError("Dataset version images directory was not found")
+
+    for source in source_images.rglob("*"):
+        relative = source.relative_to(source_images)
+        destination = target_images / relative
+        if source.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source.suffix.lower() in GRIDMASK_IMAGE_SUFFIXES:
+            _gridmask_image(source, destination)
+        else:
+            shutil.copy2(source, destination)
+
+    data_yaml = version_root / "data.yaml"
+    if not data_yaml.exists():
+        raise RuntimeError("Dataset version data.yaml was not found")
+    _rewrite_data_yaml(data_yaml, target_root / "data.yaml", target_root)
+    return target_root / "data.yaml"
 
 
 def resolve_device(requested_device: str | None) -> str:
@@ -229,6 +299,7 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
         db.refresh(run)
         version = db.get(DatasetVersion, run.version_id)
         data_yaml = Path(version.artifact_path) / "data.yaml" if version else None
+        version_root = Path(version.artifact_path) if version else None
 
     append_run_log(run_id, "training preparing", bind=bind)
     try:
@@ -244,9 +315,11 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
     if data_yaml is None or not data_yaml.exists():
         fail_training_run(run_id, "Dataset version data.yaml was not found", bind=bind)
         return
+    if version_root is None:
+        fail_training_run(run_id, "Dataset version artifact path was not found", bind=bind)
+        return
 
     mark_training_run_running(run_id, bind=bind)
-    append_run_log(run_id, "ultralytics training started", bind=bind)
 
     session_factory = _session_factory(bind)
     with session_factory() as db:
@@ -256,9 +329,18 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
         device = run.device
 
     try:
+        training_data_yaml = data_yaml
+        if (config.get("augmentation") or {}).get("gridmask"):
+            training_data_yaml = build_gridmask_dataset(version_root, artifact_root)
+            append_run_log(
+                run_id,
+                f"gridmask dataset prepared: {training_data_yaml.parent}",
+                bind=bind,
+            )
         model = YOLO(config["model"])
+        append_run_log(run_id, "ultralytics training started", bind=bind)
         results = model.train(
-            data=str(data_yaml),
+            data=str(training_data_yaml),
             epochs=config["epochs"],
             imgsz=config["image_size"],
             batch=config["batch_size"],

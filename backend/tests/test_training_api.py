@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 from test_dataset_import_api import create_import_zip, isolated_client
@@ -170,6 +172,88 @@ def test_ultralytics_augmentation_kwargs_excludes_local_strategy_flags():
         "fliplr": 0.4,
         "erasing": 0.2,
     }
+
+
+def test_gridmask_dataset_builder_derives_masked_training_artifact(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+
+        from app.training.runner import build_gridmask_dataset
+
+        run_root = tmp_path / "workspace" / "projects" / str(version["project_id"]) / "runs" / "99"
+        derived_data_yaml = build_gridmask_dataset(Path(version["artifact_path"]), run_root)
+        derived_root = derived_data_yaml.parent
+
+        assert derived_root == run_root / "gridmask_dataset"
+        assert derived_data_yaml.exists()
+        assert f"path: {derived_root}" in derived_data_yaml.read_text()
+
+        source_image = next((Path(version["artifact_path"]) / "images").rglob("*.png"))
+        derived_image = derived_root / "images" / source_image.relative_to(
+            Path(version["artifact_path"]) / "images"
+        )
+        assert derived_image.exists()
+        assert derived_image.read_bytes() != source_image.read_bytes()
+
+        source_label = next((Path(version["artifact_path"]) / "labels").rglob("*.txt"))
+        derived_label = derived_root / "labels" / source_label.relative_to(
+            Path(version["artifact_path"]) / "labels"
+        )
+        assert derived_label.read_text() == source_label.read_text()
+
+        assert (derived_root / "manifest.json").exists()
+
+
+def test_execute_training_run_uses_gridmask_dataset_when_enabled(tmp_path: Path, monkeypatch):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+    train_calls: list[dict] = []
+
+    class FakeResults:
+        results_dict = {"metrics/mAP50(B)": 0.55}
+
+    class FakeYOLO:
+        def __init__(self, model: str):
+            self.model = model
+
+        def train(self, **kwargs):
+            train_calls.append(kwargs)
+            return FakeResults()
+
+    monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+        response = client.post(
+            "/api/training/runs",
+            json={
+                "version_id": version["id"],
+                "model": "yolov8n.pt",
+                "epochs": 1,
+                "image_size": 320,
+                "batch_size": 1,
+                "augmentation": {"gridmask": True},
+            },
+        )
+
+        assert response.status_code == 200
+        run = client.get(f"/api/training/runs/{response.json()['id']}").json()
+
+        assert run["status"] == "completed"
+        assert train_calls
+        train_data = Path(train_calls[0]["data"])
+        assert train_data.name == "data.yaml"
+        assert train_data.parent == Path(run["artifact_path"]) / "gridmask_dataset"
+        assert train_data.exists()
+        assert (train_data.parent / "images").exists()
+        assert train_calls[0]["mosaic"] == 1.0
+
+        logs = client.get(f"/api/training/runs/{run['id']}/logs").json()["text"]
+        assert "gridmask dataset prepared" in logs
+        assert "ultralytics training started" in logs
 
 
 def test_post_training_threshold_scan_creates_default_prediction_jobs(
