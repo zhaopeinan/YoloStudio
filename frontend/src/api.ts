@@ -297,6 +297,19 @@ export type TrainingRunLogsResponse = {
   text: string;
 };
 
+export type TrainingRunArtifact = {
+  relative_path: string;
+  category: string;
+  size_bytes: number;
+};
+
+export type TrainingRunArtifactSummary = {
+  run_id: number;
+  artifact_root: string;
+  total_count: number;
+  items: TrainingRunArtifact[];
+};
+
 export type MetricPoint = {
   epoch: number | null;
   step: number | null;
@@ -694,6 +707,10 @@ export function cancelTrainingRun(runId: number): Promise<TrainingRun> {
 
 export function getTrainingRunLogs(runId: number): Promise<TrainingRunLogsResponse> {
   return requestJson<TrainingRunLogsResponse>(`/api/training/runs/${runId}/logs`);
+}
+
+export function getTrainingRunArtifacts(runId: number): Promise<TrainingRunArtifactSummary> {
+  return requestJson<TrainingRunArtifactSummary>(`/api/training/runs/${runId}/artifacts`);
 }
 
 export function getTrainingRunSummary(runId: number): Promise<RunExperimentSummary> {

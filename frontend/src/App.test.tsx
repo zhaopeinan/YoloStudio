@@ -281,6 +281,21 @@ const apiMock = vi.hoisted(() => {
     run_id: runId,
     text: `training log for run ${runId}\n`,
   }));
+  const getTrainingRunArtifacts = vi.fn(async (runId: number) => ({
+    run_id: runId,
+    artifact_root: `/tmp/workspace/projects/1/runs/${runId}`,
+    total_count: 4,
+    items: [
+      { relative_path: "config.json", category: "config", size_bytes: 320 },
+      { relative_path: "logs.txt", category: "log", size_bytes: 128 },
+      { relative_path: "metrics.jsonl", category: "metrics", size_bytes: 96 },
+      {
+        relative_path: "ultralytics/weights/best.pt",
+        category: "weights",
+        size_bytes: 4096,
+      },
+    ],
+  }));
   const getPredictionJobLogs = vi.fn(async (jobId: number) => ({
     job_id: jobId,
     text: `prediction log for job ${jobId}\n`,
@@ -711,6 +726,7 @@ const apiMock = vi.hoisted(() => {
     getAnnotations,
     replaceAnnotations,
     getTrainingRunLogs,
+    getTrainingRunArtifacts,
     getPredictionJobLogs,
     createPredictionJob,
     createPredictionThresholdScan,
@@ -810,6 +826,7 @@ vi.mock("./api", () => ({
   createTrainingRun: apiMock.createTrainingRun,
   cancelTrainingRun: apiMock.cancelTrainingRun,
   getTrainingRunLogs: apiMock.getTrainingRunLogs,
+  getTrainingRunArtifacts: apiMock.getTrainingRunArtifacts,
   getTrainingRunSummary: apiMock.getTrainingRunSummary,
   getProjectTrainingSummary: apiMock.getProjectTrainingSummary,
   listPredictionJobs: apiMock.listPredictionJobs,
@@ -941,6 +958,7 @@ describe("App", () => {
     apiMock.listTrainingRuns.mockClear();
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
+    apiMock.getTrainingRunArtifacts.mockClear();
     apiMock.getPredictionJobLogs.mockClear();
     apiMock.createPredictionJob.mockClear();
     apiMock.createPredictionThresholdScan.mockClear();
@@ -1101,6 +1119,11 @@ describe("App", () => {
     expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
+    expect(apiMock.getTrainingRunArtifacts).toHaveBeenCalledWith(1);
+    const runRow = screen.getByText("Run #1").closest(".run-row") as HTMLElement;
+    expect(within(runRow).getByText("Run Artifacts")).toBeInTheDocument();
+    expect(within(runRow).getByText("ultralytics/weights/best.pt")).toBeInTheDocument();
+    expect(within(runRow).getByText("4.0 KB")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("MixUp"), { target: { value: "0.2" } });
     fireEvent.change(screen.getByLabelText("Copy-Paste"), { target: { value: "0.35" } });
     await user.click(screen.getByRole("checkbox", { name: "GridMask" }));

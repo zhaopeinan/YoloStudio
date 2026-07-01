@@ -139,6 +139,61 @@ def test_start_training_run_persists_status_artifacts_and_logs(tmp_path: Path, m
         assert "fake trainer started" in logs_response.json()["text"]
 
 
+def test_training_run_artifacts_lists_generated_files(tmp_path: Path, monkeypatch):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    def fake_execute_training_run(run_id: int, bind, _settings) -> None:
+        from app.training.runner import append_run_log, complete_training_run, record_run_metric
+
+        append_run_log(run_id, "fake trainer started", bind=bind)
+        record_run_metric(run_id, epoch=1, name="metrics/mAP50(B)", value=0.42, bind=bind)
+        complete_training_run(run_id, bind=bind)
+
+    monkeypatch.setattr("app.training.router.execute_training_run", fake_execute_training_run)
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+        create_response = client.post(
+            "/api/training/runs",
+            json={
+                "version_id": version["id"],
+                "model": "yolov8n.pt",
+                "epochs": 1,
+                "image_size": 320,
+                "batch_size": 1,
+                "device": "cpu",
+            },
+        )
+        assert create_response.status_code == 200
+        run = client.get(f"/api/training/runs/{create_response.json()['id']}").json()
+
+        artifact_root = Path(run["artifact_path"])
+        weights_dir = artifact_root / "ultralytics" / "weights"
+        weights_dir.mkdir(parents=True)
+        (weights_dir / "best.pt").write_bytes(b"fake weights")
+        (artifact_root / "ultralytics" / "results.png").write_bytes(b"png")
+        exports_dir = artifact_root / "exports"
+        exports_dir.mkdir()
+        (exports_dir / "run-1.pt").write_bytes(b"export")
+
+        response = client.get(f"/api/training/runs/{run['id']}/artifacts")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["run_id"] == run["id"]
+        assert payload["artifact_root"] == run["artifact_path"]
+        assert payload["total_count"] >= 6
+        rows = {item["relative_path"]: item for item in payload["items"]}
+        assert rows["config.json"]["category"] == "config"
+        assert rows["logs.txt"]["category"] == "log"
+        assert rows["metrics.jsonl"]["category"] == "metrics"
+        assert rows["ultralytics/weights/best.pt"]["category"] == "weights"
+        assert rows["ultralytics/results.png"]["category"] == "plot"
+        assert rows["exports/run-1.pt"]["category"] == "export"
+        assert rows["ultralytics/weights/best.pt"]["size_bytes"] == len(b"fake weights")
+
+
 def test_ultralytics_augmentation_kwargs_excludes_local_strategy_flags():
     from app.training.runner import ultralytics_augmentation_kwargs
 

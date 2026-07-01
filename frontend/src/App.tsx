@@ -54,6 +54,7 @@ import type {
   QualityTagApplySummary,
   RunExperimentSummary,
   TrainingAugmentationConfig,
+  TrainingRunArtifactSummary,
   TrainingRun,
 } from "./api";
 import {
@@ -73,6 +74,7 @@ import {
   getPredictionImageReview,
   getProjectTrainingSummary,
   getQuality,
+  getTrainingRunArtifacts,
   getTrainingRunLogs,
   getTrainingRunSummary,
   importDataset,
@@ -243,6 +245,7 @@ export default function App() {
   const [isCreatingVersion, setIsCreatingVersion] = useState(false);
   const [runs, setRuns] = useState<TrainingRun[]>([]);
   const [runLogs, setRunLogs] = useState<Record<number, string>>({});
+  const [runArtifacts, setRunArtifacts] = useState<Record<number, TrainingRunArtifactSummary>>({});
   const [runSummary, setRunSummary] = useState<RunExperimentSummary | null>(null);
   const [projectExperimentSummary, setProjectExperimentSummary] =
     useState<ProjectExperimentSummary | null>(null);
@@ -513,6 +516,7 @@ export default function App() {
     setDimensionRefresh(null);
     setVersions(versionResponse.items);
     setRuns(runResponse.items);
+    await refreshRunArtifacts(runResponse.items.map((run) => run.id));
     setPredictionJobs([]);
     setPredictions([]);
     setPredictionLogs({});
@@ -574,6 +578,7 @@ export default function App() {
       if (importedDataset) {
         const runResponse = await listTrainingRuns(importedDataset.project_id);
         setRuns(runResponse.items);
+        await refreshRunArtifacts(runResponse.items.map((run) => run.id));
       }
     } catch (error) {
       setQualityError(error instanceof Error ? error.message : "Quality refresh failed");
@@ -796,6 +801,7 @@ export default function App() {
     try {
       const runResponse = await listTrainingRuns(projectId);
       setRuns(runResponse.items);
+      await refreshRunArtifacts(runResponse.items.map((run) => run.id));
       if (runResponse.items[0]) {
         await refreshRunSummary(runResponse.items[0].id);
         await refreshProjectTrainingSummary(projectId);
@@ -805,6 +811,22 @@ export default function App() {
       }
     } catch (error) {
       setTrainingError(error instanceof Error ? error.message : "Run refresh failed");
+    }
+  }
+
+  async function refreshRunArtifacts(runIds: number[]) {
+    if (runIds.length === 0) {
+      setRunArtifacts({});
+      return;
+    }
+
+    try {
+      const summaries = await Promise.all(runIds.map((runId) => getTrainingRunArtifacts(runId)));
+      setRunArtifacts(
+        Object.fromEntries(summaries.map((summary) => [summary.run_id, summary])),
+      );
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "Run artifacts failed to load");
     }
   }
 
@@ -2135,6 +2157,7 @@ export default function App() {
                     </div>
                   ) : null}
                   {run.error_message ? <p className="run-error">{run.error_message}</p> : null}
+                  <RunArtifactList summary={runArtifacts[run.id]} />
                   <button
                     type="button"
                     className="secondary-button"
@@ -3728,6 +3751,42 @@ function ExportOption(props: {
   );
 }
 
+function RunArtifactList(props: { summary?: TrainingRunArtifactSummary }) {
+  const { summary } = props;
+  const visibleItems = summary?.items.slice(0, 8) ?? [];
+
+  return (
+    <div className="run-artifacts" aria-label="Run artifacts">
+      <div className="run-artifacts-heading">
+        <strong>Run Artifacts</strong>
+        <span>{summary ? `${summary.total_count} files` : "Loading"}</span>
+      </div>
+      {!summary ? (
+        <p className="empty-state">Artifacts pending.</p>
+      ) : visibleItems.length === 0 ? (
+        <p className="empty-state">No files have been written yet.</p>
+      ) : (
+        <>
+          <div className="artifact-list">
+            {visibleItems.map((item) => (
+              <div className="artifact-item" key={item.relative_path}>
+                <span className="artifact-category">{item.category}</span>
+                <span className="artifact-path" title={item.relative_path}>
+                  {item.relative_path}
+                </span>
+                <span className="artifact-size">{formatBytes(item.size_bytes)}</span>
+              </div>
+            ))}
+          </div>
+          {summary.total_count > visibleItems.length ? (
+            <span className="artifact-more">+{summary.total_count - visibleItems.length} more</span>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 function AugmentationNumber(props: {
   id: string;
   label: string;
@@ -4018,6 +4077,20 @@ function formatPercent(value: number) {
 function formatArtifactTail(path: string) {
   const parts = path.split("/").filter(Boolean);
   return parts.slice(-2).join("/") || path;
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  const units = ["KB", "MB", "GB"];
+  let value = size / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function formatDimensionRefresh(summary: DatasetDimensionRefreshSummary) {

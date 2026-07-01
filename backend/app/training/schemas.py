@@ -56,3 +56,16 @@ class TrainingRunList(BaseModel):
 class TrainingRunLogs(BaseModel):
     run_id: int
     text: str
+
+
+class TrainingRunArtifact(BaseModel):
+    relative_path: str
+    category: str
+    size_bytes: int
+
+
+class TrainingRunArtifactSummary(BaseModel):
+    run_id: int
+    artifact_root: str
+    total_count: int
+    items: list[TrainingRunArtifact]

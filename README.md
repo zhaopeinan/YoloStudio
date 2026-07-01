@@ -134,7 +134,8 @@ After a dataset version exists:
 2. Choose a model preset such as `yolov8n.pt`, or enter a local `.pt` path.
 3. Set epochs, image size, batch size, device, augmentation strategy, TTA, and threshold scan flags.
 4. Click `Start Training Run`.
-5. Check `Run History` for status, artifact path, latest metrics, errors, and logs.
+5. Check `Run History` for status, artifact path, latest metrics, generated artifacts, errors,
+   and logs.
 6. While a run is `queued`, `preparing`, or `running`, the frontend shows `Auto refresh on` and
    refreshes run status plus logs automatically.
 7. Click `Load Config` on a historical run to restore its model, hyperparameters, augmentation,
@@ -150,6 +151,13 @@ workspace/projects/<project_id>/runs/<run_id>/
   config.json
   logs.txt
   metrics.jsonl
+```
+
+The Run History `Run Artifacts` panel and API endpoint list generated configs, logs, metrics,
+weights, plots, prediction outputs, GridMask derivatives, and exports:
+
+```bash
+curl http://127.0.0.1:8000/api/training/runs/1/artifacts
 ```
 
 Only one run can be active for a project at a time. Run status can be `queued`, `preparing`,

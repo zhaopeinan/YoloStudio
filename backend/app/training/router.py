@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,10 +18,92 @@ from app.training.runner import (
     latest_metrics_for_run,
     read_run_logs,
 )
-from app.training.schemas import TrainingRunCreate, TrainingRunList, TrainingRunLogs, TrainingRunRead
+from app.training.schemas import (
+    TrainingRunArtifact,
+    TrainingRunArtifactSummary,
+    TrainingRunCreate,
+    TrainingRunList,
+    TrainingRunLogs,
+    TrainingRunRead,
+)
 
 
 router = APIRouter(prefix="/api", tags=["training"])
+
+MAX_ARTIFACT_ITEMS = 200
+ARTIFACT_CATEGORY_ORDER = {
+    "config": 0,
+    "log": 1,
+    "metrics": 2,
+    "weights": 3,
+    "plot": 4,
+    "prediction": 5,
+    "export": 6,
+    "dataset": 7,
+    "artifact": 8,
+}
+
+
+def _artifact_category(relative_path: str) -> str:
+    path = relative_path.lower()
+    name = Path(path).name
+    suffix = Path(path).suffix
+
+    if name == "config.json" or path.endswith("/config.json"):
+        return "config"
+    if name == "logs.txt" or suffix == ".log":
+        return "log"
+    if name == "metrics.jsonl" or "metrics" in path:
+        return "metrics"
+    if path.startswith("ultralytics/weights/") or path.startswith("weights/"):
+        return "weights"
+    if path.startswith("exports/") or suffix in {".onnx", ".engine"}:
+        return "export"
+    if path.startswith("predictions/"):
+        return "prediction"
+    if path.startswith("gridmask_dataset/"):
+        return "dataset"
+    if path.startswith("ultralytics/") and suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        return "plot"
+    return "artifact"
+
+
+def _list_run_artifacts(run: TrainingRun) -> TrainingRunArtifactSummary:
+    artifact_root = Path(run.artifact_path)
+    resolved_root = artifact_root.resolve()
+    if not resolved_root.exists() or not resolved_root.is_dir():
+        return TrainingRunArtifactSummary(
+            run_id=run.id,
+            artifact_root=run.artifact_path,
+            total_count=0,
+            items=[],
+        )
+
+    items: list[TrainingRunArtifact] = []
+    for path in resolved_root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(resolved_root).as_posix()
+        items.append(
+            TrainingRunArtifact(
+                relative_path=relative_path,
+                category=_artifact_category(relative_path),
+                size_bytes=path.stat().st_size,
+            )
+        )
+
+    items.sort(
+        key=lambda item: (
+            ARTIFACT_CATEGORY_ORDER.get(item.category, ARTIFACT_CATEGORY_ORDER["artifact"]),
+            item.relative_path,
+        )
+    )
+    return TrainingRunArtifactSummary(
+        run_id=run.id,
+        artifact_root=run.artifact_path,
+        total_count=len(items),
+        items=items[:MAX_ARTIFACT_ITEMS],
+    )
 
 
 def _read_run(db: Session, run: TrainingRun) -> TrainingRunRead:
@@ -87,6 +171,17 @@ def get_training_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunR
     if run is None:
         raise HTTPException(status_code=404, detail="Training run was not found")
     return _read_run(db, run)
+
+
+@router.get("/training/runs/{run_id}/artifacts", response_model=TrainingRunArtifactSummary)
+def get_training_run_artifacts(
+    run_id: int,
+    db: Session = Depends(get_db),
+) -> TrainingRunArtifactSummary:
+    run = db.get(TrainingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+    return _list_run_artifacts(run)
 
 
 @router.post("/training/runs/{run_id}/cancel", response_model=TrainingRunRead)
