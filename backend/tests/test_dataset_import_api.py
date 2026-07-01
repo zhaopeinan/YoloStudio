@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.settings import Settings, get_settings
-from app.db.models import Base
+from app.db.models import Base, Image
 from app.db.session import create_engine_for_settings, get_db
 from app.main import app
 
@@ -274,6 +274,63 @@ def test_import_dataset_reads_jpeg_dimensions(tmp_path: Path):
         assert len(images) == 1
         assert images[0]["width"] == 32
         assert images[0]["height"] == 24
+
+
+def test_refresh_image_dimensions_repairs_legacy_missing_sizes(tmp_path: Path):
+    zip_path = tmp_path / "jpeg.zip"
+    create_jpeg_import_zip(zip_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "JPEG Refresh Project",
+                "dataset_name": "jpeg-refresh",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+
+        db = next(app.dependency_overrides[get_db]())
+        try:
+            image = db.query(Image).filter(Image.dataset_id == payload["dataset_id"]).one()
+            image.width = None
+            image.height = None
+            db.commit()
+        finally:
+            db.close()
+
+        before_response = client.get(f"/api/datasets/{payload['dataset_id']}/images")
+        assert before_response.status_code == 200
+        assert before_response.json()["items"][0]["width"] is None
+        assert before_response.json()["items"][0]["height"] is None
+
+        refresh_response = client.post(
+            f"/api/datasets/{payload['dataset_id']}/refresh-image-dimensions"
+        )
+
+        assert refresh_response.status_code == 200
+        assert refresh_response.json() == {
+            "dataset_id": payload["dataset_id"],
+            "scanned_count": 1,
+            "updated_count": 1,
+            "missing_count": 0,
+        }
+
+        after_response = client.get(f"/api/datasets/{payload['dataset_id']}/images")
+        assert after_response.status_code == 200
+        after_image = after_response.json()["items"][0]
+        assert after_image["width"] == 32
+        assert after_image["height"] == 24
+
+
+def test_refresh_image_dimensions_reports_missing_dataset(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        response = client.post("/api/datasets/999/refresh-image-dimensions")
+
+        assert response.status_code == 404
+        assert "Dataset was not found" in response.text
 
 
 def test_import_dataset_reports_unknown_yolo_class_references(tmp_path: Path):

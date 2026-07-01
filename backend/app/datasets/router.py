@@ -6,11 +6,12 @@ from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
-from app.datasets.importer import import_dataset
+from app.datasets.importer import import_dataset, read_image_dimensions
 from app.datasets.scanner import scan_dataset_source
 from app.datasets.schemas import (
     DatasetImageList,
     DatasetImageRead,
+    DatasetDimensionRefreshSummary,
     DatasetImportRequest,
     DatasetImportSummary,
     DatasetScanRequest,
@@ -159,6 +160,49 @@ def list_dataset_images(
         limit=limit,
         offset=offset,
         total=total,
+    )
+
+
+@router.post("/{dataset_id}/refresh-image-dimensions", response_model=DatasetDimensionRefreshSummary)
+def refresh_dataset_image_dimensions(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> DatasetDimensionRefreshSummary:
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset was not found")
+
+    workspace_root = settings.workspace_root.resolve()
+    images = db.scalars(
+        select(Image)
+        .where(Image.dataset_id == dataset_id, (Image.width.is_(None) | Image.height.is_(None)))
+        .order_by(Image.id)
+    ).all()
+    updated_count = 0
+    missing_count = 0
+
+    for image in images:
+        file_path = (settings.workspace_root / image.relative_path).resolve()
+        if not file_path.is_relative_to(workspace_root) or not file_path.exists():
+            missing_count += 1
+            continue
+
+        width, height = read_image_dimensions(file_path)
+        if width is None or height is None:
+            missing_count += 1
+            continue
+
+        image.width = width
+        image.height = height
+        updated_count += 1
+
+    db.commit()
+    return DatasetDimensionRefreshSummary(
+        dataset_id=dataset.id,
+        scanned_count=len(images),
+        updated_count=updated_count,
+        missing_count=missing_count,
     )
 
 

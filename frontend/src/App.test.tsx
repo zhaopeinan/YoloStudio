@@ -304,6 +304,12 @@ const apiMock = vi.hoisted(() => {
   });
   const getQuality = vi.fn(async () => defaultQuality());
   const listQualityIssues = vi.fn(async () => defaultQualityIssues());
+  const refreshImageDimensions = vi.fn(async () => ({
+    dataset_id: 1,
+    scanned_count: 2,
+    updated_count: 1,
+    missing_count: 0,
+  }));
   const getTrainingRunSummary = vi.fn(async (runId: number) => ({
     run_id: runId,
     metric_series: [
@@ -425,6 +431,7 @@ const apiMock = vi.hoisted(() => {
     listPredictions,
     getQuality,
     listQualityIssues,
+    refreshImageDimensions,
     defaultQuality,
     defaultQualityIssues,
     getTrainingRunSummary,
@@ -503,6 +510,7 @@ vi.mock("./api", () => ({
   replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: apiMock.getQuality,
   listQualityIssues: apiMock.listQualityIssues,
+  refreshImageDimensions: apiMock.refreshImageDimensions,
   listDatasetVersions: async () => ({
     items: [
       {
@@ -645,6 +653,13 @@ describe("App", () => {
     apiMock.getQuality.mockImplementation(async () => apiMock.defaultQuality());
     apiMock.listQualityIssues.mockReset();
     apiMock.listQualityIssues.mockImplementation(async () => apiMock.defaultQualityIssues());
+    apiMock.refreshImageDimensions.mockReset();
+    apiMock.refreshImageDimensions.mockImplementation(async () => ({
+      dataset_id: 1,
+      scanned_count: 2,
+      updated_count: 1,
+      missing_count: 0,
+    }));
     apiMock.getTrainingRunSummary.mockClear();
     apiMock.getExportCapabilities.mockClear();
     apiMock.listRunExports.mockClear();
@@ -1003,6 +1018,29 @@ describe("App", () => {
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+  });
+
+  it("refreshes missing image dimensions from the quality panel", async () => {
+    const user = userEvent.setup();
+    apiMock.getQuality
+      .mockImplementationOnce(async () => ({
+        ...apiMock.defaultQuality(),
+        missing_image_dimensions_count: 1,
+        issues: ["1 image has unreadable image dimensions."],
+      }))
+      .mockImplementation(async () => apiMock.defaultQuality());
+
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    expect(await screen.findByText("Missing dimensions")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Refresh Dimensions" }));
+
+    expect(apiMock.refreshImageDimensions).toHaveBeenCalledWith(1);
+    expect(await screen.findByText("2 scanned, 1 updated, 0 still missing")).toBeInTheDocument();
+    expect(apiMock.listImages).toHaveBeenCalledTimes(2);
+    expect(apiMock.getQuality).toHaveBeenCalledTimes(2);
   });
 
   it("cancels an active training run from run history", async () => {

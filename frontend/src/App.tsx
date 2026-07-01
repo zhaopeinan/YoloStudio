@@ -20,6 +20,7 @@ import type { FormEvent, PointerEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   Annotation,
+  DatasetDimensionRefreshSummary,
   DatasetImage,
   DatasetImportResponse,
   DatasetQualityIssue,
@@ -70,6 +71,7 @@ import {
   listRunExports,
   listTrainingRuns,
   replaceAnnotations,
+  refreshImageDimensions,
   scanDataset,
 } from "./api";
 
@@ -161,6 +163,9 @@ export default function App() {
   const [qualityIssues, setQualityIssues] = useState<DatasetQualityIssue[]>([]);
   const [qualityError, setQualityError] = useState<string | null>(null);
   const [isLoadingQuality, setIsLoadingQuality] = useState(false);
+  const [dimensionRefresh, setDimensionRefresh] =
+    useState<DatasetDimensionRefreshSummary | null>(null);
+  const [isRefreshingDimensions, setIsRefreshingDimensions] = useState(false);
   const [versions, setVersions] = useState<DatasetVersion[]>([]);
   const [versionName, setVersionName] = useState("");
   const [versionError, setVersionError] = useState<string | null>(null);
@@ -325,6 +330,7 @@ export default function App() {
     setQualityError(null);
     setVersionError(null);
     setQualityIssues([]);
+    setDimensionRefresh(null);
 
     try {
       const imported = await importDataset(datasetPath, projectName.trim(), datasetName.trim());
@@ -377,6 +383,7 @@ export default function App() {
     setActiveReview(null);
     setQuality(qualityResponse);
     setQualityIssues(qualityIssueResponse.items);
+    setDimensionRefresh(null);
     setVersions(versionResponse.items);
     setRuns(runResponse.items);
     setPredictionJobs([]);
@@ -461,6 +468,28 @@ export default function App() {
       });
     } catch (error) {
       setImageFilterError(error instanceof Error ? error.message : "Image filters failed");
+    }
+  }
+
+  async function handleRefreshImageDimensions() {
+    if (!importedDataset) {
+      return;
+    }
+
+    setIsRefreshingDimensions(true);
+    setQualityError(null);
+
+    try {
+      const response = await refreshImageDimensions(importedDataset.dataset_id);
+      setDimensionRefresh(response);
+      await Promise.all([
+        refreshImages(importedDataset.dataset_id),
+        refreshTrainingPrep(importedDataset.dataset_id),
+      ]);
+    } catch (error) {
+      setQualityError(error instanceof Error ? error.message : "Dimension refresh failed");
+    } finally {
+      setIsRefreshingDimensions(false);
     }
   }
 
@@ -1223,7 +1252,20 @@ export default function App() {
               <p className="eyebrow">Training Prep</p>
               <h2>Quality Review</h2>
             </div>
-            {quality?.ready_for_training ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+            <div className="panel-heading-actions">
+              {importedDataset ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={handleRefreshImageDimensions}
+                  disabled={isRefreshingDimensions}
+                >
+                  <ImageIcon size={16} />
+                  {isRefreshingDimensions ? "Refreshing" : "Refresh Dimensions"}
+                </button>
+              ) : null}
+              {quality?.ready_for_training ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+            </div>
           </div>
 
           {quality ? (
@@ -1264,6 +1306,10 @@ export default function App() {
               ) : (
                 <p className="empty-state">No blocking quality issues detected.</p>
               )}
+
+              {dimensionRefresh ? (
+                <p className="summary-line">{formatDimensionRefresh(dimensionRefresh)}</p>
+              ) : null}
 
               {qualityIssues.length > 0 ? (
                 <div className="quality-issue-list" aria-label="Quality issue samples">
@@ -3002,6 +3048,10 @@ function shortMetricName(name: string) {
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+function formatDimensionRefresh(summary: DatasetDimensionRefreshSummary) {
+  return `${summary.scanned_count} scanned, ${summary.updated_count} updated, ${summary.missing_count} still missing`;
 }
 
 function Metric(props: { label: string; value: string }) {

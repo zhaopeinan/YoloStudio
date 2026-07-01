@@ -90,6 +90,13 @@ export type DatasetImageListResponse = {
   total: number;
 };
 
+export type DatasetDimensionRefreshSummary = {
+  dataset_id: number;
+  scanned_count: number;
+  updated_count: number;
+  missing_count: number;
+};
+
 export type DatasetImageFilters = {
   platform?: string;
   label_status?: "all" | "annotated" | "unannotated";
@@ -478,6 +485,15 @@ export function listImages(
     }
   });
   return requestJson<DatasetImageListResponse>(`/api/datasets/${datasetId}/images?${params}`);
+}
+
+export function refreshImageDimensions(
+  datasetId: number,
+): Promise<DatasetDimensionRefreshSummary> {
+  return requestJson<DatasetDimensionRefreshSummary>(
+    `/api/datasets/${datasetId}/refresh-image-dimensions`,
+    { method: "POST" },
+  );
 }
 
 export function listClasses(projectId: number): Promise<ClassListResponse> {

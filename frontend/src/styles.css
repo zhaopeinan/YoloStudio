@@ -133,6 +133,20 @@ h2 {
   margin-bottom: 20px;
 }
 
+.panel-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.panel-heading-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .scan-form {
   display: grid;
   gap: 8px;

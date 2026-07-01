@@ -89,3 +89,10 @@ class DatasetImageList(BaseModel):
     limit: int
     offset: int
     total: int
+
+
+class DatasetDimensionRefreshSummary(BaseModel):
+    dataset_id: int
+    scanned_count: int
+    updated_count: int
+    missing_count: int

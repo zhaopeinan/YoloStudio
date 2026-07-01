@@ -382,6 +382,10 @@ def _image_size(path: Path) -> tuple[int | None, int | None]:
     return None, None
 
 
+def read_image_dimensions(path: Path) -> tuple[int | None, int | None]:
+    return _image_size(path)
+
+
 def _open_zip_source(source_path: Path) -> tuple[ZipFile, DatasetSourceBundle]:
     try:
         archive = ZipFile(source_path)
