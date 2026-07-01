@@ -152,3 +152,91 @@ def test_prediction_job_persists_matches_and_failures(tmp_path: Path, monkeypatc
             "false_positive": 1,
             "false_negative": 0,
         }
+
+
+def test_prediction_threshold_scan_creates_multiple_jobs_and_summary_points(
+    tmp_path: Path,
+    monkeypatch,
+):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        run = _create_completed_run(client, zip_path, monkeypatch)
+        first_image_id, second_image_id = run["image_ids"]
+
+        def fake_predict_images(_run, _images, confidence_threshold):
+            first_image_predictions = [
+                {
+                    "class_id": run["class_id"],
+                    "x_center": 0.5,
+                    "y_center": 0.5,
+                    "width": 0.4,
+                    "height": 0.4,
+                    "confidence": 0.91,
+                }
+            ]
+            if confidence_threshold <= 0.25:
+                first_image_predictions.append(
+                    {
+                        "class_id": run["class_id"],
+                        "x_center": 0.15,
+                        "y_center": 0.15,
+                        "width": 0.1,
+                        "height": 0.1,
+                        "confidence": 0.32,
+                    }
+                )
+
+            second_image_predictions = []
+            if confidence_threshold <= 0.25:
+                second_image_predictions.append(
+                    {
+                        "class_id": run["class_id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "confidence": 0.44,
+                    }
+                )
+
+            return {
+                first_image_id: first_image_predictions,
+                second_image_id: second_image_predictions,
+            }
+
+        monkeypatch.setattr("app.prediction.router.predict_images", fake_predict_images)
+
+        create_response = client.post(
+            f"/api/training/runs/{run['id']}/prediction-threshold-scan",
+            json={"image_scope": "all", "thresholds": [0.5, 0.15, 0.25]},
+        )
+
+        assert create_response.status_code == 200
+        jobs = create_response.json()["items"]
+        assert [job["status"] for job in jobs] == ["completed", "completed", "completed"]
+        assert [job["confidence_threshold"] for job in jobs] == [0.15, 0.25, 0.5]
+        assert [job["matched_count"] for job in jobs] == [2, 2, 1]
+        assert [job["false_positive_count"] for job in jobs] == [1, 1, 0]
+        assert [job["false_negative_count"] for job in jobs] == [0, 0, 1]
+
+        jobs_response = client.get(f"/api/training/runs/{run['id']}/prediction-jobs")
+
+        assert jobs_response.status_code == 200
+        assert [job["id"] for job in jobs_response.json()["items"]] == [
+            jobs[2]["id"],
+            jobs[1]["id"],
+            jobs[0]["id"],
+        ]
+
+        summary_response = client.get(f"/api/training/runs/{run['id']}/summary")
+
+        assert summary_response.status_code == 200
+        threshold_scan = summary_response.json()["threshold_scan"]
+        assert [point["confidence_threshold"] for point in threshold_scan] == [0.15, 0.25, 0.5]
+        assert [point["job_id"] for point in threshold_scan] == [job["id"] for job in jobs]
+        assert threshold_scan[0]["precision"] == 2 / 3
+        assert threshold_scan[0]["recall"] == 1
+        assert threshold_scan[2]["precision"] == 1
+        assert threshold_scan[2]["recall"] == 0.5

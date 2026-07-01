@@ -277,6 +277,10 @@ export type PredictionJobListResponse = {
   items: PredictionJob[];
 };
 
+export type PredictionThresholdScanResponse = {
+  items: PredictionJob[];
+};
+
 export type Prediction = {
   id: number;
   run_id: number;
@@ -478,6 +482,19 @@ export function createPredictionJob(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export function createPredictionThresholdScan(
+  runId: number,
+  body: { image_scope: string; thresholds: number[] },
+): Promise<PredictionThresholdScanResponse> {
+  return requestJson<PredictionThresholdScanResponse>(
+    `/api/training/runs/${runId}/prediction-threshold-scan`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export function listPredictionJobs(runId: number): Promise<PredictionJobListResponse> {

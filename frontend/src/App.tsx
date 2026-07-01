@@ -44,6 +44,7 @@ import {
   createClass,
   createDatasetVersion,
   createPredictionJob,
+  createPredictionThresholdScan,
   createRunExport,
   createTrainingRun,
   getAnnotations,
@@ -155,8 +156,12 @@ export default function App() {
   const [predictionLogs, setPredictionLogs] = useState<Record<number, string>>({});
   const [predictionError, setPredictionError] = useState<string | null>(null);
   const [isCreatingPrediction, setIsCreatingPrediction] = useState(false);
+  const [isCreatingThresholdScan, setIsCreatingThresholdScan] = useState(false);
   const [predictionScope, setPredictionScope] = useState("all");
   const [predictionConfidence, setPredictionConfidence] = useState(0.25);
+  const [predictionThresholds, setPredictionThresholds] = useState(
+    "0.15, 0.25, 0.35, 0.5, 0.65",
+  );
   const [activeReview, setActiveReview] = useState<PredictionImageReview | null>(null);
   const [showGroundTruthLayer, setShowGroundTruthLayer] = useState(true);
   const [showPredictionLayer, setShowPredictionLayer] = useState(true);
@@ -767,6 +772,43 @@ export default function App() {
     }
   }
 
+  async function handleCreateThresholdScan() {
+    const run = runs[0];
+    if (!run) {
+      return;
+    }
+
+    let thresholds: number[];
+    try {
+      thresholds = parseThresholdList(predictionThresholds);
+    } catch (error) {
+      setPredictionError(error instanceof Error ? error.message : "Threshold scan input failed");
+      return;
+    }
+
+    setIsCreatingThresholdScan(true);
+    setPredictionError(null);
+
+    try {
+      const response = await createPredictionThresholdScan(run.id, {
+        image_scope: predictionScope,
+        thresholds,
+      });
+      setPredictionJobs((current) => mergePredictionJobs(response.items, current));
+      const latestJob = response.items[response.items.length - 1];
+      if (latestJob) {
+        const predictionsResponse = await listPredictions(latestJob.id);
+        setPredictions(predictionsResponse.items);
+        await loadPredictionLogs(latestJob.id);
+      }
+      await refreshRunSummary(run.id);
+    } catch (error) {
+      setPredictionError(error instanceof Error ? error.message : "Threshold scan failed");
+    } finally {
+      setIsCreatingThresholdScan(false);
+    }
+  }
+
   async function loadPredictionLogs(jobId: number) {
     try {
       const response = await getPredictionJobLogs(jobId);
@@ -1337,6 +1379,24 @@ export default function App() {
           >
             <Radar size={16} />
             {isCreatingPrediction ? "Running" : "Run Prediction Analysis"}
+          </button>
+          <label className="threshold-scan-field" htmlFor="prediction-thresholds">
+            Scan thresholds
+            <input
+              id="prediction-thresholds"
+              value={predictionThresholds}
+              onChange={(event) => setPredictionThresholds(event.target.value)}
+              disabled={runs.length === 0}
+            />
+          </label>
+          <button
+            type="button"
+            className="secondary-button threshold-scan-button"
+            disabled={runs.length === 0 || isCreatingThresholdScan}
+            onClick={handleCreateThresholdScan}
+          >
+            <Radar size={16} />
+            {isCreatingThresholdScan ? "Scanning" : "Run Threshold Scan"}
           </button>
         </div>
 
@@ -2004,6 +2064,37 @@ function parseTags(value: string) {
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
+}
+
+function parseThresholdList(value: string) {
+  const parts = value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    throw new Error("Enter at least one confidence threshold.");
+  }
+  if (parts.length > 20) {
+    throw new Error("Threshold scan supports up to 20 values.");
+  }
+
+  const thresholds = parts.map((part) => Number(part));
+  if (thresholds.some((threshold) => Number.isNaN(threshold))) {
+    throw new Error("Threshold scan values must be numbers.");
+  }
+  if (thresholds.some((threshold) => threshold < 0 || threshold > 1)) {
+    throw new Error("Threshold scan values must be between 0 and 1.");
+  }
+
+  return Array.from(new Set(thresholds.map((threshold) => Number(threshold.toFixed(4))))).sort(
+    (left, right) => left - right,
+  );
+}
+
+function mergePredictionJobs(incoming: PredictionJob[], existing: PredictionJob[]) {
+  const byId = new Map<number, PredictionJob>();
+  [...incoming, ...existing].forEach((job) => byId.set(job.id, job));
+  return Array.from(byId.values()).sort((left, right) => right.id - left.id);
 }
 
 function toDraftBox(annotation: Annotation, index: number): DraftBox {

@@ -179,8 +179,21 @@ After a training run exists:
 11. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
 12. Click `Save Annotations` when the correction draft looks right.
 
+For threshold tuning, enter comma-separated confidence values in `Scan thresholds`, such as
+`0.15, 0.25, 0.35, 0.5, 0.65`, then click `Run Threshold Scan`. The backend creates one
+prediction job for each value and the Experiment Dashboard automatically refreshes the
+`Threshold Scan` table with precision and recall for each point.
+
 Prediction jobs also show `Auto refresh on` while queued or running. The UI refreshes the latest job,
 its prediction rows, and active job logs until the job reaches a terminal state.
+
+API smoke for threshold scans:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/training/runs/1/prediction-threshold-scan \
+  -H "Content-Type: application/json" \
+  -d '{"image_scope":"all","thresholds":[0.15,0.25,0.35,0.5,0.65]}'
+```
 
 Prediction artifacts are written under:
 

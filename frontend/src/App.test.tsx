@@ -176,6 +176,19 @@ const apiMock = vi.hoisted(() => {
     job_id: jobId,
     text: `prediction log for job ${jobId}\n`,
   }));
+  const createPredictionThresholdScan = vi.fn(
+    async (_runId: number, body: { image_scope: string; thresholds: number[] }) => ({
+      items: body.thresholds.map((threshold, index) => ({
+        ...completedPredictionJob,
+        id: 10 + index,
+        confidence_threshold: threshold,
+        artifact_path: `/tmp/workspace/projects/1/runs/1/predictions/${10 + index}`,
+        log_path: `/tmp/workspace/projects/1/runs/1/predictions/${10 + index}/logs.txt`,
+        created_at: `2026-06-30T00:0${index}:00`,
+        updated_at: `2026-06-30T00:0${index}:30`,
+      })),
+    }),
+  );
   const getTrainingRunSummary = vi.fn(async (runId: number) => ({
     run_id: runId,
     metric_series: [
@@ -289,6 +302,7 @@ const apiMock = vi.hoisted(() => {
     replaceAnnotations,
     getTrainingRunLogs,
     getPredictionJobLogs,
+    createPredictionThresholdScan,
     getTrainingRunSummary,
     getExportCapabilities,
     listRunExports,
@@ -422,6 +436,7 @@ vi.mock("./api", () => ({
     created_at: "2026-06-30T00:05:00",
     updated_at: "2026-06-30T00:05:01",
   }),
+  createPredictionThresholdScan: apiMock.createPredictionThresholdScan,
   listPredictions: async () => ({
     items: [
       {
@@ -543,6 +558,7 @@ describe("App", () => {
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
     apiMock.getPredictionJobLogs.mockClear();
+    apiMock.createPredictionThresholdScan.mockClear();
     apiMock.getTrainingRunSummary.mockClear();
     apiMock.getExportCapabilities.mockClear();
     apiMock.listRunExports.mockClear();
@@ -626,6 +642,15 @@ describe("App", () => {
     expect(await screen.findAllByText("67%")).toHaveLength(2);
     expect(await screen.findByText("false_positive")).toBeInTheDocument();
     expect((await screen.findAllByText("Matched")).length).toBeGreaterThanOrEqual(2);
+    const thresholdInput = screen.getByLabelText("Scan thresholds");
+    await user.clear(thresholdInput);
+    await user.type(thresholdInput, "0.1, 0.25, 0.55");
+    await user.click(screen.getByRole("button", { name: "Run Threshold Scan" }));
+    expect(apiMock.createPredictionThresholdScan).toHaveBeenCalledWith(1, {
+      image_scope: "all",
+      thresholds: [0.1, 0.25, 0.55],
+    });
+    expect(await screen.findByText("Prediction #12")).toBeInTheDocument();
     expect(await screen.findByText("Model Export")).toBeInTheDocument();
     expect(await screen.findByText(".pt Weights")).toBeInTheDocument();
     expect(await screen.findByText("Ultralytics is not installed")).toBeInTheDocument();

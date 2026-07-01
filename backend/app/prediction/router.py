@@ -19,6 +19,8 @@ from app.prediction.schemas import (
     PredictionJobList,
     PredictionJobLogs,
     PredictionJobRead,
+    PredictionThresholdScanCreate,
+    PredictionThresholdScanRead,
     PredictionReviewAnnotation,
     PredictionReviewImage,
     PredictionList,
@@ -89,6 +91,34 @@ def create_run_prediction_job(
     )
     job = execute_prediction_job(db, job, run, predictor=predict_images)
     return _read_job(job)
+
+
+@router.post(
+    "/training/runs/{run_id}/prediction-threshold-scan",
+    response_model=PredictionThresholdScanRead,
+)
+def create_run_prediction_threshold_scan(
+    run_id: int,
+    request: PredictionThresholdScanCreate,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> PredictionThresholdScanRead:
+    run = db.get(TrainingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+
+    jobs: list[PredictionJobRead] = []
+    for threshold in request.thresholds:
+        job = create_prediction_job(
+            db,
+            settings,
+            run,
+            image_scope=request.image_scope,
+            confidence_threshold=threshold,
+        )
+        job = execute_prediction_job(db, job, run, predictor=predict_images)
+        jobs.append(_read_job(job))
+    return PredictionThresholdScanRead(items=jobs)
 
 
 @router.get("/training/runs/{run_id}/prediction-jobs", response_model=PredictionJobList)
