@@ -76,6 +76,33 @@ const apiMock = vi.hoisted(() => {
   const listPredictionJobs = vi.fn(async () => {
     return predictionJobsResponseQueue.shift() ?? { items: [completedPredictionJob] };
   });
+  const listImages = vi.fn(async (_datasetId: number, filters = {}) => ({
+    items: [
+      {
+        id: 10,
+        relative_path: "iris/frame001.jpg",
+        platform: "iris",
+        altitude: 12,
+        timestamp: 1,
+        annotation_count: filters.label_status === "unannotated" ? 0 : 1,
+        image_url: "/api/images/10/file",
+      },
+    ],
+    limit: 50,
+    offset: 0,
+    total: 1,
+  }));
+  const createDatasetVersion = vi.fn(async (_datasetId: number, name?: string, classIds?: number[]) => ({
+    id: 2,
+    project_id: 1,
+    dataset_id: 1,
+    name: name || "mvp-quality-pass",
+    class_mapping: Object.fromEntries((classIds ?? [1]).map((classId, index) => [String(classId), index])),
+    split_counts: { train: 1, val: 0, test: 0 },
+    artifact_path: "/tmp/workspace/projects/1/versions/2",
+    frozen: true,
+    created_at: "2026-06-30T00:01:00",
+  }));
   const getTrainingRunLogs = vi.fn(async (runId: number) => ({
     run_id: runId,
     text: `training log for run ${runId}\n`,
@@ -190,6 +217,8 @@ const apiMock = vi.hoisted(() => {
     predictionJobsResponseQueue,
     listTrainingRuns,
     listPredictionJobs,
+    listImages,
+    createDatasetVersion,
     getTrainingRunLogs,
     getPredictionJobLogs,
     getTrainingRunSummary,
@@ -249,22 +278,7 @@ vi.mock("./api", () => ({
     image_count: 1,
     groups: [{ name: "iris", image_count: 1, metadata_rows: 1 }],
   }),
-  listImages: async () => ({
-    items: [
-      {
-        id: 10,
-        relative_path: "iris/frame001.jpg",
-        platform: "iris",
-        altitude: 12,
-        timestamp: 1,
-        annotation_count: 0,
-        image_url: "/api/images/10/file",
-      },
-    ],
-    limit: 50,
-    offset: 0,
-    total: 1,
-  }),
+  listImages: apiMock.listImages,
   listClasses: async () => ({
     items: [
       {
@@ -314,17 +328,7 @@ vi.mock("./api", () => ({
       },
     ],
   }),
-  createDatasetVersion: async () => ({
-    id: 2,
-    project_id: 1,
-    dataset_id: 1,
-    name: "mvp-quality-pass",
-    class_mapping: { "1": 0 },
-    split_counts: { train: 1, val: 0, test: 0 },
-    artifact_path: "/tmp/workspace/projects/1/versions/2",
-    frozen: true,
-    created_at: "2026-06-30T00:01:00",
-  }),
+  createDatasetVersion: apiMock.createDatasetVersion,
   listTrainingRuns: apiMock.listTrainingRuns,
   createTrainingRun: async () => ({
     id: 2,
@@ -477,6 +481,8 @@ describe("App", () => {
   beforeEach(() => {
     apiMock.trainingRunsResponseQueue.length = 0;
     apiMock.predictionJobsResponseQueue.length = 0;
+    apiMock.listImages.mockClear();
+    apiMock.createDatasetVersion.mockClear();
     apiMock.listTrainingRuns.mockClear();
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
@@ -515,9 +521,26 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
+    expect(screen.getByLabelText("Image filters")).toBeInTheDocument();
+    expect(screen.getByLabelText("Version class subset")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Label status"), "annotated");
+    await user.type(screen.getByLabelText("Edge tag"), "occluded");
+    await user.click(screen.getByRole("button", { name: "Apply Filters" }));
+    expect(apiMock.listImages).toHaveBeenLastCalledWith(1, {
+      platform: undefined,
+      label_status: "annotated",
+      class_id: undefined,
+      edge_tag: "occluded",
+      altitude_min: undefined,
+      altitude_max: undefined,
+    });
     expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "target" }));
+    await user.click(screen.getByRole("checkbox", { name: "target" }));
+    await user.click(screen.getByRole("button", { name: "Create Dataset Version" }));
+    expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
     expect(await screen.findByText("Experiment Dashboard")).toBeInTheDocument();

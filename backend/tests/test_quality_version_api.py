@@ -162,3 +162,95 @@ def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
 
         assert list_response.status_code == 200
         assert list_response.json()["items"][0]["id"] == version["id"]
+
+
+def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = _import_dataset(client, zip_path)
+        drone_class = _create_class(client, dataset["project_id"], "drone")
+        decoy_class = _create_class(client, dataset["project_id"], "decoy")
+        images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
+        first_image_id = images[0]["id"]
+        second_image_id = images[1]["id"]
+
+        first_response = client.put(
+            f"/api/images/{first_image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": drone_class["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.25,
+                        "height": 0.25,
+                    },
+                    {
+                        "class_id": decoy_class["id"],
+                        "x_center": 0.2,
+                        "y_center": 0.2,
+                        "width": 0.2,
+                        "height": 0.2,
+                    },
+                ]
+            },
+        )
+        assert first_response.status_code == 200
+        second_response = client.put(
+            f"/api/images/{second_image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": decoy_class["id"],
+                        "x_center": 0.35,
+                        "y_center": 0.35,
+                        "width": 0.25,
+                        "height": 0.25,
+                    }
+                ]
+            },
+        )
+        assert second_response.status_code == 200
+
+        version_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "drone-only", "class_ids": [drone_class["id"]]},
+        )
+
+        assert version_response.status_code == 200
+        version = version_response.json()
+        assert version["class_mapping"] == {str(drone_class["id"]): 0}
+        assert version["split_counts"] == {"train": 1, "val": 0, "test": 0}
+
+        artifact_root = Path(version["artifact_path"])
+        data_yaml = (artifact_root / "data.yaml").read_text()
+        assert "  0: drone" in data_yaml
+        assert "decoy" not in data_yaml
+
+        manifest = json.loads((artifact_root / "manifest.json").read_text())
+        assert manifest["selected_class_ids"] == [drone_class["id"]]
+        assert len(manifest["images"]) == 1
+        assert manifest["images"][0]["image_id"] == first_image_id
+        assert manifest["images"][0]["annotations"] == [
+            {
+                "annotation_id": first_response.json()["items"][0]["id"],
+                "class_id": drone_class["id"],
+                "yolo_class": 0,
+                "track_id": None,
+                "edge_tags": [],
+            }
+        ]
+
+        label_files = sorted((artifact_root / "labels").glob("*/*.txt"))
+        assert len(label_files) == 1
+        assert label_files[0].read_text().startswith("0 ")
+
+        missing_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "missing", "class_ids": [9999]},
+        )
+
+        assert missing_response.status_code == 400
+        assert "Selected classes must belong" in missing_response.text

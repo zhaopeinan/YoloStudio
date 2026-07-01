@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class DatasetVersionCreate(BaseModel):
     name: str | None = Field(default=None, max_length=160)
+    class_ids: list[int] | None = None
 
 
 class DatasetVersionRead(BaseModel):

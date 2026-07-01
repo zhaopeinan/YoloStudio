@@ -62,6 +62,24 @@ With both servers running:
 8. Click `Save Annotations`.
 9. Reselect or reload the image and confirm the saved box is still listed.
 
+## Dataset browser filters
+
+After import, `Image Browser` can filter the current dataset by:
+
+- platform, such as `iris` or `vtol`
+- label status: all, annotated, or unannotated
+- project class
+- edge tag, such as `occluded`
+- altitude range
+
+API smoke:
+
+```bash
+curl "http://127.0.0.1:8000/api/datasets/1/images?platform=iris&label_status=annotated"
+curl "http://127.0.0.1:8000/api/datasets/1/images?class_id=1&edge_tag=occluded"
+curl "http://127.0.0.1:8000/api/datasets/1/images?altitude_min=20&altitude_max=40"
+```
+
 ## Quality review and dataset version export
 
 After importing a dataset and saving at least one annotation:
@@ -69,8 +87,11 @@ After importing a dataset and saving at least one annotation:
 1. Check `Quality Review` for image, annotated image, class, box, tiny-box, and issue counts.
 2. Confirm the panel says `Ready to export`.
 3. Enter an optional version name in `Version Export`.
-4. Click `Create Dataset Version`.
-5. Confirm the new version appears with train/val/test counts and an artifact path.
+4. Select the class subset to freeze for this version. Leaving all classes selected exports the full
+   active project class library; selecting a subset exports only images and labels that contain those
+   classes.
+5. Click `Create Dataset Version`.
+6. Confirm the new version appears with train/val/test counts and an artifact path.
 
 The backend writes frozen YOLO artifacts under:
 
@@ -82,10 +103,10 @@ workspace/projects/<project_id>/versions/<version_id>/
   manifest.json
 ```
 
-Version export includes only annotated images. It freezes the project class library into a
-zero-based YOLO class map sorted by class ID, writes normalized `class x_center y_center width height`
-labels, and uses a deterministic 80/10/10 split with at least one validation image when there are
-two or more annotated images.
+Version export includes only annotated images for the selected classes. It freezes the selected
+project classes into a zero-based YOLO class map sorted by class ID, writes normalized
+`class x_center y_center width height` labels, and uses a deterministic 80/10/10 split with at least
+one validation image when there are two or more annotated images.
 
 ## Training run lifecycle
 

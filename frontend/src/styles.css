@@ -18,7 +18,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -143,7 +144,8 @@ h2 {
   gap: 10px;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-height: 42px;
   border: 1px solid #c7d2da;
@@ -286,6 +288,7 @@ th {
 
 .class-form,
 .class-list,
+.image-filter-panel,
 .image-list,
 .box-list,
 .version-controls,
@@ -302,6 +305,7 @@ th {
 
 .class-form label,
 .version-controls label,
+.image-filter-panel label,
 .training-form label,
 .prediction-controls label,
 .box-editor label {
@@ -360,6 +364,33 @@ input[type="color"] {
 .image-list {
   max-height: 520px;
   overflow: auto;
+}
+
+.image-filter-panel {
+  margin-bottom: 14px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.range-row,
+.filter-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.range-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.range-row label {
+  display: grid;
+  gap: 6px;
+}
+
+.filter-actions {
+  grid-template-columns: 1fr 1fr;
 }
 
 .image-row {
@@ -435,6 +466,46 @@ input[type="color"] {
 
 .version-controls {
   margin-bottom: 16px;
+}
+
+.subset-controls {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.subset-controls > span {
+  color: #62727e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.subset-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.subset-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #172026;
+  background: #f8fafb;
+}
+
+.subset-grid input {
+  width: auto;
+  min-height: auto;
+}
+
+.subset-grid label span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
 }
 
 .version-row {

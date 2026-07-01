@@ -69,6 +69,15 @@ export type DatasetImageListResponse = {
   total: number;
 };
 
+export type DatasetImageFilters = {
+  platform?: string;
+  label_status?: "all" | "annotated" | "unannotated";
+  class_id?: number;
+  edge_tag?: string;
+  altitude_min?: number;
+  altitude_max?: number;
+};
+
 export type ProjectClass = {
   id: number;
   project_id: number;
@@ -367,10 +376,17 @@ export function importDataset(
   });
 }
 
-export function listImages(datasetId: number): Promise<DatasetImageListResponse> {
-  return requestJson<DatasetImageListResponse>(
-    `/api/datasets/${datasetId}/images?limit=50&offset=0`,
-  );
+export function listImages(
+  datasetId: number,
+  filters: DatasetImageFilters = {},
+): Promise<DatasetImageListResponse> {
+  const params = new URLSearchParams({ limit: "50", offset: "0" });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "" && value !== "all") {
+      params.set(key, String(value));
+    }
+  });
+  return requestJson<DatasetImageListResponse>(`/api/datasets/${datasetId}/images?${params}`);
 }
 
 export function listClasses(projectId: number): Promise<ClassListResponse> {
@@ -408,10 +424,11 @@ export function getQuality(datasetId: number): Promise<DatasetQualitySummary> {
 export function createDatasetVersion(
   datasetId: number,
   name?: string,
+  classIds?: number[],
 ): Promise<DatasetVersion> {
   return requestJson<DatasetVersion>(`/api/datasets/${datasetId}/versions`, {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, class_ids: classIds && classIds.length > 0 ? classIds : undefined }),
   });
 }
 

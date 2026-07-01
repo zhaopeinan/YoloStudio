@@ -82,6 +82,7 @@ def create_dataset_version(
     settings: Settings,
     dataset_id: int,
     name: str | None = None,
+    class_ids: list[int] | None = None,
 ) -> DatasetVersion:
     dataset = db.get(Dataset, dataset_id)
     if dataset is None:
@@ -100,20 +101,30 @@ def create_dataset_version(
     if blockers:
         raise VersionExportError("Cannot create dataset version: " + ", ".join(blockers))
 
-    classes = db.scalars(
-        select(ClassDef)
-        .where(ClassDef.project_id == dataset.project_id, ClassDef.active == 1)
-        .order_by(ClassDef.id)
-    ).all()
+    requested_class_ids = list(dict.fromkeys(class_ids or []))
+    class_query = select(ClassDef).where(
+        ClassDef.project_id == dataset.project_id,
+        ClassDef.active == 1,
+    )
+    if requested_class_ids:
+        class_query = class_query.where(ClassDef.id.in_(requested_class_ids))
+    classes = db.scalars(class_query.order_by(ClassDef.id)).all()
+    if requested_class_ids and {class_def.id for class_def in classes} != set(requested_class_ids):
+        raise VersionExportError("Selected classes must belong to the dataset project")
+    if not classes:
+        raise VersionExportError("Cannot create dataset version: no selected active classes")
     class_mapping = {str(class_def.id): index for index, class_def in enumerate(classes)}
+    selected_class_ids = [class_def.id for class_def in classes]
 
     annotated_images = db.scalars(
         select(Image)
         .join(Annotation, Annotation.image_id == Image.id)
-        .where(Image.dataset_id == dataset_id)
+        .where(Image.dataset_id == dataset_id, Annotation.class_id.in_(selected_class_ids))
         .group_by(Image.id)
         .order_by(Image.id)
     ).all()
+    if not annotated_images:
+        raise VersionExportError("Cannot create dataset version: selected classes have no annotations")
     splits = _split_images(annotated_images)
 
     version = DatasetVersion(
@@ -139,7 +150,7 @@ def create_dataset_version(
     annotations = db.scalars(
         select(Annotation)
         .join(Image, Annotation.image_id == Image.id)
-        .where(Image.dataset_id == dataset.id)
+        .where(Image.dataset_id == dataset.id, Annotation.class_id.in_(selected_class_ids))
         .order_by(Annotation.id)
     ).all()
     for annotation in annotations:
@@ -199,6 +210,7 @@ def create_dataset_version(
         "dataset_id": dataset.id,
         "dataset_name": dataset.name,
         "class_mapping": class_mapping,
+        "selected_class_ids": selected_class_ids,
         "split_counts": split_counts,
         "images": manifest_images,
     }

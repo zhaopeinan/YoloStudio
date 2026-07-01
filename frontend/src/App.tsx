@@ -96,10 +96,20 @@ export default function App() {
   const [className, setClassName] = useState("");
   const [classColor, setClassColor] = useState(defaultClassColor);
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
+  const [versionClassIds, setVersionClassIds] = useState<number[]>([]);
   const [classError, setClassError] = useState<string | null>(null);
   const [isCreatingClass, setIsCreatingClass] = useState(false);
   const [images, setImages] = useState<DatasetImage[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
+  const [imageFilters, setImageFilters] = useState({
+    platform: "",
+    label_status: "all" as "all" | "annotated" | "unannotated",
+    class_id: "",
+    edge_tag: "",
+    altitude_min: "",
+    altitude_max: "",
+  });
+  const [imageFilterError, setImageFilterError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<DraftBox[]>([]);
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   const [isSavingAnnotations, setIsSavingAnnotations] = useState(false);
@@ -277,6 +287,7 @@ export default function App() {
 
       setClasses(classResponse.items);
       setSelectedClassId(classResponse.items[0]?.id ?? null);
+      setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
       setImages(imageResponse.items);
       setSelectedImageId(imageResponse.items[0]?.id ?? null);
       setQuality(qualityResponse);
@@ -317,6 +328,59 @@ export default function App() {
     } finally {
       setIsLoadingQuality(false);
     }
+  }
+
+  async function refreshImages(datasetId = importedDataset?.dataset_id) {
+    if (!datasetId) {
+      return;
+    }
+
+    setImageFilterError(null);
+    try {
+      const response = await listImages(datasetId, toImageFilterRequest(imageFilters));
+      setImages(response.items);
+      setSelectedImageId((current) => {
+        if (response.items.some((image) => image.id === current)) {
+          return current;
+        }
+        return response.items[0]?.id ?? null;
+      });
+    } catch (error) {
+      setImageFilterError(error instanceof Error ? error.message : "Image filters failed");
+    }
+  }
+
+  function handleApplyImageFilters() {
+    void refreshImages();
+  }
+
+  function handleResetImageFilters() {
+    const nextFilters = {
+      platform: "",
+      label_status: "all" as const,
+      class_id: "",
+      edge_tag: "",
+      altitude_min: "",
+      altitude_max: "",
+    };
+    setImageFilters(nextFilters);
+    if (importedDataset) {
+      setImageFilterError(null);
+      listImages(importedDataset.dataset_id)
+        .then((response) => {
+          setImages(response.items);
+          setSelectedImageId(response.items[0]?.id ?? null);
+        })
+        .catch((error: Error) => setImageFilterError(error.message));
+    }
+  }
+
+  function toggleVersionClass(classId: number) {
+    setVersionClassIds((current) =>
+      current.includes(classId)
+        ? current.filter((existing) => existing !== classId)
+        : [...current, classId],
+    );
   }
 
   async function refreshTrainingRuns(projectId = importedDataset?.project_id) {
@@ -415,6 +479,7 @@ export default function App() {
         color: classColor,
       });
       setClasses((current) => [...current, created]);
+      setVersionClassIds((current) => [...current, created.id]);
       setSelectedClassId(created.id);
       setClassName("");
       void refreshTrainingPrep();
@@ -561,6 +626,7 @@ export default function App() {
       const created = await createDatasetVersion(
         importedDataset.dataset_id,
         versionName.trim() || undefined,
+        versionClassIds,
       );
       setVersions((current) => [created, ...current]);
       setVersionName("");
@@ -893,6 +959,27 @@ export default function App() {
               >
                 {isCreatingVersion ? "Exporting" : "Create Dataset Version"}
               </button>
+            </div>
+            <div className="subset-controls" aria-label="Version class subset">
+              <span>Class subset</span>
+              <div className="subset-grid">
+                {classes.length === 0 ? (
+                  <p className="empty-state">Create project classes before freezing a subset.</p>
+                ) : (
+                  classes.map((classItem) => (
+                    <label key={classItem.id}>
+                      <input
+                        type="checkbox"
+                        checked={versionClassIds.includes(classItem.id)}
+                        onChange={() => toggleVersionClass(classItem.id)}
+                        disabled={!importedDataset}
+                      />
+                      <span style={{ background: classItem.color }} />
+                      {classItem.name}
+                    </label>
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
@@ -1335,6 +1422,108 @@ export default function App() {
             <ImageIcon size={20} />
           </div>
 
+          <div className="image-filter-panel" aria-label="Image filters">
+            <label htmlFor="filter-platform">Platform</label>
+            <input
+              id="filter-platform"
+              value={imageFilters.platform}
+              disabled={!importedDataset}
+              onChange={(event) =>
+                setImageFilters((current) => ({ ...current, platform: event.target.value }))
+              }
+              placeholder="iris"
+            />
+            <label htmlFor="filter-label-status">Label status</label>
+            <select
+              id="filter-label-status"
+              value={imageFilters.label_status}
+              disabled={!importedDataset}
+              onChange={(event) =>
+                setImageFilters((current) => ({
+                  ...current,
+                  label_status: event.target.value as "all" | "annotated" | "unannotated",
+                }))
+              }
+            >
+              <option value="all">All</option>
+              <option value="annotated">Annotated</option>
+              <option value="unannotated">Unannotated</option>
+            </select>
+            <label htmlFor="filter-class">Class</label>
+            <select
+              id="filter-class"
+              value={imageFilters.class_id}
+              disabled={!importedDataset}
+              onChange={(event) =>
+                setImageFilters((current) => ({ ...current, class_id: event.target.value }))
+              }
+            >
+              <option value="">All classes</option>
+              {classes.map((classItem) => (
+                <option key={classItem.id} value={classItem.id}>
+                  {classItem.name}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="filter-edge-tag">Edge tag</label>
+            <input
+              id="filter-edge-tag"
+              value={imageFilters.edge_tag}
+              disabled={!importedDataset}
+              onChange={(event) =>
+                setImageFilters((current) => ({ ...current, edge_tag: event.target.value }))
+              }
+              placeholder="occluded"
+            />
+            <div className="range-row">
+              <label htmlFor="filter-altitude-min">
+                Min altitude
+                <input
+                  id="filter-altitude-min"
+                  type="number"
+                  value={imageFilters.altitude_min}
+                  disabled={!importedDataset}
+                  onChange={(event) =>
+                    setImageFilters((current) => ({
+                      ...current,
+                      altitude_min: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label htmlFor="filter-altitude-max">
+                Max altitude
+                <input
+                  id="filter-altitude-max"
+                  type="number"
+                  value={imageFilters.altitude_max}
+                  disabled={!importedDataset}
+                  onChange={(event) =>
+                    setImageFilters((current) => ({
+                      ...current,
+                      altitude_max: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+            <div className="filter-actions">
+              <button type="button" disabled={!importedDataset} onClick={handleApplyImageFilters}>
+                Apply Filters
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!importedDataset}
+                onClick={handleResetImageFilters}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          {imageFilterError ? <div className="error-banner">{imageFilterError}</div> : null}
+
           <div className="image-list" aria-label="Imported images">
             {images.length === 0 ? (
               <p className="empty-state">Imported images will appear here.</p>
@@ -1566,6 +1755,24 @@ function formatAltitude(minimum: number | null, maximum: number | null) {
 
 function formatImageAltitude(altitude: number | null) {
   return altitude === null ? "altitude n/a" : `${altitude.toFixed(1)}m`;
+}
+
+function toImageFilterRequest(filters: {
+  platform: string;
+  label_status: "all" | "annotated" | "unannotated";
+  class_id: string;
+  edge_tag: string;
+  altitude_min: string;
+  altitude_max: string;
+}) {
+  return {
+    platform: filters.platform.trim() || undefined,
+    label_status: filters.label_status,
+    class_id: filters.class_id ? Number(filters.class_id) : undefined,
+    edge_tag: filters.edge_tag.trim() || undefined,
+    altitude_min: filters.altitude_min === "" ? undefined : Number(filters.altitude_min),
+    altitude_max: filters.altitude_max === "" ? undefined : Number(filters.altitude_max),
+  };
 }
 
 function parseTags(value: string) {

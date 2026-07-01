@@ -96,3 +96,78 @@ def test_import_dataset_persists_images_and_serves_files(tmp_path: Path):
         assert file_response.status_code == 200
         assert file_response.headers["content-type"] == "image/png"
         assert file_response.content == PNG_1X1
+
+
+def test_list_dataset_images_filters_by_metadata_and_annotations(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "Filter Test Project",
+                "dataset_name": "sample",
+            },
+        )
+        assert response.status_code == 200
+        dataset = response.json()
+        class_response = client.post(
+            f"/api/projects/{dataset['project_id']}/classes",
+            json={"name": "drone", "color": "#ef4444"},
+        )
+        assert class_response.status_code == 200
+        class_payload = class_response.json()
+        images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
+        iris_image = next(image for image in images if image["platform"] == "iris")
+
+        annotation_response = client.put(
+            f"/api/images/{iris_image['id']}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "edge_tags": ["occluded", "small"],
+                    }
+                ]
+            },
+        )
+        assert annotation_response.status_code == 200
+
+        platform_response = client.get(f"/api/datasets/{dataset['dataset_id']}/images?platform=iris")
+        assert platform_response.status_code == 200
+        assert platform_response.json()["total"] == 1
+        assert platform_response.json()["items"][0]["id"] == iris_image["id"]
+
+        annotated_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/images?label_status=annotated"
+        )
+        assert annotated_response.status_code == 200
+        assert [item["id"] for item in annotated_response.json()["items"]] == [iris_image["id"]]
+
+        unannotated_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/images?label_status=unannotated"
+        )
+        assert unannotated_response.status_code == 200
+        assert unannotated_response.json()["total"] == 1
+
+        class_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/images?class_id={class_payload['id']}"
+        )
+        assert class_response.status_code == 200
+        assert class_response.json()["items"][0]["id"] == iris_image["id"]
+
+        tag_response = client.get(f"/api/datasets/{dataset['dataset_id']}/images?edge_tag=occluded")
+        assert tag_response.status_code == 200
+        assert tag_response.json()["items"][0]["id"] == iris_image["id"]
+
+        altitude_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/images?altitude_min=20&altitude_max=30"
+        )
+        assert altitude_response.status_code == 200
+        assert altitude_response.json()["total"] == 1
+        assert altitude_response.json()["items"][0]["platform"] == "vtol"

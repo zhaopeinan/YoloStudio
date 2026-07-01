@@ -41,7 +41,7 @@ def create_version(
     settings: Settings = Depends(get_settings),
 ) -> DatasetVersionRead:
     try:
-        version = create_dataset_version(db, settings, dataset_id, request.name)
+        version = create_dataset_version(db, settings, dataset_id, request.name, request.class_ids)
     except VersionExportError as exc:
         message = str(exc)
         status_code = 404 if message == "Dataset was not found" else 400

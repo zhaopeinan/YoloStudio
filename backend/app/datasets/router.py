@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
@@ -52,22 +52,54 @@ def list_dataset_images(
     dataset_id: int,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    platform: str | None = Query(None, max_length=80),
+    label_status: str = Query("all", pattern="^(all|annotated|unannotated)$"),
+    class_id: int | None = Query(None, ge=1),
+    edge_tag: str | None = Query(None, max_length=80),
+    altitude_min: float | None = Query(None),
+    altitude_max: float | None = Query(None),
     db: Session = Depends(get_db),
 ) -> DatasetImageList:
     dataset = db.get(Dataset, dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset was not found")
 
-    total = db.scalar(select(func.count()).select_from(Image).where(Image.dataset_id == dataset_id)) or 0
     annotation_counts = (
         select(Annotation.image_id, func.count(Annotation.id).label("annotation_count"))
         .group_by(Annotation.image_id)
         .subquery()
     )
+    conditions = [Image.dataset_id == dataset_id]
+    if platform:
+        conditions.append(Image.platform == platform)
+    if altitude_min is not None:
+        conditions.append(Image.altitude >= altitude_min)
+    if altitude_max is not None:
+        conditions.append(Image.altitude <= altitude_max)
+    if label_status == "annotated":
+        conditions.append(exists().where(Annotation.image_id == Image.id))
+    elif label_status == "unannotated":
+        conditions.append(~exists().where(Annotation.image_id == Image.id))
+    if class_id is not None:
+        conditions.append(
+            exists().where(Annotation.image_id == Image.id, Annotation.class_id == class_id)
+        )
+    if edge_tag:
+        conditions.append(
+            exists().where(
+                Annotation.image_id == Image.id,
+                text(
+                    "EXISTS (SELECT 1 FROM json_each(annotations.edge_tags) "
+                    "WHERE json_each.value = :edge_tag)"
+                ).bindparams(edge_tag=edge_tag),
+            )
+        )
+
+    total = db.scalar(select(func.count()).select_from(Image).where(*conditions)) or 0
     rows = db.execute(
         select(Image, func.coalesce(annotation_counts.c.annotation_count, 0))
         .outerjoin(annotation_counts, Image.id == annotation_counts.c.image_id)
-        .where(Image.dataset_id == dataset_id)
+        .where(*conditions)
         .order_by(Image.id)
         .limit(limit)
         .offset(offset)
