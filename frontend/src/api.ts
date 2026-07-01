@@ -281,6 +281,18 @@ export type PredictionThresholdScanResponse = {
   items: PredictionJob[];
 };
 
+export type PredictionFilters = {
+  failure_type?: "all" | "matched" | "false_positive" | "false_negative";
+  class_id?: number;
+  confidence_min?: number;
+  confidence_max?: number;
+  platform?: string;
+  altitude_min?: number;
+  altitude_max?: number;
+  timestamp_min?: number;
+  timestamp_max?: number;
+};
+
 export type Prediction = {
   id: number;
   run_id: number;
@@ -501,8 +513,20 @@ export function listPredictionJobs(runId: number): Promise<PredictionJobListResp
   return requestJson<PredictionJobListResponse>(`/api/training/runs/${runId}/prediction-jobs`);
 }
 
-export function listPredictions(jobId: number): Promise<PredictionListResponse> {
-  return requestJson<PredictionListResponse>(`/api/prediction-jobs/${jobId}/predictions`);
+export function listPredictions(
+  jobId: number,
+  filters: PredictionFilters = {},
+): Promise<PredictionListResponse> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "" && value !== "all") {
+      params.set(key, String(value));
+    }
+  });
+  const query = params.toString();
+  return requestJson<PredictionListResponse>(
+    `/api/prediction-jobs/${jobId}/predictions${query ? `?${query}` : ""}`,
+  );
 }
 
 export function getPredictionJobLogs(jobId: number): Promise<PredictionJobLogsResponse> {

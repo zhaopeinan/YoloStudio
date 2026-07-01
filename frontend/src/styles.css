@@ -854,6 +854,32 @@ input[type="color"] {
   min-height: 42px;
 }
 
+.prediction-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.prediction-filter-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.prediction-filter-actions {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.prediction-filter-actions button {
+  min-height: 42px;
+}
+
 .prediction-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1198,6 +1224,7 @@ input[type="color"] {
   .training-number-grid,
   .augmentation-grid,
   .prediction-controls,
+  .prediction-filter-panel,
   .prediction-summary,
   .prediction-layout,
   .export-grid,

@@ -66,6 +66,7 @@ def _create_completed_run(client, zip_path: Path, monkeypatch) -> dict:
     assert run["status"] == "completed"
     run["class_id"] = class_payload["id"]
     run["image_ids"] = [image["id"] for image in images]
+    run["image_platform_by_id"] = {image["id"]: image["platform"] for image in images}
     return run
 
 
@@ -127,6 +128,29 @@ def test_prediction_job_persists_matches_and_failures(tmp_path: Path, monkeypatc
         ]
         assert predictions[0]["matched_annotation_id"] is not None
         assert predictions[2]["confidence"] == 0
+
+        filtered_response = client.get(
+            f"/api/prediction-jobs/{job['id']}/predictions"
+            f"?failure_type=false_positive&class_id={run['class_id']}"
+            f"&confidence_min=0.7&confidence_max=0.8&platform={run['image_platform_by_id'][first_image_id]}"
+        )
+
+        assert filtered_response.status_code == 200
+        filtered_predictions = filtered_response.json()["items"]
+        assert len(filtered_predictions) == 1
+        assert filtered_predictions[0]["failure_type"] == "false_positive"
+        assert filtered_predictions[0]["confidence"] == 0.77
+
+        missed_response = client.get(
+            f"/api/prediction-jobs/{job['id']}/predictions"
+            f"?failure_type=false_negative&confidence_max=0"
+            f"&platform={run['image_platform_by_id'][second_image_id]}"
+        )
+
+        assert missed_response.status_code == 200
+        missed_predictions = missed_response.json()["items"]
+        assert len(missed_predictions) == 1
+        assert missed_predictions[0]["failure_type"] == "false_negative"
 
         jobs_response = client.get(f"/api/training/runs/{run['id']}/prediction-jobs")
 

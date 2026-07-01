@@ -189,6 +189,38 @@ const apiMock = vi.hoisted(() => {
       })),
     }),
   );
+  const listPredictions = vi.fn(async () => ({
+    items: [
+      {
+        id: 1,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 1,
+        x_center: 0.5,
+        y_center: 0.5,
+        width: 0.4,
+        height: 0.4,
+        confidence: 0.91,
+        matched_annotation_id: 1,
+        failure_type: "matched",
+      },
+      {
+        id: 2,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 1,
+        x_center: 0.1,
+        y_center: 0.1,
+        width: 0.1,
+        height: 0.1,
+        confidence: 0.77,
+        matched_annotation_id: null,
+        failure_type: "false_positive",
+      },
+    ],
+  }));
   const getTrainingRunSummary = vi.fn(async (runId: number) => ({
     run_id: runId,
     metric_series: [
@@ -303,6 +335,7 @@ const apiMock = vi.hoisted(() => {
     getTrainingRunLogs,
     getPredictionJobLogs,
     createPredictionThresholdScan,
+    listPredictions,
     getTrainingRunSummary,
     getExportCapabilities,
     listRunExports,
@@ -437,38 +470,7 @@ vi.mock("./api", () => ({
     updated_at: "2026-06-30T00:05:01",
   }),
   createPredictionThresholdScan: apiMock.createPredictionThresholdScan,
-  listPredictions: async () => ({
-    items: [
-      {
-        id: 1,
-        run_id: 1,
-        job_id: 1,
-        image_id: 10,
-        class_id: 1,
-        x_center: 0.5,
-        y_center: 0.5,
-        width: 0.4,
-        height: 0.4,
-        confidence: 0.91,
-        matched_annotation_id: 1,
-        failure_type: "matched",
-      },
-      {
-        id: 2,
-        run_id: 1,
-        job_id: 1,
-        image_id: 10,
-        class_id: 1,
-        x_center: 0.1,
-        y_center: 0.1,
-        width: 0.1,
-        height: 0.1,
-        confidence: 0.77,
-        matched_annotation_id: null,
-        failure_type: "false_positive",
-      },
-    ],
-  }),
+  listPredictions: apiMock.listPredictions,
   getPredictionJobLogs: apiMock.getPredictionJobLogs,
   getPredictionImageReview: async () => ({
     image: {
@@ -559,6 +561,7 @@ describe("App", () => {
     apiMock.getTrainingRunLogs.mockClear();
     apiMock.getPredictionJobLogs.mockClear();
     apiMock.createPredictionThresholdScan.mockClear();
+    apiMock.listPredictions.mockClear();
     apiMock.getTrainingRunSummary.mockClear();
     apiMock.getExportCapabilities.mockClear();
     apiMock.listRunExports.mockClear();
@@ -644,6 +647,22 @@ describe("App", () => {
     expect(await screen.findAllByText("67%")).toHaveLength(2);
     expect(await screen.findByText("false_positive")).toBeInTheDocument();
     expect((await screen.findAllByText("Matched")).length).toBeGreaterThanOrEqual(2);
+    await user.selectOptions(screen.getByLabelText("Failure type"), "false_positive");
+    await user.selectOptions(screen.getByLabelText("Prediction class"), "1");
+    await user.type(screen.getByLabelText("Min conf"), "0.5");
+    await user.type(screen.getByLabelText("Prediction platform"), "iris");
+    await user.click(screen.getByRole("button", { name: "Apply Sample Filters" }));
+    expect(apiMock.listPredictions).toHaveBeenLastCalledWith(1, {
+      failure_type: "false_positive",
+      class_id: 1,
+      confidence_min: 0.5,
+      confidence_max: undefined,
+      platform: "iris",
+      altitude_min: undefined,
+      altitude_max: undefined,
+      timestamp_min: undefined,
+      timestamp_max: undefined,
+    });
     const thresholdInput = screen.getByLabelText("Scan thresholds");
     await user.clear(thresholdInput);
     await user.type(thresholdInput, "0.1, 0.25, 0.55");

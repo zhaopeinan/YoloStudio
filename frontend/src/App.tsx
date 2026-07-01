@@ -34,6 +34,7 @@ import type {
   ConfusionCell,
   MetricSeries,
   Prediction,
+  PredictionFilters,
   PredictionImageReview,
   PredictionJob,
   RunExperimentSummary,
@@ -85,6 +86,20 @@ const defaultAugmentation: TrainingAugmentationConfig = {
   erasing: 0.4,
   gridmask: false,
 };
+
+function defaultPredictionFilters() {
+  return {
+    failure_type: "all" as "all" | "matched" | "false_positive" | "false_negative",
+    class_id: "",
+    confidence_min: "",
+    confidence_max: "",
+    platform: "",
+    altitude_min: "",
+    altitude_max: "",
+    timestamp_min: "",
+    timestamp_max: "",
+  };
+}
 
 type DraftBox = Annotation & {
   local_id: string;
@@ -162,6 +177,7 @@ export default function App() {
   const [predictionThresholds, setPredictionThresholds] = useState(
     "0.15, 0.25, 0.35, 0.5, 0.65",
   );
+  const [predictionFilters, setPredictionFilters] = useState(defaultPredictionFilters);
   const [activeReview, setActiveReview] = useState<PredictionImageReview | null>(null);
   const [showGroundTruthLayer, setShowGroundTruthLayer] = useState(true);
   const [showPredictionLayer, setShowPredictionLayer] = useState(true);
@@ -438,8 +454,7 @@ export default function App() {
       const jobsResponse = await listPredictionJobs(runId);
       setPredictionJobs(jobsResponse.items);
       if (jobsResponse.items[0]) {
-        const predictionsResponse = await listPredictions(jobsResponse.items[0].id);
-        setPredictions(predictionsResponse.items);
+        await loadFilteredPredictions(jobsResponse.items[0].id);
         if (
           isActivePredictionJob(jobsResponse.items[0].status) ||
           predictionLogs[jobsResponse.items[0].id]
@@ -488,6 +503,38 @@ export default function App() {
     } catch (error) {
       setSummaryError(error instanceof Error ? error.message : "Run summary failed to load");
     }
+  }
+
+  async function loadFilteredPredictions(jobId: number) {
+    const predictionsResponse = await listPredictions(
+      jobId,
+      toPredictionFilterRequest(predictionFilters),
+    );
+    setPredictions(predictionsResponse.items);
+  }
+
+  function handleApplyPredictionFilters() {
+    const job = predictionJobs[0];
+    if (!job) {
+      return;
+    }
+
+    setPredictionError(null);
+    loadFilteredPredictions(job.id).catch((error: Error) => setPredictionError(error.message));
+  }
+
+  function handleResetPredictionFilters() {
+    const nextFilters = defaultPredictionFilters();
+    setPredictionFilters(nextFilters);
+    const job = predictionJobs[0];
+    if (!job) {
+      return;
+    }
+
+    setPredictionError(null);
+    listPredictions(job.id)
+      .then((response) => setPredictions(response.items))
+      .catch((error: Error) => setPredictionError(error.message));
   }
 
   async function handleCreateClass(event: FormEvent<HTMLFormElement>) {
@@ -761,8 +808,7 @@ export default function App() {
         confidence_threshold: predictionConfidence,
       });
       setPredictionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
-      const predictionsResponse = await listPredictions(job.id);
-      setPredictions(predictionsResponse.items);
+      await loadFilteredPredictions(job.id);
       await refreshRunSummary(run.id);
       await loadPredictionLogs(job.id);
     } catch (error) {
@@ -797,8 +843,7 @@ export default function App() {
       setPredictionJobs((current) => mergePredictionJobs(response.items, current));
       const latestJob = response.items[response.items.length - 1];
       if (latestJob) {
-        const predictionsResponse = await listPredictions(latestJob.id);
-        setPredictions(predictionsResponse.items);
+        await loadFilteredPredictions(latestJob.id);
         await loadPredictionLogs(latestJob.id);
       }
       await refreshRunSummary(run.id);
@@ -1398,6 +1443,170 @@ export default function App() {
             <Radar size={16} />
             {isCreatingThresholdScan ? "Scanning" : "Run Threshold Scan"}
           </button>
+        </div>
+
+        <div className="prediction-filter-panel" aria-label="Prediction sample filters">
+          <label htmlFor="prediction-filter-failure">
+            Failure type
+            <select
+              id="prediction-filter-failure"
+              value={predictionFilters.failure_type}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({
+                  ...current,
+                  failure_type: event.target.value as typeof predictionFilters.failure_type,
+                }))
+              }
+              disabled={predictionJobs.length === 0}
+            >
+              <option value="all">All</option>
+              <option value="matched">Matched</option>
+              <option value="false_positive">False positive</option>
+              <option value="false_negative">False negative</option>
+            </select>
+          </label>
+          <label htmlFor="prediction-filter-class">
+            Prediction class
+            <select
+              id="prediction-filter-class"
+              value={predictionFilters.class_id}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({ ...current, class_id: event.target.value }))
+              }
+              disabled={predictionJobs.length === 0}
+            >
+              <option value="">All classes</option>
+              {classes.map((classItem) => (
+                <option key={classItem.id} value={classItem.id}>
+                  {classItem.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label htmlFor="prediction-filter-conf-min">
+            Min conf
+            <input
+              id="prediction-filter-conf-min"
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={predictionFilters.confidence_min}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({
+                  ...current,
+                  confidence_min: event.target.value,
+                }))
+              }
+              disabled={predictionJobs.length === 0}
+            />
+          </label>
+          <label htmlFor="prediction-filter-conf-max">
+            Max conf
+            <input
+              id="prediction-filter-conf-max"
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={predictionFilters.confidence_max}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({
+                  ...current,
+                  confidence_max: event.target.value,
+                }))
+              }
+              disabled={predictionJobs.length === 0}
+            />
+          </label>
+          <label htmlFor="prediction-filter-platform">
+            Prediction platform
+            <input
+              id="prediction-filter-platform"
+              value={predictionFilters.platform}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({ ...current, platform: event.target.value }))
+              }
+              disabled={predictionJobs.length === 0}
+            />
+          </label>
+          <label htmlFor="prediction-filter-alt-min">
+            Min altitude
+            <input
+              id="prediction-filter-alt-min"
+              type="number"
+              value={predictionFilters.altitude_min}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({
+                  ...current,
+                  altitude_min: event.target.value,
+                }))
+              }
+              disabled={predictionJobs.length === 0}
+            />
+          </label>
+          <label htmlFor="prediction-filter-alt-max">
+            Max altitude
+            <input
+              id="prediction-filter-alt-max"
+              type="number"
+              value={predictionFilters.altitude_max}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({
+                  ...current,
+                  altitude_max: event.target.value,
+                }))
+              }
+              disabled={predictionJobs.length === 0}
+            />
+          </label>
+          <label htmlFor="prediction-filter-time-min">
+            Min time
+            <input
+              id="prediction-filter-time-min"
+              type="number"
+              value={predictionFilters.timestamp_min}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({
+                  ...current,
+                  timestamp_min: event.target.value,
+                }))
+              }
+              disabled={predictionJobs.length === 0}
+            />
+          </label>
+          <label htmlFor="prediction-filter-time-max">
+            Max time
+            <input
+              id="prediction-filter-time-max"
+              type="number"
+              value={predictionFilters.timestamp_max}
+              onChange={(event) =>
+                setPredictionFilters((current) => ({
+                  ...current,
+                  timestamp_max: event.target.value,
+                }))
+              }
+              disabled={predictionJobs.length === 0}
+            />
+          </label>
+          <div className="prediction-filter-actions">
+            <button
+              type="button"
+              disabled={predictionJobs.length === 0}
+              onClick={handleApplyPredictionFilters}
+            >
+              Apply Sample Filters
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={predictionJobs.length === 0}
+              onClick={handleResetPredictionFilters}
+            >
+              Reset
+            </button>
+          </div>
         </div>
 
         {predictionError ? <div className="error-banner">{predictionError}</div> : null}
@@ -2056,6 +2265,20 @@ function toImageFilterRequest(filters: {
     edge_tag: filters.edge_tag.trim() || undefined,
     altitude_min: filters.altitude_min === "" ? undefined : Number(filters.altitude_min),
     altitude_max: filters.altitude_max === "" ? undefined : Number(filters.altitude_max),
+  };
+}
+
+function toPredictionFilterRequest(filters: ReturnType<typeof defaultPredictionFilters>): PredictionFilters {
+  return {
+    failure_type: filters.failure_type,
+    class_id: filters.class_id ? Number(filters.class_id) : undefined,
+    confidence_min: filters.confidence_min === "" ? undefined : Number(filters.confidence_min),
+    confidence_max: filters.confidence_max === "" ? undefined : Number(filters.confidence_max),
+    platform: filters.platform.trim() || undefined,
+    altitude_min: filters.altitude_min === "" ? undefined : Number(filters.altitude_min),
+    altitude_max: filters.altitude_max === "" ? undefined : Number(filters.altitude_max),
+    timestamp_min: filters.timestamp_min === "" ? undefined : Number(filters.timestamp_min),
+    timestamp_max: filters.timestamp_max === "" ? undefined : Number(filters.timestamp_max),
   };
 }
 

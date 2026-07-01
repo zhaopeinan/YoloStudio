@@ -176,13 +176,14 @@ After a training run exists:
 3. Set a confidence threshold.
 4. Click `Run Prediction Analysis`.
 5. Review matched, false-positive, and false-negative counts.
-6. Inspect the prediction/failure sample list; each row keeps the source image ID for annotator follow-up.
-7. Click `Open Image` on a sample to jump to that image in the annotator.
-8. Use the `GT` and `Pred` layer toggles to isolate saved boxes or model outputs.
-9. Prediction boxes show failure type, class, and confidence on the image overlay.
-10. Use `Add as annotation` to promote a false-positive prediction into an editable annotation draft.
-11. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
-12. Click `Save Annotations` when the correction draft looks right.
+6. Filter prediction/failure samples by failure type, class, confidence, platform, altitude, or timestamp.
+7. Inspect the prediction/failure sample list; each row keeps the source image ID for annotator follow-up.
+8. Click `Open Image` on a sample to jump to that image in the annotator.
+9. Use the `GT` and `Pred` layer toggles to isolate saved boxes or model outputs.
+10. Prediction boxes show failure type, class, and confidence on the image overlay.
+11. Use `Add as annotation` to promote a false-positive prediction into an editable annotation draft.
+12. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
+13. Click `Save Annotations` when the correction draft looks right.
 
 For threshold tuning, enter comma-separated confidence values in `Scan thresholds`, such as
 `0.15, 0.25, 0.35, 0.5, 0.65`, then click `Run Threshold Scan`. The backend creates one
@@ -198,6 +199,8 @@ API smoke for threshold scans:
 curl -X POST http://127.0.0.1:8000/api/training/runs/1/prediction-threshold-scan \
   -H "Content-Type: application/json" \
   -d '{"image_scope":"all","thresholds":[0.15,0.25,0.35,0.5,0.65]}'
+
+curl "http://127.0.0.1:8000/api/prediction-jobs/1/predictions?failure_type=false_positive&class_id=1&confidence_min=0.5&platform=iris"
 ```
 
 Prediction artifacts are written under:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -132,12 +132,54 @@ def list_run_prediction_jobs(run_id: int, db: Session = Depends(get_db)) -> Pred
 
 
 @router.get("/prediction-jobs/{job_id}/predictions", response_model=PredictionList)
-def list_job_predictions(job_id: int, db: Session = Depends(get_db)) -> PredictionList:
+def list_job_predictions(
+    job_id: int,
+    failure_type: str = Query("all", pattern="^(all|matched|false_positive|false_negative)$"),
+    class_id: int | None = None,
+    confidence_min: float | None = Query(None, ge=0, le=1),
+    confidence_max: float | None = Query(None, ge=0, le=1),
+    platform: str | None = Query(None, max_length=80),
+    altitude_min: float | None = None,
+    altitude_max: float | None = None,
+    timestamp_min: float | None = None,
+    timestamp_max: float | None = None,
+    db: Session = Depends(get_db),
+) -> PredictionList:
     if db.get(PredictionJob, job_id) is None:
         raise HTTPException(status_code=404, detail="Prediction job was not found")
-    predictions = db.scalars(
-        select(Prediction).where(Prediction.job_id == job_id).order_by(Prediction.id)
-    ).all()
+    query = select(Prediction).where(Prediction.job_id == job_id)
+    needs_image_join = any(
+        value is not None
+        for value in [
+            platform,
+            altitude_min,
+            altitude_max,
+            timestamp_min,
+            timestamp_max,
+        ]
+    )
+    if needs_image_join:
+        query = query.join(Image, Prediction.image_id == Image.id)
+    if failure_type != "all":
+        query = query.where(Prediction.failure_type == failure_type)
+    if class_id is not None:
+        query = query.where(Prediction.class_id == class_id)
+    if confidence_min is not None:
+        query = query.where(Prediction.confidence >= confidence_min)
+    if confidence_max is not None:
+        query = query.where(Prediction.confidence <= confidence_max)
+    if platform:
+        query = query.where(Image.platform == platform)
+    if altitude_min is not None:
+        query = query.where(Image.altitude >= altitude_min)
+    if altitude_max is not None:
+        query = query.where(Image.altitude <= altitude_max)
+    if timestamp_min is not None:
+        query = query.where(Image.timestamp >= timestamp_min)
+    if timestamp_max is not None:
+        query = query.where(Image.timestamp <= timestamp_max)
+
+    predictions = db.scalars(query.order_by(Prediction.id)).all()
     return PredictionList(items=[_read_prediction(prediction) for prediction in predictions])
 
 
