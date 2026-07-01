@@ -156,6 +156,9 @@ Enable `Auto threshold scan` in Training Setup to run the default thresholds
 normal prediction job, so the Prediction Analysis list, logs, and Experiment Dashboard threshold
 table use the same review workflow as manual prediction jobs.
 
+Enable `TTA` to pass Ultralytics `augment=True` into prediction jobs. This affects manual
+prediction analysis, manual threshold scans, and automatic post-training threshold scans for the run.
+
 API smoke after creating a dataset version:
 
 ```bash

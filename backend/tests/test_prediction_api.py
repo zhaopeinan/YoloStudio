@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 from test_dataset_import_api import create_import_zip, isolated_client
@@ -264,3 +266,48 @@ def test_prediction_threshold_scan_creates_multiple_jobs_and_summary_points(
         assert threshold_scan[0]["recall"] == 1
         assert threshold_scan[2]["precision"] == 1
         assert threshold_scan[2]["recall"] == 0.5
+
+
+def test_predict_images_passes_tta_to_ultralytics(tmp_path: Path, monkeypatch):
+    from app.db.models import Image, TrainingRun
+    from app.prediction.runner import predict_images
+
+    calls = []
+
+    class FakeYOLO:
+        def __init__(self, weights_path):
+            self.weights_path = weights_path
+
+        def predict(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLO=FakeYOLO))
+
+    run_root = tmp_path / "run"
+    weights = run_root / "ultralytics" / "weights" / "best.pt"
+    weights.parent.mkdir(parents=True)
+    weights.write_text("fake weights")
+    run = TrainingRun(
+        id=1,
+        project_id=1,
+        version_id=1,
+        status="completed",
+        device="cpu",
+        config={"tta": True},
+        artifact_path=str(run_root),
+        log_path=str(run_root / "logs.txt"),
+    )
+    image = Image(id=10, dataset_id=1, relative_path="/tmp/frame.png")
+
+    results = predict_images(run, [image], confidence_threshold=0.35)
+
+    assert results == {10: []}
+    assert calls == [
+        {
+            "source": "/tmp/frame.png",
+            "conf": 0.35,
+            "augment": True,
+            "verbose": False,
+        }
+    ]

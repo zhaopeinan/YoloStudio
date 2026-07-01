@@ -88,6 +88,10 @@ def list_job_images(db: Session, run: TrainingRun, image_scope: str) -> list[Ima
     return db.scalars(select(Image).where(Image.id.in_(image_ids)).order_by(Image.id)).all()
 
 
+def run_uses_tta(run: TrainingRun) -> bool:
+    return bool((run.config or {}).get("tta"))
+
+
 def predict_images(
     run: TrainingRun,
     images: list[Image],
@@ -103,9 +107,15 @@ def predict_images(
         raise RuntimeError(f"Model weights were not found: {weights}")
 
     model = YOLO(str(weights))
+    use_tta = run_uses_tta(run)
     results_by_image: dict[int, list[dict]] = {}
     for image in images:
-        result = model.predict(source=image.relative_path, conf=confidence_threshold, verbose=False)
+        result = model.predict(
+            source=image.relative_path,
+            conf=confidence_threshold,
+            augment=use_tta,
+            verbose=False,
+        )
         results_by_image[image.id] = []
         for item in result:
             boxes = getattr(item, "boxes", None)
