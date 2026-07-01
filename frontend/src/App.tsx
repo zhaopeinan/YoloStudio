@@ -874,6 +874,19 @@ export default function App() {
     updateAnnotation(localId, { [field]: nextValue });
   }
 
+  function updateAnnotationClass(localId: string, classId: number) {
+    const classInfo = classById.get(classId);
+    if (!classInfo) {
+      return;
+    }
+
+    updateAnnotation(localId, {
+      class_id: classInfo.id,
+      class_name: classInfo.name,
+      class_color: classInfo.color,
+    });
+  }
+
   function deleteAnnotation(localId: string) {
     setAnnotations((current) => current.filter((annotation) => annotation.local_id !== localId));
   }
@@ -2628,6 +2641,28 @@ export default function App() {
                           <Trash2 size={16} />
                         </button>
                       </div>
+
+                      <label
+                        className="box-class-control"
+                        htmlFor={`box-class-${annotation.local_id}`}
+                      >
+                        Class
+                        <select
+                          id={`box-class-${annotation.local_id}`}
+                          aria-label={`Box ${index + 1} class`}
+                          value={annotation.class_id}
+                          onChange={(event) =>
+                            updateAnnotationClass(annotation.local_id, Number(event.target.value))
+                          }
+                          disabled={classes.length === 0}
+                        >
+                          {classes.map((classItem) => (
+                            <option key={classItem.id} value={classItem.id}>
+                              {classItem.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
                       <div className="geometry-grid" aria-label={`Box ${index + 1} geometry`}>
                         <label htmlFor={`box-x-${annotation.local_id}`}>

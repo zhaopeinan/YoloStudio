@@ -1038,6 +1038,43 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("changes an existing annotation box class before saving", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.type(screen.getByLabelText("Class name"), "vehicle");
+    await user.click(screen.getByRole("button", { name: "Create Class" }));
+    expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
+
+    await user.click(await screen.findByText("iris/frame002.jpg"));
+    expect(
+      await screen.findByText("target", { selector: ".box-editor-title strong" }),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Box 1 class"), "2");
+    expect(
+      screen.getByText("vehicle", { selector: ".box-editor-title strong" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+
+    expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
+      11,
+      expect.arrayContaining([
+        expect.objectContaining({
+          class_id: 2,
+          x_center: 0.6,
+          y_center: 0.55,
+          width: 0.25,
+          height: 0.2,
+          track_id: "copy-source",
+          edge_tags: ["occluded"],
+        }),
+      ]),
+    );
+  });
+
   it("auto-refreshes active training runs and prediction jobs until idle", async () => {
     apiMock.trainingRunsResponseQueue.push(
       { items: [apiMock.runningRun] },
