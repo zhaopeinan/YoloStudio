@@ -1275,6 +1275,28 @@ input[type="color"] {
   background: #f8fafb;
 }
 
+.edge-tag-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  min-height: 28px;
+  border: 1px solid #c9d7de;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: #234047;
+  background: #eef4f6;
+  font-size: 12px;
+}
+
+.tag-chip.selected {
+  border-color: #1f6f78;
+  color: #ffffff;
+  background: #1f6f78;
+}
+
 .box-editor-title {
   justify-content: flex-start;
 }

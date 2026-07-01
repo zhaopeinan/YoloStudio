@@ -827,6 +827,8 @@ describe("App", () => {
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("X"), { target: { value: "0.42" } });
+    await user.click(screen.getByRole("button", { name: "camouflaged" }));
+    await user.click(screen.getByRole("button", { name: "hard negative" }));
     await user.click(screen.getByRole("button", { name: "Save Annotations" }));
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       10,
@@ -837,6 +839,7 @@ describe("App", () => {
           width: 0.25,
           height: 0.2,
           track_id: "copy-source",
+          edge_tags: ["occluded", "camouflaged", "hard_negative"],
         }),
       ]),
     );

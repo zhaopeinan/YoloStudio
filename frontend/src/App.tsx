@@ -82,6 +82,14 @@ const defaultClassColor = "#ef4444";
 const monitorRefreshMs = 2500;
 const activeRunStatuses = new Set(["queued", "preparing", "running"]);
 const activePredictionStatuses = new Set(["queued", "running"]);
+const edgeTagPresets = [
+  "occluded",
+  "camouflaged",
+  "low_light",
+  "small",
+  "dense",
+  "hard_negative",
+];
 const defaultAugmentation: TrainingAugmentationConfig = {
   mosaic: 1,
   mixup: 0,
@@ -2493,6 +2501,26 @@ export default function App() {
                         }
                         placeholder="occluded, small"
                       />
+                      <div className="edge-tag-presets" aria-label={`Box ${index + 1} edge tag presets`}>
+                        {edgeTagPresets.map((tag) => {
+                          const isSelected = (annotation.edge_tags ?? []).includes(tag);
+                          return (
+                            <button
+                              type="button"
+                              key={tag}
+                              className={isSelected ? "tag-chip selected" : "tag-chip"}
+                              aria-pressed={isSelected}
+                              onClick={() =>
+                                updateAnnotation(annotation.local_id, {
+                                  edge_tags: toggleTag(annotation.edge_tags, tag),
+                                })
+                              }
+                            >
+                              {formatIssueType(tag)}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   ))
                 )}
@@ -2694,6 +2722,14 @@ function clampDimension(value: number) {
 
 function mergeTags(existing: string[] | undefined, tags: string[]) {
   return Array.from(new Set([...(existing ?? []), ...tags]));
+}
+
+function toggleTag(existing: string[] | undefined, tag: string) {
+  const tags = existing ?? [];
+  if (tags.includes(tag)) {
+    return tags.filter((item) => item !== tag);
+  }
+  return [...tags, tag];
 }
 
 function formatFailureType(value: string) {
