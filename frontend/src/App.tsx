@@ -2908,7 +2908,10 @@ function ExperimentDashboard(props: { summary: RunExperimentSummary | null }) {
             <ConfusionMatrix cells={summary.confusion_matrix} />
           </div>
 
-          <ThresholdScanTable rows={summary.threshold_scan} />
+          <ThresholdScanTable
+            rows={summary.threshold_scan}
+            recommendation={summary.threshold_recommendation}
+          />
         </>
       )}
     </div>
@@ -3004,39 +3007,57 @@ function ConfusionMatrix(props: { cells: ConfusionCell[] }) {
   );
 }
 
-function ThresholdScanTable(props: { rows: RunExperimentSummary["threshold_scan"] }) {
+function ThresholdScanTable(props: {
+  rows: RunExperimentSummary["threshold_scan"];
+  recommendation: RunExperimentSummary["threshold_recommendation"];
+}) {
   return (
     <div className="analysis-panel threshold-panel">
       <strong>Threshold Scan</strong>
       {props.rows.length === 0 ? (
         <p className="empty-state">Run prediction jobs at different confidence thresholds.</p>
       ) : (
-        <div className="compact-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Conf</th>
-                <th>Precision</th>
-                <th>Recall</th>
-                <th>Matched</th>
-                <th>False +</th>
-                <th>False -</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.rows.map((row) => (
-                <tr key={row.job_id}>
-                  <td>{row.confidence_threshold.toFixed(2)}</td>
-                  <td>{formatPercent(row.precision)}</td>
-                  <td>{formatPercent(row.recall)}</td>
-                  <td>{row.matched}</td>
-                  <td>{row.false_positive}</td>
-                  <td>{row.false_negative}</td>
+        <>
+          {props.recommendation ? (
+            <div className="threshold-recommendation">
+              <span>Best threshold</span>
+              <strong>{props.recommendation.confidence_threshold.toFixed(2)}</strong>
+              <small>
+                F1 {formatPercent(props.recommendation.f1)} | P{" "}
+                {formatPercent(props.recommendation.precision)} | R{" "}
+                {formatPercent(props.recommendation.recall)}
+              </small>
+            </div>
+          ) : null}
+          <div className="compact-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Conf</th>
+                  <th>Precision</th>
+                  <th>Recall</th>
+                  <th>F1</th>
+                  <th>Matched</th>
+                  <th>False +</th>
+                  <th>False -</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {props.rows.map((row) => (
+                  <tr key={row.job_id}>
+                    <td>{row.confidence_threshold.toFixed(2)}</td>
+                    <td>{formatPercent(row.precision)}</td>
+                    <td>{formatPercent(row.recall)}</td>
+                    <td>{formatPercent(row.f1)}</td>
+                    <td>{row.matched}</td>
+                    <td>{row.false_positive}</td>
+                    <td>{row.false_negative}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

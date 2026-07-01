@@ -100,4 +100,14 @@ def test_run_experiment_summary_aggregates_metrics_predictions_and_thresholds(
         assert payload["confusion_matrix"][0]["count"] == 1
         assert [point["confidence_threshold"] for point in payload["threshold_scan"]] == [0.25, 0.5]
         assert payload["threshold_scan"][0]["precision"] == 2 / 3
+        assert payload["threshold_scan"][0]["recall"] == 1.0
+        assert payload["threshold_scan"][0]["f1"] == 0.8
         assert payload["threshold_scan"][1]["recall"] == 0.5
+        assert payload["threshold_scan"][1]["f1"] == 2 / 3
+        assert payload["threshold_recommendation"] == {
+            "job_id": first_job_response.json()["id"],
+            "confidence_threshold": 0.25,
+            "precision": 2 / 3,
+            "recall": 1.0,
+            "f1": 0.8,
+        }

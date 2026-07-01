@@ -277,6 +277,15 @@ export type ThresholdPoint = {
   false_negative: number;
   precision: number;
   recall: number;
+  f1: number;
+};
+
+export type ThresholdRecommendation = {
+  job_id: number;
+  confidence_threshold: number;
+  precision: number;
+  recall: number;
+  f1: number;
 };
 
 export type RunExperimentSummary = {
@@ -285,6 +294,7 @@ export type RunExperimentSummary = {
   class_outcomes: ClassOutcome[];
   confusion_matrix: ConfusionCell[];
   threshold_scan: ThresholdPoint[];
+  threshold_recommendation: ThresholdRecommendation | null;
   latest_prediction_job_id: number | null;
 };
 

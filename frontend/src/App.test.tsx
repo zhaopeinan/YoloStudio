@@ -357,8 +357,16 @@ const apiMock = vi.hoisted(() => {
         false_negative: 1,
         precision: 2 / 3,
         recall: 2 / 3,
+        f1: 2 / 3,
       },
     ],
+    threshold_recommendation: {
+      job_id: 1,
+      confidence_threshold: 0.25,
+      precision: 2 / 3,
+      recall: 2 / 3,
+      f1: 2 / 3,
+    },
     latest_prediction_job_id: 1,
   }));
   const getExportCapabilities = vi.fn(async () => ({
@@ -757,7 +765,11 @@ describe("App", () => {
     expect(await screen.findByText("box_loss")).toBeInTheDocument();
     expect(await screen.findByText("Class Outcomes")).toBeInTheDocument();
     expect(await screen.findByText("Threshold Scan")).toBeInTheDocument();
-    expect(await screen.findAllByText("67%")).toHaveLength(2);
+    expect(await screen.findByText("Best threshold")).toBeInTheDocument();
+    expect((await screen.findAllByText("0.25")).length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText("F1")).toBeInTheDocument();
+    expect(await screen.findByText("F1 67% | P 67% | R 67%")).toBeInTheDocument();
+    expect((await screen.findAllByText("67%")).length).toBeGreaterThanOrEqual(3);
     expect(await screen.findByText("false_positive")).toBeInTheDocument();
     expect((await screen.findAllByText("Matched")).length).toBeGreaterThanOrEqual(2);
     await user.selectOptions(screen.getByLabelText("Failure type"), "false_positive");

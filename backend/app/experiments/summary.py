@@ -13,17 +13,20 @@ from app.experiments.schemas import (
     MetricSeries,
     RunExperimentSummary,
     ThresholdPoint,
+    ThresholdRecommendation,
 )
 
 
 def build_run_experiment_summary(db: Session, run: TrainingRun) -> RunExperimentSummary:
     latest_job = _latest_completed_prediction_job(db, run.id)
+    threshold_scan = _threshold_scan(db, run.id)
     return RunExperimentSummary(
         run_id=run.id,
         metric_series=_metric_series(db, run.id),
         class_outcomes=_class_outcomes(db, latest_job.id) if latest_job else [],
         confusion_matrix=_confusion_matrix(db, latest_job.id) if latest_job else [],
-        threshold_scan=_threshold_scan(db, run.id),
+        threshold_scan=threshold_scan,
+        threshold_recommendation=_threshold_recommendation(threshold_scan),
         latest_prediction_job_id=latest_job.id if latest_job else None,
     )
 
@@ -69,6 +72,7 @@ def _threshold_scan(db: Session, run_id: int) -> list[ThresholdPoint]:
         recall_denominator = job.matched_count + job.false_negative_count
         precision = job.matched_count / precision_denominator if precision_denominator else 0
         recall = job.matched_count / recall_denominator if recall_denominator else 0
+        f1 = _f1(precision, recall)
         points.append(
             ThresholdPoint(
                 job_id=job.id,
@@ -78,9 +82,28 @@ def _threshold_scan(db: Session, run_id: int) -> list[ThresholdPoint]:
                 false_negative=job.false_negative_count,
                 precision=precision,
                 recall=recall,
+                f1=f1,
             )
         )
     return points
+
+
+def _f1(precision: float, recall: float) -> float:
+    denominator = precision + recall
+    return 2 * precision * recall / denominator if denominator else 0
+
+
+def _threshold_recommendation(points: list[ThresholdPoint]) -> ThresholdRecommendation | None:
+    if not points:
+        return None
+    best = max(points, key=lambda point: (point.f1, point.recall, point.confidence_threshold))
+    return ThresholdRecommendation(
+        job_id=best.job_id,
+        confidence_threshold=best.confidence_threshold,
+        precision=best.precision,
+        recall=best.recall,
+        f1=best.f1,
+    )
 
 
 def _class_outcomes(db: Session, job_id: int) -> list[ClassOutcome]:

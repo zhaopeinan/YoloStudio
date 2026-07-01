@@ -39,6 +39,15 @@ class ThresholdPoint(BaseModel):
     false_negative: int
     precision: float
     recall: float
+    f1: float
+
+
+class ThresholdRecommendation(BaseModel):
+    job_id: int
+    confidence_threshold: float
+    precision: float
+    recall: float
+    f1: float
 
 
 class RunExperimentSummary(BaseModel):
@@ -47,4 +56,5 @@ class RunExperimentSummary(BaseModel):
     class_outcomes: list[ClassOutcome]
     confusion_matrix: list[ConfusionCell]
     threshold_scan: list[ThresholdPoint]
+    threshold_recommendation: ThresholdRecommendation | None
     latest_prediction_job_id: int | None

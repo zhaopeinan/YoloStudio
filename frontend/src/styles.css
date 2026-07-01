@@ -874,6 +874,24 @@ input[type="color"] {
   gap: 10px;
 }
 
+.threshold-recommendation {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cddde5;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #eef5f6;
+}
+
+.threshold-recommendation span,
+.threshold-recommendation small {
+  color: #62727e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .compact-table-wrap {
   overflow-x: auto;
 }
