@@ -238,6 +238,17 @@ def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
         assert len(manifest["images"]) == 2
         assert {item["split"] for item in manifest["images"]} == {"train", "val"}
         assert all(item["annotations"] for item in manifest["images"])
+        images_by_id = {image["id"]: image for image in images}
+        for manifest_image in manifest["images"]:
+            source_image = images_by_id[manifest_image["image_id"]]
+            assert manifest_image["width"] == source_image["width"]
+            assert manifest_image["height"] == source_image["height"]
+            assert manifest_image["platform"] == source_image["platform"]
+            assert manifest_image["altitude"] == source_image["altitude"]
+            assert manifest_image["timestamp"] == source_image["timestamp"]
+            assert manifest_image["metadata"]["drone"] == source_image["platform"]
+            assert manifest_image["metadata"]["z"] == source_image["altitude"]
+            assert manifest_image["metadata"]["t"] == source_image["timestamp"]
 
         label_files = sorted((artifact_root / "labels").glob("*/*.txt"))
         assert len(label_files) == 2

@@ -201,6 +201,12 @@ def create_dataset_version(
                     "export_image": str(Path("images") / split / image_name),
                     "export_label": str(Path("labels") / split / label_name),
                     "split": split,
+                    "width": image.width,
+                    "height": image.height,
+                    "platform": image.platform,
+                    "altitude": image.altitude,
+                    "timestamp": image.timestamp,
+                    "metadata": image.metadata_ or {},
                     "annotations": manifest_annotations,
                 }
             )

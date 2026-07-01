@@ -114,6 +114,9 @@ Version export includes only annotated images for the selected classes. It freez
 project classes into a zero-based YOLO class map sorted by class ID, writes normalized
 `class x_center y_center width height` labels, and uses a deterministic 80/10/10 split with at least
 one validation image when there are two or more annotated images.
+The version `manifest.json` also freezes each exported image's platform, altitude, timestamp,
+dimensions, source metadata, annotation `track_id`, and edge tags so later prediction review or
+situation-map alignment can trace results back to the exact training snapshot.
 
 ## Training run lifecycle
 
