@@ -75,6 +75,8 @@ class ProjectList(BaseModel):
 class DatasetImageRead(BaseModel):
     id: int
     relative_path: str
+    width: int | None
+    height: int | None
     platform: str | None
     altitude: float | None
     timestamp: float | None

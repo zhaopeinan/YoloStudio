@@ -995,6 +995,8 @@ export default function App() {
           {
             id: review.image.id,
             relative_path: review.image.relative_path,
+            width: null,
+            height: null,
             platform: review.image.platform,
             altitude: review.image.altitude,
             timestamp: review.image.timestamp,
@@ -1022,6 +1024,8 @@ export default function App() {
         {
           id: issue.image_id,
           relative_path: issue.image_path,
+          width: null,
+          height: null,
           platform: null,
           altitude: null,
           timestamp: null,

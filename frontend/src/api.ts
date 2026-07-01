@@ -74,6 +74,8 @@ export type ProjectListResponse = {
 export type DatasetImage = {
   id: number;
   relative_path: string;
+  width: number | null;
+  height: number | null;
   platform: string | null;
   altitude: number | null;
   timestamp: number | null;

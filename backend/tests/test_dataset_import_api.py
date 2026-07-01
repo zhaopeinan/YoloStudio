@@ -18,6 +18,38 @@ from app.main import app
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+JPEG_32X24 = bytes(
+    [
+        0xFF,
+        0xD8,
+        0xFF,
+        0xE0,
+        0x00,
+        0x10,
+        *b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00",
+        0xFF,
+        0xC0,
+        0x00,
+        0x11,
+        0x08,
+        0x00,
+        0x18,
+        0x00,
+        0x20,
+        0x03,
+        0x01,
+        0x11,
+        0x00,
+        0x02,
+        0x11,
+        0x00,
+        0x03,
+        0x11,
+        0x00,
+        0xFF,
+        0xD9,
+    ]
+)
 
 
 def create_import_zip(path: Path) -> None:
@@ -61,6 +93,15 @@ def create_unknown_class_yolo_zip(path: Path) -> None:
         archive.writestr("dataset/data.yaml", "names: [target]\n")
         archive.writestr("dataset/images/train/frame001.png", PNG_1X1)
         archive.writestr("dataset/labels/train/frame001.txt", "2 0.5 0.5 0.4 0.4\n")
+
+
+def create_jpeg_import_zip(path: Path) -> None:
+    with ZipFile(path, "w") as archive:
+        archive.writestr("dataset/images/train/frame001.jpg", JPEG_32X24)
+        archive.writestr(
+            "dataset/meta.jsonl",
+            '{"file":"frame001.jpg","drone":"iris","z":12.0,"t":1.0}\n',
+        )
 
 
 @contextmanager
@@ -208,6 +249,31 @@ def test_import_dataset_loads_yolo_classes_and_labels(tmp_path: Path):
                 "edge_tags": [],
             }
         ]
+
+
+def test_import_dataset_reads_jpeg_dimensions(tmp_path: Path):
+    zip_path = tmp_path / "jpeg.zip"
+    create_jpeg_import_zip(zip_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "JPEG Import Project",
+                "dataset_name": "jpeg",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+
+        images_response = client.get(f"/api/datasets/{payload['dataset_id']}/images")
+
+        assert images_response.status_code == 200
+        images = images_response.json()["items"]
+        assert len(images) == 1
+        assert images[0]["width"] == 32
+        assert images[0]["height"] == 24
 
 
 def test_import_dataset_reports_unknown_yolo_class_references(tmp_path: Path):

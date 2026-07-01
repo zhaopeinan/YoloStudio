@@ -146,6 +146,8 @@ def list_dataset_images(
             DatasetImageRead(
                 id=image.id,
                 relative_path=image.relative_path,
+                width=image.width,
+                height=image.height,
                 platform=image.platform,
                 altitude=image.altitude,
                 timestamp=image.timestamp,

@@ -115,6 +115,8 @@ const apiMock = vi.hoisted(() => {
       {
         id: 10,
         relative_path: "iris/frame001.jpg",
+        width: 640,
+        height: 480,
         platform: "iris",
         altitude: 12,
         timestamp: 1,
@@ -124,6 +126,8 @@ const apiMock = vi.hoisted(() => {
       {
         id: 11,
         relative_path: "iris/frame002.jpg",
+        width: 640,
+        height: 480,
         platform: "iris",
         altitude: 13,
         timestamp: 2,

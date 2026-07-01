@@ -317,9 +317,68 @@ def _png_size(path: Path) -> tuple[int | None, int | None]:
     return None, None
 
 
+def _jpeg_size(path: Path) -> tuple[int | None, int | None]:
+    try:
+        with path.open("rb") as handle:
+            data = handle.read()
+    except OSError:
+        return None, None
+    if len(data) < 4 or data[:2] != b"\xff\xd8":
+        return None, None
+
+    offset = 2
+    sof_markers = {
+        0xC0,
+        0xC1,
+        0xC2,
+        0xC3,
+        0xC5,
+        0xC6,
+        0xC7,
+        0xC9,
+        0xCA,
+        0xCB,
+        0xCD,
+        0xCE,
+        0xCF,
+    }
+    while offset < len(data):
+        while offset < len(data) and data[offset] != 0xFF:
+            offset += 1
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            return None, None
+
+        marker = data[offset]
+        offset += 1
+        if marker in {0xD8, 0xD9}:
+            continue
+        if marker == 0xDA:
+            return None, None
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            return None, None
+        if offset + 2 > len(data):
+            return None, None
+
+        segment_length = int.from_bytes(data[offset : offset + 2], "big")
+        if segment_length < 2 or offset + segment_length > len(data):
+            return None, None
+        if marker in sof_markers:
+            if segment_length < 7:
+                return None, None
+            height = int.from_bytes(data[offset + 3 : offset + 5], "big")
+            width = int.from_bytes(data[offset + 5 : offset + 7], "big")
+            return width, height
+        offset += segment_length
+    return None, None
+
+
 def _image_size(path: Path) -> tuple[int | None, int | None]:
     if path.suffix.lower() == ".png":
         return _png_size(path)
+    if path.suffix.lower() in {".jpg", ".jpeg"}:
+        return _jpeg_size(path)
     return None, None
 
 
