@@ -18,6 +18,7 @@ QUALITY_ISSUE_TYPES = {
     "invalid_box",
     "duplicate_box",
     "missing_metadata",
+    "missing_image_dimensions",
     "unknown_class_reference",
 }
 
@@ -71,6 +72,10 @@ def missing_metadata_fields(image: Image) -> list[str]:
     if image.timestamp is None:
         fields.append("timestamp")
     return fields
+
+
+def has_missing_image_dimensions(image: Image) -> bool:
+    return image.width is None or image.height is None
 
 
 def _import_warnings(dataset: Dataset, warning_type: str | None = None) -> list[dict]:
@@ -129,6 +134,7 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     duplicate_box_count = _duplicate_box_count([annotation for annotation, _ in rows])
     images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
     missing_metadata_count = sum(1 for image in images if missing_metadata_fields(image))
+    missing_image_dimensions_count = sum(1 for image in images if has_missing_image_dimensions(image))
     unannotated_image_count = image_count - annotated_image_count
     unknown_class_reference_count = sum(
         int(warning.get("count") or 0)
@@ -159,6 +165,9 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
         issues.append(
             f"{missing_metadata_count} {noun} missing platform, altitude, timestamp, or source metadata."
         )
+    if missing_image_dimensions_count > 0:
+        noun = "image has" if missing_image_dimensions_count == 1 else "images have"
+        issues.append(f"{missing_image_dimensions_count} {noun} unreadable image dimensions.")
     if unknown_class_reference_count > 0:
         noun = "label references" if unknown_class_reference_count == 1 else "label references"
         issues.append(f"{unknown_class_reference_count} {noun} unknown class indexes.")
@@ -181,6 +190,7 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
         invalid_box_count=invalid_box_count,
         duplicate_box_count=duplicate_box_count,
         missing_metadata_count=missing_metadata_count,
+        missing_image_dimensions_count=missing_image_dimensions_count,
         unknown_class_reference_count=unknown_class_reference_count,
         ready_for_training=ready_for_training,
         issues=issues,
@@ -329,6 +339,22 @@ def build_quality_issues(
                     issue_type="missing_metadata",
                     severity="warning",
                     message=f"Image is missing {', '.join(missing_fields)}.",
+                    image_id=image.id,
+                    image_path=image.relative_path,
+                    image_url=f"/api/images/{image.id}/file",
+                )
+            )
+
+    if issue_type in {"all", "missing_image_dimensions"}:
+        images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
+        for image in images:
+            if not has_missing_image_dimensions(image):
+                continue
+            issues.append(
+                DatasetQualityIssue(
+                    issue_type="missing_image_dimensions",
+                    severity="warning",
+                    message="Image width or height could not be read.",
                     image_id=image.id,
                     image_path=image.relative_path,
                     image_url=f"/api/images/{image.id}/file",

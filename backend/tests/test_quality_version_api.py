@@ -39,6 +39,15 @@ def _create_missing_metadata_zip(path: Path) -> None:
         )
 
 
+def _create_unreadable_dimension_zip(path: Path) -> None:
+    with ZipFile(path, "w") as archive:
+        archive.writestr("yolo_dataset/iris/images/raw/frame_iris_00001.jpg", b"not-a-real-jpeg")
+        archive.writestr(
+            "yolo_dataset/iris/meta.jsonl",
+            '{"file":"frame_iris_00001.jpg","drone":"iris","z":12.0,"t":2.0}\n',
+        )
+
+
 def test_dataset_quality_reports_training_readiness(tmp_path: Path):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)
@@ -385,6 +394,65 @@ def test_dataset_quality_reports_missing_metadata_without_blocking_export(tmp_pa
         version_response = client.post(
             f"/api/datasets/{dataset['dataset_id']}/versions",
             json={"name": "metadata-warning-ok"},
+        )
+
+        assert version_response.status_code == 200
+
+
+def test_dataset_quality_reports_missing_image_dimensions_without_blocking_export(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    _create_unreadable_dimension_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = _import_dataset(client, zip_path)
+        class_payload = _create_class(client, dataset["project_id"], "drone")
+        image = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"][0]
+
+        assert image["width"] is None
+        assert image["height"] is None
+
+        response = client.put(
+            f"/api/images/{image['id']}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.25,
+                        "height": 0.25,
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200
+
+        quality_response = client.get(f"/api/datasets/{dataset['dataset_id']}/quality")
+
+        assert quality_response.status_code == 200
+        quality = quality_response.json()
+        assert quality["ready_for_training"] is True
+        assert quality["missing_image_dimensions_count"] == 1
+        assert "1 image has unreadable image dimensions." in quality["issues"]
+
+        issues_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/quality/issues"
+            "?issue_type=missing_image_dimensions"
+        )
+
+        assert issues_response.status_code == 200
+        issues = issues_response.json()
+        assert issues["total"] == 1
+        issue = issues["items"][0]
+        assert issue["issue_type"] == "missing_image_dimensions"
+        assert issue["severity"] == "warning"
+        assert issue["image_id"] == image["id"]
+        assert issue["image_path"].endswith("frame_iris_00001.jpg")
+        assert issue["message"] == "Image width or height could not be read."
+
+        version_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "dimension-warning-ok"},
         )
 
         assert version_response.status_code == 200

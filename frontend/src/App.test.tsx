@@ -274,6 +274,7 @@ const apiMock = vi.hoisted(() => {
     invalid_box_count: 0,
     duplicate_box_count: 0,
     missing_metadata_count: 0,
+    missing_image_dimensions_count: 0,
     unknown_class_reference_count: 0,
     ready_for_training: true,
     issues: [],
@@ -951,6 +952,51 @@ describe("App", () => {
     expect(await screen.findByText("missing metadata")).toBeInTheDocument();
     expect(
       await screen.findByText("Image is missing source metadata row, altitude, timestamp."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open Issue" }));
+
+    expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+  });
+
+  it("surfaces unreadable image dimension quality issues", async () => {
+    const user = userEvent.setup();
+    apiMock.getQuality.mockImplementation(async () => ({
+      ...apiMock.defaultQuality(),
+      missing_image_dimensions_count: 1,
+      issues: ["1 image has unreadable image dimensions."],
+    }));
+    apiMock.listQualityIssues.mockImplementation(async () => ({
+      ...apiMock.defaultQualityIssues(),
+      total: 1,
+      items: [
+        {
+          issue_type: "missing_image_dimensions",
+          severity: "warning",
+          message: "Image width or height could not be read.",
+          image_id: 11,
+          image_path: "iris/frame002.jpg",
+          image_url: "/api/images/11/file",
+          annotation_id: null,
+          class_id: null,
+          class_name: null,
+          x_center: null,
+          y_center: null,
+          width: null,
+          height: null,
+        },
+      ],
+    }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+
+    expect(await screen.findByText("Ready to export")).toBeInTheDocument();
+    expect(await screen.findByText("Missing dimensions")).toBeInTheDocument();
+    expect(await screen.findByText("missing image dimensions")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Image width or height could not be read."),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Open Issue" }));

@@ -1249,6 +1249,10 @@ export default function App() {
                   label="Missing metadata"
                   value={quality.missing_metadata_count.toLocaleString()}
                 />
+                <Metric
+                  label="Missing dimensions"
+                  value={quality.missing_image_dimensions_count.toLocaleString()}
+                />
               </div>
 
               {quality.issues.length > 0 ? (
