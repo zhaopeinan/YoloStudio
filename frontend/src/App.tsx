@@ -39,6 +39,7 @@ import type {
   ConfusionCell,
   MetricSeries,
   Prediction,
+  PredictionFailureType,
   PredictionFilters,
   PredictionImageReview,
   PredictionJob,
@@ -96,6 +97,13 @@ const qualityIssueTypeOptions: Array<{ value: DatasetQualityIssueType; label: st
   { value: "missing_image_dimensions", label: "Missing dimensions" },
   { value: "unknown_class_reference", label: "Unknown class references" },
 ];
+const predictionFailureOptions: Array<{ value: PredictionFailureType; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "matched", label: "Matched" },
+  { value: "false_positive", label: "False positive" },
+  { value: "false_negative", label: "False negative" },
+  { value: "class_confusion", label: "Class confusion" },
+];
 const edgeTagPresets = [
   "occluded",
   "camouflaged",
@@ -120,7 +128,7 @@ const defaultAugmentation: TrainingAugmentationConfig = {
 
 function defaultPredictionFilters() {
   return {
-    failure_type: "all" as "all" | "matched" | "false_positive" | "false_negative",
+    failure_type: "all" as PredictionFailureType,
     class_id: "",
     confidence_min: "",
     confidence_max: "",
@@ -178,7 +186,7 @@ export default function App() {
     label_status: "all" as "all" | "annotated" | "unannotated",
     class_id: "",
     edge_tag: "",
-    failure_type: "all" as "all" | "matched" | "false_positive" | "false_negative",
+    failure_type: "all" as PredictionFailureType,
     altitude_min: "",
     altitude_max: "",
   });
@@ -1897,10 +1905,11 @@ export default function App() {
               }
               disabled={predictionJobs.length === 0}
             >
-              <option value="all">All</option>
-              <option value="matched">Matched</option>
-              <option value="false_positive">False positive</option>
-              <option value="false_negative">False negative</option>
+              {predictionFailureOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label htmlFor="prediction-filter-class">
@@ -2055,6 +2064,7 @@ export default function App() {
             <Metric label="Matched" value={predictionJobs[0].matched_count.toLocaleString()} />
             <Metric label="False +" value={predictionJobs[0].false_positive_count.toLocaleString()} />
             <Metric label="False -" value={predictionJobs[0].false_negative_count.toLocaleString()} />
+            <Metric label="Confused" value={predictionJobs[0].class_confusion_count.toLocaleString()} />
           </div>
         ) : (
           <p className="empty-state">Start a prediction job from a completed or failed run to review outputs.</p>
@@ -2352,10 +2362,11 @@ export default function App() {
                 }))
               }
             >
-              <option value="all">All failures</option>
-              <option value="matched">Matched</option>
-              <option value="false_positive">False positive</option>
-              <option value="false_negative">False negative</option>
+              {predictionFailureOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.value === "all" ? "All failures" : option.label}
+                </option>
+              ))}
             </select>
             <label htmlFor="filter-edge-tag">Edge tag</label>
             <input
@@ -2567,7 +2578,8 @@ export default function App() {
                         <span>
                           matched {activeReview.counts.matched ?? 0} | false+{" "}
                           {activeReview.counts.false_positive ?? 0} | false-{" "}
-                          {activeReview.counts.false_negative ?? 0}
+                          {activeReview.counts.false_negative ?? 0} | confused{" "}
+                          {activeReview.counts.class_confusion ?? 0}
                         </span>
                       </div>
                       <div className="layer-toggles" aria-label="Annotation review layers">
@@ -2855,7 +2867,7 @@ function toImageFilterRequest(filters: {
   label_status: "all" | "annotated" | "unannotated";
   class_id: string;
   edge_tag: string;
-  failure_type: "all" | "matched" | "false_positive" | "false_negative";
+  failure_type: PredictionFailureType;
   altitude_min: string;
   altitude_max: string;
 }) {
@@ -3084,7 +3096,9 @@ function PredictionRect(props: { prediction: Prediction; className?: string }) {
       ? "#16a34a"
       : prediction.failure_type === "false_negative"
         ? "#f97316"
-        : "#dc2626";
+        : prediction.failure_type === "class_confusion"
+          ? "#eab308"
+          : "#dc2626";
   const left = prediction.x_center - prediction.width / 2;
   const top = prediction.y_center - prediction.height / 2;
   const label = `${formatFailureType(prediction.failure_type)} | ${
@@ -3280,6 +3294,7 @@ function ClassOutcomeTable(props: { rows: ClassOutcome[] }) {
                 <th>Match</th>
                 <th>False +</th>
                 <th>False -</th>
+                <th>Confused</th>
               </tr>
             </thead>
             <tbody>
@@ -3289,6 +3304,7 @@ function ClassOutcomeTable(props: { rows: ClassOutcome[] }) {
                   <td>{row.matched}</td>
                   <td>{row.false_positive}</td>
                   <td>{row.false_negative}</td>
+                  <td>{row.class_confusion}</td>
                 </tr>
               ))}
             </tbody>
@@ -3357,6 +3373,7 @@ function ThresholdScanTable(props: {
                   <th>Matched</th>
                   <th>False +</th>
                   <th>False -</th>
+                  <th>Confused</th>
                 </tr>
               </thead>
               <tbody>
@@ -3369,6 +3386,7 @@ function ThresholdScanTable(props: {
                     <td>{row.matched}</td>
                     <td>{row.false_positive}</td>
                     <td>{row.false_negative}</td>
+                    <td>{row.class_confusion}</td>
                   </tr>
                 ))}
               </tbody>

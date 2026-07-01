@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
@@ -29,9 +29,22 @@ from app.prediction.schemas import (
 
 
 router = APIRouter(prefix="/api", tags=["prediction"])
+FAILURE_TYPE_PATTERN = "^(all|matched|false_positive|false_negative|class_confusion)$"
 
 
-def _read_job(job: PredictionJob) -> PredictionJobRead:
+def _class_confusion_count(db: Session, job_id: int) -> int:
+    return (
+        db.scalar(
+            select(func.count(Prediction.id)).where(
+                Prediction.job_id == job_id,
+                Prediction.failure_type == "class_confusion",
+            )
+        )
+        or 0
+    )
+
+
+def _read_job(job: PredictionJob, db: Session) -> PredictionJobRead:
     return PredictionJobRead(
         id=job.id,
         run_id=job.run_id,
@@ -46,6 +59,7 @@ def _read_job(job: PredictionJob) -> PredictionJobRead:
         matched_count=job.matched_count,
         false_positive_count=job.false_positive_count,
         false_negative_count=job.false_negative_count,
+        class_confusion_count=_class_confusion_count(db, job.id),
         error_message=job.error_message,
         started_at=job.started_at,
         ended_at=job.ended_at,
@@ -90,7 +104,7 @@ def create_run_prediction_job(
         confidence_threshold=request.confidence_threshold,
     )
     job = execute_prediction_job(db, job, run, predictor=predict_images)
-    return _read_job(job)
+    return _read_job(job, db)
 
 
 @router.post(
@@ -117,7 +131,7 @@ def create_run_prediction_threshold_scan(
             confidence_threshold=threshold,
         )
         job = execute_prediction_job(db, job, run, predictor=predict_images)
-        jobs.append(_read_job(job))
+        jobs.append(_read_job(job, db))
     return PredictionThresholdScanRead(items=jobs)
 
 
@@ -128,13 +142,13 @@ def list_run_prediction_jobs(run_id: int, db: Session = Depends(get_db)) -> Pred
     jobs = db.scalars(
         select(PredictionJob).where(PredictionJob.run_id == run_id).order_by(PredictionJob.id.desc())
     ).all()
-    return PredictionJobList(items=[_read_job(job) for job in jobs])
+    return PredictionJobList(items=[_read_job(job, db) for job in jobs])
 
 
 @router.get("/prediction-jobs/{job_id}/predictions", response_model=PredictionList)
 def list_job_predictions(
     job_id: int,
-    failure_type: str = Query("all", pattern="^(all|matched|false_positive|false_negative)$"),
+    failure_type: str = Query("all", pattern=FAILURE_TYPE_PATTERN),
     class_id: int | None = None,
     confidence_min: float | None = Query(None, ge=0, le=1),
     confidence_max: float | None = Query(None, ge=0, le=1),
@@ -221,6 +235,9 @@ def get_prediction_image_review(
         ),
         "false_negative": sum(
             1 for prediction in predictions if prediction.failure_type == "false_negative"
+        ),
+        "class_confusion": sum(
+            1 for prediction in predictions if prediction.failure_type == "class_confusion"
         ),
     }
 

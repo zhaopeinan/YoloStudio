@@ -95,6 +95,7 @@ def test_run_experiment_summary_aggregates_metrics_predictions_and_thresholds(
                 "matched": 1,
                 "false_positive": 0,
                 "false_negative": 1,
+                "class_confusion": 0,
             }
         ]
         assert payload["confusion_matrix"][0]["count"] == 1
@@ -102,6 +103,7 @@ def test_run_experiment_summary_aggregates_metrics_predictions_and_thresholds(
         assert payload["threshold_scan"][0]["precision"] == 2 / 3
         assert payload["threshold_scan"][0]["recall"] == 1.0
         assert payload["threshold_scan"][0]["f1"] == 0.8
+        assert payload["threshold_scan"][0]["class_confusion"] == 0
         assert payload["threshold_scan"][1]["recall"] == 0.5
         assert payload["threshold_scan"][1]["f1"] == 2 / 3
         assert payload["threshold_recommendation"] == {

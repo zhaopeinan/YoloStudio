@@ -155,6 +155,40 @@ def _merge_tags(existing_tags: list[str] | None, new_tags: list[str]) -> list[st
     return merged
 
 
+def _class_id_for_prediction(raw_class_id: int, version: DatasetVersion | None) -> int:
+    if version is None:
+        return raw_class_id
+
+    class_mapping = version.class_mapping or {}
+    reverse_mapping = {int(yolo_index): int(class_id) for class_id, yolo_index in class_mapping.items()}
+    if raw_class_id in reverse_mapping:
+        return reverse_mapping[raw_class_id]
+    return raw_class_id
+
+
+def _best_annotation_match(
+    prediction_box: Box,
+    image_annotations: list[Annotation],
+    matched_annotations: set[int],
+    class_id: int,
+    same_class_only: bool,
+) -> tuple[Annotation | None, float]:
+    best_annotation = None
+    best_iou = 0.0
+    for annotation in image_annotations:
+        if annotation.id in matched_annotations:
+            continue
+        if same_class_only and annotation.class_id != class_id:
+            continue
+        if not same_class_only and annotation.class_id == class_id:
+            continue
+        score = iou(prediction_box, annotation_box(annotation))
+        if score > best_iou:
+            best_iou = score
+            best_annotation = annotation
+    return best_annotation, best_iou
+
+
 def persist_predictions(
     db: Session,
     job: PredictionJob,
@@ -171,22 +205,22 @@ def persist_predictions(
     for annotation in annotations:
         annotations_by_image.setdefault(annotation.image_id, []).append(annotation)
 
+    version = db.get(DatasetVersion, run.version_id)
     rows: list[Prediction] = []
     matched_annotations: set[int] = set()
     for image in images:
         image_annotations = annotations_by_image.get(image.id, [])
         for prediction in predictions_by_image.get(image.id, []):
-            best_annotation = None
-            best_iou = 0.0
-            for annotation in image_annotations:
-                if annotation.id in matched_annotations:
-                    continue
-                if annotation.class_id != int(prediction["class_id"]):
-                    continue
-                score = iou(_prediction_box(prediction), annotation_box(annotation))
-                if score > best_iou:
-                    best_iou = score
-                    best_annotation = annotation
+            raw_class_id = int(prediction["class_id"])
+            class_id = _class_id_for_prediction(raw_class_id, version)
+            prediction_box = _prediction_box(prediction)
+            best_annotation, best_iou = _best_annotation_match(
+                prediction_box,
+                image_annotations,
+                matched_annotations,
+                class_id,
+                same_class_only=True,
+            )
 
             failure_type = "false_positive"
             matched_annotation_id = None
@@ -194,13 +228,29 @@ def persist_predictions(
                 failure_type = "matched"
                 matched_annotation_id = best_annotation.id
                 matched_annotations.add(best_annotation.id)
+            else:
+                confused_annotation, confused_iou = _best_annotation_match(
+                    prediction_box,
+                    image_annotations,
+                    matched_annotations,
+                    class_id,
+                    same_class_only=False,
+                )
+                if confused_annotation is not None and confused_iou >= iou_threshold:
+                    failure_type = "class_confusion"
+                    matched_annotation_id = confused_annotation.id
+                    matched_annotations.add(confused_annotation.id)
+                    confused_annotation.edge_tags = _merge_tags(
+                        confused_annotation.edge_tags,
+                        ["class_confusion"],
+                    )
 
             rows.append(
                 Prediction(
                     run_id=run.id,
                     job_id=job.id,
                     image_id=image.id,
-                    class_id=int(prediction["class_id"]),
+                    class_id=class_id,
                     x_center=float(prediction["x_center"]),
                     y_center=float(prediction["y_center"]),
                     width=float(prediction["width"]),

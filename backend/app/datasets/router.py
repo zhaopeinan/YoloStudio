@@ -25,6 +25,7 @@ from app.db.session import get_db
 
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
+FAILURE_TYPE_PATTERN = "^(all|matched|false_positive|false_negative|class_confusion)$"
 
 
 projects_router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -93,7 +94,7 @@ def list_dataset_images(
     label_status: str = Query("all", pattern="^(all|annotated|unannotated)$"),
     class_id: int | None = Query(None, ge=1),
     edge_tag: str | None = Query(None, max_length=80),
-    failure_type: str = Query("all", pattern="^(all|matched|false_positive|false_negative)$"),
+    failure_type: str = Query("all", pattern=FAILURE_TYPE_PATTERN),
     altitude_min: float | None = Query(None),
     altitude_max: float | None = Query(None),
     db: Session = Depends(get_db),

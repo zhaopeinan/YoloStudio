@@ -21,6 +21,7 @@ class ClassOutcome(BaseModel):
     matched: int
     false_positive: int
     false_negative: int
+    class_confusion: int
 
 
 class ConfusionCell(BaseModel):
@@ -37,6 +38,7 @@ class ThresholdPoint(BaseModel):
     matched: int
     false_positive: int
     false_negative: int
+    class_confusion: int
     precision: float
     recall: float
     f1: float

@@ -39,6 +39,7 @@ class PredictionJobRead(BaseModel):
     matched_count: int
     false_positive_count: int
     false_negative_count: int
+    class_confusion_count: int
     error_message: str | None
     started_at: datetime | None
     ended_at: datetime | None

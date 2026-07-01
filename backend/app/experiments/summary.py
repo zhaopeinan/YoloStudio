@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from sqlalchemy import select
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models import Annotation, ClassDef, Prediction, PredictionJob, RunMetric, TrainingRun
@@ -68,8 +69,9 @@ def _threshold_scan(db: Session, run_id: int) -> list[ThresholdPoint]:
     ).all()
     points: list[ThresholdPoint] = []
     for job in jobs:
-        precision_denominator = job.matched_count + job.false_positive_count
-        recall_denominator = job.matched_count + job.false_negative_count
+        class_confusion_count = _prediction_count(db, job.id, "class_confusion")
+        precision_denominator = job.matched_count + job.false_positive_count + class_confusion_count
+        recall_denominator = job.matched_count + job.false_negative_count + class_confusion_count
         precision = job.matched_count / precision_denominator if precision_denominator else 0
         recall = job.matched_count / recall_denominator if recall_denominator else 0
         f1 = _f1(precision, recall)
@@ -80,6 +82,7 @@ def _threshold_scan(db: Session, run_id: int) -> list[ThresholdPoint]:
                 matched=job.matched_count,
                 false_positive=job.false_positive_count,
                 false_negative=job.false_negative_count,
+                class_confusion=class_confusion_count,
                 precision=precision,
                 recall=recall,
                 f1=f1,
@@ -91,6 +94,18 @@ def _threshold_scan(db: Session, run_id: int) -> list[ThresholdPoint]:
 def _f1(precision: float, recall: float) -> float:
     denominator = precision + recall
     return 2 * precision * recall / denominator if denominator else 0
+
+
+def _prediction_count(db: Session, job_id: int, failure_type: str) -> int:
+    return (
+        db.scalar(
+            select(func.count(Prediction.id)).where(
+                Prediction.job_id == job_id,
+                Prediction.failure_type == failure_type,
+            )
+        )
+        or 0
+    )
 
 
 def _threshold_recommendation(points: list[ThresholdPoint]) -> ThresholdRecommendation | None:
@@ -110,7 +125,13 @@ def _class_outcomes(db: Session, job_id: int) -> list[ClassOutcome]:
     classes = db.scalars(select(ClassDef).order_by(ClassDef.id)).all()
     names = {class_def.id: class_def.name for class_def in classes}
     counts: dict[int, dict[str, int]] = {
-        class_def.id: {"matched": 0, "false_positive": 0, "false_negative": 0} for class_def in classes
+        class_def.id: {
+            "matched": 0,
+            "false_positive": 0,
+            "false_negative": 0,
+            "class_confusion": 0,
+        }
+        for class_def in classes
     }
     predictions = db.scalars(
         select(Prediction).where(Prediction.job_id == job_id).order_by(Prediction.id)
@@ -118,7 +139,7 @@ def _class_outcomes(db: Session, job_id: int) -> list[ClassOutcome]:
     for prediction in predictions:
         bucket = counts.setdefault(
             prediction.class_id,
-            {"matched": 0, "false_positive": 0, "false_negative": 0},
+            {"matched": 0, "false_positive": 0, "false_negative": 0, "class_confusion": 0},
         )
         if prediction.failure_type in bucket:
             bucket[prediction.failure_type] += 1
@@ -130,9 +151,13 @@ def _class_outcomes(db: Session, job_id: int) -> list[ClassOutcome]:
             matched=values["matched"],
             false_positive=values["false_positive"],
             false_negative=values["false_negative"],
+            class_confusion=values["class_confusion"],
         )
         for class_id, values in sorted(counts.items())
-        if values["matched"] or values["false_positive"] or values["false_negative"]
+        if values["matched"]
+        or values["false_positive"]
+        or values["false_negative"]
+        or values["class_confusion"]
     ]
 
 
@@ -141,7 +166,7 @@ def _confusion_matrix(db: Session, job_id: int) -> list[ConfusionCell]:
         select(Prediction, Annotation, ClassDef)
         .join(Annotation, Prediction.matched_annotation_id == Annotation.id)
         .join(ClassDef, Annotation.class_id == ClassDef.id)
-        .where(Prediction.job_id == job_id, Prediction.failure_type == "matched")
+        .where(Prediction.job_id == job_id, Prediction.failure_type.in_(["matched", "class_confusion"]))
         .order_by(Prediction.id)
     ).all()
     class_defs = db.scalars(select(ClassDef).order_by(ClassDef.id)).all()

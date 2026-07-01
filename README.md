@@ -192,7 +192,7 @@ After a training run exists:
 2. Choose an image scope: `all`, `train`, `val`, or `test`.
 3. Set a confidence threshold.
 4. Click `Run Prediction Analysis`.
-5. Review matched, false-positive, and false-negative counts.
+5. Review matched, false-positive, false-negative, and class-confusion counts.
 6. Filter prediction/failure samples by failure type, class, confidence, platform, altitude, or timestamp.
 7. Inspect the prediction/failure sample list; each row keeps the source image ID for annotator follow-up.
 8. Click `Open Image` on a sample to jump to that image in the annotator.
@@ -202,10 +202,11 @@ After a training run exists:
 12. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
 13. Click `Save Annotations` when the correction draft looks right.
 
-Prediction jobs automatically add the `false_negative` edge tag to missed ground-truth boxes.
-Use the Image Browser `Edge tag` filter with `false_negative` to build a follow-up annotation queue
-from model misses. The manual `reviewed_prediction` tag is still only added when an operator clicks
-`Mark reviewed` and saves the annotation changes.
+Prediction jobs automatically add the `false_negative` edge tag to missed ground-truth boxes and
+`class_confusion` to ground-truth boxes that were localized with high IoU but assigned the wrong
+class. Use the Image Browser `Edge tag` filter with either tag to build follow-up annotation queues.
+The manual `reviewed_prediction` tag is still only added when an operator clicks `Mark reviewed` and
+saves the annotation changes.
 
 For threshold tuning, enter comma-separated confidence values in `Scan thresholds`, such as
 `0.15, 0.25, 0.35, 0.5, 0.65`, then click `Run Threshold Scan`. The backend creates one
@@ -255,8 +256,8 @@ curl http://127.0.0.1:8000/api/prediction-jobs/1/logs
 `Run History` includes an `Experiment Dashboard` for the latest run. It summarizes:
 
 1. Training metric series stored in `run_metrics`.
-2. Per-class matched, false-positive, and false-negative counts from the latest completed prediction job.
-3. A class-level confusion matrix for matched predictions.
+2. Per-class matched, false-positive, false-negative, and class-confusion counts from the latest completed prediction job.
+3. A class-level confusion matrix for matched and class-confusion predictions.
 4. Threshold scan rows across completed prediction jobs at different confidence thresholds.
 
 The dashboard is populated through:

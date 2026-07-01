@@ -73,6 +73,15 @@ def _create_completed_run(client, zip_path: Path, monkeypatch) -> dict:
     return run
 
 
+def _add_project_class(client, project_id: int, name: str, color: str) -> dict:
+    response = client.post(
+        f"/api/projects/{project_id}/classes",
+        json={"name": name, "color": color},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 def test_prediction_job_persists_matches_and_failures(tmp_path: Path, monkeypatch):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)
@@ -119,6 +128,7 @@ def test_prediction_job_persists_matches_and_failures(tmp_path: Path, monkeypatc
         assert job["matched_count"] == 1
         assert job["false_positive_count"] == 1
         assert job["false_negative_count"] == 1
+        assert job["class_confusion_count"] == 0
 
         predictions_response = client.get(f"/api/prediction-jobs/{job['id']}/predictions")
 
@@ -210,7 +220,187 @@ def test_prediction_job_persists_matches_and_failures(tmp_path: Path, monkeypatc
             "matched": 1,
             "false_positive": 1,
             "false_negative": 0,
+            "class_confusion": 0,
         }
+
+
+def test_prediction_job_maps_yolo_classes_and_detects_class_confusion(
+    tmp_path: Path,
+    monkeypatch,
+):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        run = _create_completed_run(client, zip_path, monkeypatch)
+        first_image_id, second_image_id = run["image_ids"]
+        wrong_class = _add_project_class(client, run["project_id"], "decoy", "#0ea5e9")
+
+        first_annotation_response = client.put(
+            f"/api/images/{first_image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": run["class_id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                    }
+                ]
+            },
+        )
+        assert first_annotation_response.status_code == 200
+        second_annotation_response = client.put(
+            f"/api/images/{second_image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": wrong_class["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                    }
+                ]
+            },
+        )
+        assert second_annotation_response.status_code == 200
+
+        version_response = client.post(
+            f"/api/datasets/{run['dataset_id']}/versions",
+            json={"name": "confusion-version", "class_ids": [run["class_id"], wrong_class["id"]]},
+        )
+        assert version_response.status_code == 200
+        version = version_response.json()
+        assert version["class_mapping"] == {str(run["class_id"]): 0, str(wrong_class["id"]): 1}
+
+        run_response = client.post(
+            "/api/training/runs",
+            json={"version_id": version["id"], "epochs": 1, "image_size": 320, "batch_size": 1},
+        )
+        assert run_response.status_code == 200
+        confusion_run = client.get(f"/api/training/runs/{run_response.json()['id']}").json()
+        assert confusion_run["status"] == "completed"
+
+        def fake_predict_images(_run, _images, _confidence_threshold):
+            return {
+                first_image_id: [
+                    {
+                        "class_id": 0,
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "confidence": 0.93,
+                    }
+                ],
+                second_image_id: [
+                    {
+                        "class_id": 0,
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "confidence": 0.88,
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("app.prediction.router.predict_images", fake_predict_images)
+
+        create_response = client.post(
+            f"/api/training/runs/{confusion_run['id']}/prediction-jobs",
+            json={"image_scope": "all", "confidence_threshold": 0.25},
+        )
+
+        assert create_response.status_code == 200
+        job = create_response.json()
+        assert job["matched_count"] == 1
+        assert job["false_positive_count"] == 0
+        assert job["false_negative_count"] == 0
+        assert job["class_confusion_count"] == 1
+
+        predictions_response = client.get(f"/api/prediction-jobs/{job['id']}/predictions")
+
+        assert predictions_response.status_code == 200
+        predictions = predictions_response.json()["items"]
+        assert [item["failure_type"] for item in predictions] == ["matched", "class_confusion"]
+        assert [item["class_id"] for item in predictions] == [run["class_id"], run["class_id"]]
+        assert predictions[1]["matched_annotation_id"] is not None
+        assert predictions[1]["confidence"] == 0.88
+
+        confusion_response = client.get(
+            f"/api/prediction-jobs/{job['id']}/predictions?failure_type=class_confusion"
+        )
+
+        assert confusion_response.status_code == 200
+        assert [item["image_id"] for item in confusion_response.json()["items"]] == [second_image_id]
+
+        confusion_annotations_response = client.get(f"/api/images/{second_image_id}/annotations")
+
+        assert confusion_annotations_response.status_code == 200
+        confusion_annotations = confusion_annotations_response.json()["items"]
+        assert confusion_annotations[0]["edge_tags"] == ["class_confusion"]
+
+        confusion_tagged_images = client.get(
+            f"/api/datasets/{run['dataset_id']}/images?edge_tag=class_confusion"
+        )
+
+        assert confusion_tagged_images.status_code == 200
+        assert [image["id"] for image in confusion_tagged_images.json()["items"]] == [
+            second_image_id
+        ]
+
+        confusion_images = client.get(
+            f"/api/datasets/{run['dataset_id']}/images?failure_type=class_confusion"
+        )
+
+        assert confusion_images.status_code == 200
+        assert [image["id"] for image in confusion_images.json()["items"]] == [second_image_id]
+
+        review_response = client.get(
+            f"/api/prediction-jobs/{job['id']}/images/{second_image_id}/review"
+        )
+
+        assert review_response.status_code == 200
+        assert review_response.json()["counts"] == {
+            "matched": 0,
+            "false_positive": 0,
+            "false_negative": 0,
+            "class_confusion": 1,
+        }
+
+        summary_response = client.get(f"/api/training/runs/{confusion_run['id']}/summary")
+
+        assert summary_response.status_code == 200
+        summary = summary_response.json()
+        assert summary["class_outcomes"] == [
+            {
+                "class_id": run["class_id"],
+                "class_name": "drone",
+                "matched": 1,
+                "false_positive": 0,
+                "false_negative": 0,
+                "class_confusion": 1,
+            }
+        ]
+        assert summary["confusion_matrix"] == [
+            {
+                "actual_class_id": run["class_id"],
+                "actual_class_name": "drone",
+                "predicted_class_id": run["class_id"],
+                "predicted_class_name": "drone",
+                "count": 1,
+            },
+            {
+                "actual_class_id": wrong_class["id"],
+                "actual_class_name": "decoy",
+                "predicted_class_id": run["class_id"],
+                "predicted_class_name": "drone",
+                "count": 1,
+            },
+        ]
 
 
 def test_prediction_threshold_scan_creates_multiple_jobs_and_summary_points(

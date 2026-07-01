@@ -52,6 +52,7 @@ const apiMock = vi.hoisted(() => {
     matched_count: 1,
     false_positive_count: 1,
     false_negative_count: 1,
+    class_confusion_count: 1,
     error_message: null,
     started_at: "2026-06-30T00:03:00",
     ended_at: "2026-06-30T00:04:00",
@@ -68,6 +69,7 @@ const apiMock = vi.hoisted(() => {
     matched_count: 0,
     false_positive_count: 0,
     false_negative_count: 0,
+    class_confusion_count: 0,
     ended_at: null,
     created_at: "2026-06-30T00:05:00",
     updated_at: "2026-06-30T00:05:30",
@@ -150,7 +152,7 @@ const apiMock = vi.hoisted(() => {
       _datasetId: number,
       filters: {
         label_status?: "all" | "annotated" | "unannotated";
-        failure_type?: "all" | "matched" | "false_positive" | "false_negative";
+        failure_type?: "all" | "matched" | "false_positive" | "false_negative" | "class_confusion";
       } = {},
       options: { limit?: number; offset?: number } = {},
     ) => {
@@ -293,6 +295,20 @@ const apiMock = vi.hoisted(() => {
         matched_annotation_id: null,
         failure_type: "false_positive",
       },
+      {
+        id: 4,
+        run_id: 1,
+        job_id: 1,
+        image_id: 11,
+        class_id: 2,
+        x_center: 0.58,
+        y_center: 0.5,
+        width: 0.3,
+        height: 0.3,
+        confidence: 0.68,
+        matched_annotation_id: 2,
+        failure_type: "class_confusion",
+      },
     ],
   }));
   const defaultQuality = (): DatasetQualitySummary => ({
@@ -404,6 +420,7 @@ const apiMock = vi.hoisted(() => {
         matched: 1,
         false_positive: 1,
         false_negative: 1,
+        class_confusion: 1,
       },
     ],
     confusion_matrix: [
@@ -422,6 +439,7 @@ const apiMock = vi.hoisted(() => {
         matched: 2,
         false_positive: 1,
         false_negative: 1,
+        class_confusion: 1,
         precision: 2 / 3,
         recall: 2 / 3,
         f1: 2 / 3,
@@ -609,6 +627,7 @@ vi.mock("./api", () => ({
     matched_count: 0,
     false_positive_count: 0,
     false_negative_count: 0,
+    class_confusion_count: 0,
     error_message: "Model weights were not found",
     started_at: "2026-06-30T00:05:00",
     ended_at: "2026-06-30T00:05:01",
@@ -685,8 +704,22 @@ vi.mock("./api", () => ({
         matched_annotation_id: 1,
         failure_type: "false_negative",
       },
+      {
+        id: 4,
+        run_id: 1,
+        job_id: 1,
+        image_id: 10,
+        class_id: 2,
+        x_center: 0.58,
+        y_center: 0.5,
+        width: 0.3,
+        height: 0.3,
+        confidence: 0.68,
+        matched_annotation_id: 1,
+        failure_type: "class_confusion",
+      },
     ],
-    counts: { matched: 1, false_positive: 1, false_negative: 1 },
+    counts: { matched: 1, false_positive: 1, false_negative: 1, class_confusion: 1 },
   }),
   getExportCapabilities: apiMock.getExportCapabilities,
   listRunExports: apiMock.listRunExports,
@@ -893,14 +926,16 @@ describe("App", () => {
     expect(await screen.findByText("F1 67% | P 67% | R 67%")).toBeInTheDocument();
     expect((await screen.findAllByText("67%")).length).toBeGreaterThanOrEqual(3);
     expect(await screen.findByText("false_positive")).toBeInTheDocument();
+    expect(await screen.findByText("class_confusion")).toBeInTheDocument();
+    expect((await screen.findAllByText("Confused")).length).toBeGreaterThanOrEqual(1);
     expect((await screen.findAllByText("Matched")).length).toBeGreaterThanOrEqual(2);
-    await user.selectOptions(screen.getByLabelText("Failure type"), "false_positive");
+    await user.selectOptions(screen.getByLabelText("Failure type"), "class_confusion");
     await user.selectOptions(screen.getByLabelText("Prediction class"), "1");
     fireEvent.change(screen.getByLabelText("Min conf"), { target: { value: "0.5" } });
     fireEvent.change(screen.getByLabelText("Prediction platform"), { target: { value: "iris" } });
     await user.click(screen.getByRole("button", { name: "Apply Sample Filters" }));
     expect(apiMock.listPredictions).toHaveBeenLastCalledWith(1, {
-      failure_type: "false_positive",
+      failure_type: "class_confusion",
       class_id: 1,
       confidence_min: 0.5,
       confidence_max: undefined,
@@ -934,12 +969,13 @@ describe("App", () => {
     expect(screen.getByLabelText("Prediction legend")).toBeInTheDocument();
     expect(screen.getByText("false positive")).toBeInTheDocument();
     expect(screen.getByText("false negative")).toBeInTheDocument();
+    expect(screen.getByText("class confusion")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Add as annotation" }));
 
     expect(screen.getByDisplayValue("false_positive, reviewed_prediction")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Mark reviewed" }));
+    await user.click(screen.getAllByRole("button", { name: "Mark reviewed" })[0]);
 
     expect(
       await screen.findByDisplayValue("occluded, false_negative, reviewed_prediction"),

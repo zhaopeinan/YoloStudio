@@ -97,12 +97,19 @@ export type DatasetDimensionRefreshSummary = {
   missing_count: number;
 };
 
+export type PredictionFailureType =
+  | "all"
+  | "matched"
+  | "false_positive"
+  | "false_negative"
+  | "class_confusion";
+
 export type DatasetImageFilters = {
   platform?: string;
   label_status?: "all" | "annotated" | "unannotated";
   class_id?: number;
   edge_tag?: string;
-  failure_type?: "all" | "matched" | "false_positive" | "false_negative";
+  failure_type?: PredictionFailureType;
   altitude_min?: number;
   altitude_max?: number;
 };
@@ -268,6 +275,7 @@ export type ClassOutcome = {
   matched: number;
   false_positive: number;
   false_negative: number;
+  class_confusion: number;
 };
 
 export type ConfusionCell = {
@@ -284,6 +292,7 @@ export type ThresholdPoint = {
   matched: number;
   false_positive: number;
   false_negative: number;
+  class_confusion: number;
   precision: number;
   recall: number;
   f1: number;
@@ -348,6 +357,7 @@ export type PredictionJob = {
   matched_count: number;
   false_positive_count: number;
   false_negative_count: number;
+  class_confusion_count: number;
   error_message: string | null;
   started_at: string | null;
   ended_at: string | null;
@@ -364,7 +374,7 @@ export type PredictionThresholdScanResponse = {
 };
 
 export type PredictionFilters = {
-  failure_type?: "all" | "matched" | "false_positive" | "false_negative";
+  failure_type?: PredictionFailureType;
   class_id?: number;
   confidence_min?: number;
   confidence_max?: number;
