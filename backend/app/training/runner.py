@@ -14,6 +14,7 @@ from app.db.session import SessionLocal
 
 
 ACTIVE_STATUSES = {"queued", "preparing", "running"}
+DEFAULT_THRESHOLD_SCAN_VALUES = (0.15, 0.25, 0.35, 0.5, 0.65)
 
 
 def _now() -> datetime:
@@ -163,6 +164,33 @@ def complete_training_run(run_id: int, bind=None) -> None:
     append_run_log(run_id, "training completed", bind=bind)
 
 
+def run_post_training_threshold_scan(
+    run_id: int,
+    bind=None,
+    settings: Settings | None = None,
+    predictor=None,
+) -> None:
+    from app.prediction.runner import create_prediction_job, execute_prediction_job, predict_images
+
+    settings = settings or get_settings()
+    session_factory = _session_factory(bind)
+    with session_factory() as db:
+        run = db.get(TrainingRun, run_id)
+        if run is None or not run.config.get("threshold_scan"):
+            return
+        append_run_log(run_id, "threshold scan started", bind=bind)
+        for threshold in DEFAULT_THRESHOLD_SCAN_VALUES:
+            job = create_prediction_job(
+                db,
+                settings,
+                run,
+                image_scope="all",
+                confidence_threshold=threshold,
+            )
+            execute_prediction_job(db, job, run, predictor=predictor or predict_images)
+        append_run_log(run_id, "threshold scan completed", bind=bind)
+
+
 def fail_training_run(run_id: int, message: str, bind=None) -> None:
     session_factory = _session_factory(bind)
     with session_factory() as db:
@@ -238,6 +266,11 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
                     bind=bind,
                 )
         complete_training_run(run_id, bind=bind)
+        run_post_training_threshold_scan(
+            run_id,
+            bind=bind,
+            settings=settings or get_settings(),
+        )
     except Exception as exc:
         fail_training_run(run_id, str(exc), bind=bind)
 

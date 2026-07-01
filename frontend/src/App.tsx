@@ -1269,7 +1269,7 @@ export default function App() {
                   onChange={(event) => setThresholdScan(event.target.checked)}
                   disabled={versions.length === 0}
                 />
-                Threshold scan
+                Auto threshold scan
               </label>
             </div>
 

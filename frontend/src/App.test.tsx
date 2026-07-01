@@ -622,10 +622,12 @@ describe("App", () => {
     await user.clear(copyPasteInput);
     await user.type(copyPasteInput, "0.35");
     await user.click(screen.getByRole("checkbox", { name: "GridMask" }));
+    await user.click(screen.getByRole("checkbox", { name: "Auto threshold scan" }));
     await user.click(screen.getByRole("button", { name: "Start Training Run" }));
     expect(apiMock.createTrainingRun).toHaveBeenCalledWith(
       expect.objectContaining({
         augmentation_preset: "balanced",
+        threshold_scan: true,
         augmentation: expect.objectContaining({
           mosaic: 1,
           mixup: 0.2,

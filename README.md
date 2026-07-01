@@ -151,6 +151,11 @@ the run config for strategy review and future trainer adapters.
 If Ultralytics is not installed, the run is still persisted and moves to `failed` with a clear log
 message. This lets the UI and run history be tested without downloading model weights.
 
+Enable `Auto threshold scan` in Training Setup to run the default thresholds
+`0.15, 0.25, 0.35, 0.5, 0.65` after a successful training run. Each threshold creates a
+normal prediction job, so the Prediction Analysis list, logs, and Experiment Dashboard threshold
+table use the same review workflow as manual prediction jobs.
+
 API smoke after creating a dataset version:
 
 ```bash

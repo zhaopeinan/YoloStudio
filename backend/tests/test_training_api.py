@@ -172,6 +172,92 @@ def test_ultralytics_augmentation_kwargs_excludes_local_strategy_flags():
     }
 
 
+def test_post_training_threshold_scan_creates_default_prediction_jobs(
+    tmp_path: Path,
+    monkeypatch,
+):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    def fake_execute_training_run(run_id: int, bind, _settings) -> None:
+        from app.training.runner import complete_training_run
+
+        complete_training_run(run_id, bind=bind)
+
+    monkeypatch.setattr("app.training.router.execute_training_run", fake_execute_training_run)
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+        create_response = client.post(
+            "/api/training/runs",
+            json={
+                "version_id": version["id"],
+                "epochs": 1,
+                "image_size": 320,
+                "batch_size": 1,
+                "threshold_scan": True,
+            },
+        )
+        assert create_response.status_code == 200
+        run = client.get(f"/api/training/runs/{create_response.json()['id']}").json()
+
+        def fake_predict_images(_run, images, confidence_threshold):
+            return {
+                image.id: [
+                    {
+                        "class_id": next(iter(version["class_mapping"].keys())),
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "confidence": 1 - confidence_threshold,
+                    }
+                ]
+                for image in images
+            }
+
+        from app.core.settings import Settings
+        from app.db.session import create_engine_for_settings
+        from app.training.runner import (
+            DEFAULT_THRESHOLD_SCAN_VALUES,
+            run_post_training_threshold_scan,
+        )
+
+        settings = Settings(workspace_root=tmp_path / "workspace")
+        bind = create_engine_for_settings(settings)
+
+        run_post_training_threshold_scan(
+            run["id"],
+            bind=bind,
+            settings=settings,
+            predictor=fake_predict_images,
+        )
+
+        jobs_response = client.get(f"/api/training/runs/{run['id']}/prediction-jobs")
+
+        assert jobs_response.status_code == 200
+        jobs = jobs_response.json()["items"]
+        assert len(jobs) == len(DEFAULT_THRESHOLD_SCAN_VALUES)
+        assert [job["confidence_threshold"] for job in reversed(jobs)] == list(
+            DEFAULT_THRESHOLD_SCAN_VALUES
+        )
+        assert {job["status"] for job in jobs} == {"completed"}
+
+        summary_response = client.get(f"/api/training/runs/{run['id']}/summary")
+
+        assert summary_response.status_code == 200
+        assert [point["confidence_threshold"] for point in summary_response.json()["threshold_scan"]] == list(
+            DEFAULT_THRESHOLD_SCAN_VALUES
+        )
+
+        logs_response = client.get(f"/api/training/runs/{run['id']}/logs")
+
+        assert logs_response.status_code == 200
+        assert "threshold scan started" in logs_response.json()["text"]
+        assert "threshold scan completed" in logs_response.json()["text"]
+        bind.dispose()
+
+
 def test_training_run_rejects_when_another_run_is_active(tmp_path: Path, monkeypatch):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)
