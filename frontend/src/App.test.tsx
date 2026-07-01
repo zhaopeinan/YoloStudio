@@ -148,7 +148,10 @@ const apiMock = vi.hoisted(() => {
   const listImages = vi.fn(
     async (
       _datasetId: number,
-      filters: { label_status?: "all" | "annotated" | "unannotated" } = {},
+      filters: {
+        label_status?: "all" | "annotated" | "unannotated";
+        failure_type?: "all" | "matched" | "false_positive" | "false_negative";
+      } = {},
       options: { limit?: number; offset?: number } = {},
     ) => {
       const offset = options.offset ?? 0;
@@ -790,6 +793,7 @@ describe("App", () => {
     expect(screen.getByLabelText("Image filters")).toBeInTheDocument();
     expect(screen.getByLabelText("Version class subset")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Label status"), "annotated");
+    await user.selectOptions(screen.getByLabelText("Failure"), "false_negative");
     fireEvent.change(screen.getByLabelText("Edge tag"), { target: { value: "occluded" } });
     await user.click(screen.getByRole("button", { name: "Apply Filters" }));
     expect(apiMock.listImages).toHaveBeenLastCalledWith(
@@ -799,6 +803,7 @@ describe("App", () => {
         label_status: "annotated",
         class_id: undefined,
         edge_tag: "occluded",
+        failure_type: "false_negative",
         altitude_min: undefined,
         altitude_max: undefined,
       },
@@ -816,6 +821,7 @@ describe("App", () => {
         label_status: "annotated",
         class_id: undefined,
         edge_tag: "occluded",
+        failure_type: "false_negative",
         altitude_min: undefined,
         altitude_max: undefined,
       },
@@ -834,6 +840,7 @@ describe("App", () => {
         label_status: "annotated",
         class_id: undefined,
         edge_tag: "occluded",
+        failure_type: "false_negative",
         altitude_min: undefined,
         altitude_max: undefined,
       },

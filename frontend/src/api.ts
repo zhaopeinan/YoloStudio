@@ -102,6 +102,7 @@ export type DatasetImageFilters = {
   label_status?: "all" | "annotated" | "unannotated";
   class_id?: number;
   edge_tag?: string;
+  failure_type?: "all" | "matched" | "false_positive" | "false_negative";
   altitude_min?: number;
   altitude_max?: number;
 };

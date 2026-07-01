@@ -67,6 +67,7 @@ def _create_completed_run(client, zip_path: Path, monkeypatch) -> dict:
     run = client.get(f"/api/training/runs/{run_response.json()['id']}").json()
     assert run["status"] == "completed"
     run["class_id"] = class_payload["id"]
+    run["dataset_id"] = dataset["dataset_id"]
     run["image_ids"] = [image["id"] for image in images]
     run["image_platform_by_id"] = {image["id"]: image["platform"] for image in images}
     return run
@@ -153,6 +154,22 @@ def test_prediction_job_persists_matches_and_failures(tmp_path: Path, monkeypatc
         missed_predictions = missed_response.json()["items"]
         assert len(missed_predictions) == 1
         assert missed_predictions[0]["failure_type"] == "false_negative"
+
+        false_positive_images = client.get(
+            f"/api/datasets/{run['dataset_id']}/images?failure_type=false_positive"
+        )
+
+        assert false_positive_images.status_code == 200
+        assert [image["id"] for image in false_positive_images.json()["items"]] == [first_image_id]
+
+        false_negative_images = client.get(
+            f"/api/datasets/{run['dataset_id']}/images?failure_type=false_negative"
+        )
+
+        assert false_negative_images.status_code == 200
+        assert [image["id"] for image in false_negative_images.json()["items"]] == [
+            second_image_id
+        ]
 
         jobs_response = client.get(f"/api/training/runs/{run['id']}/prediction-jobs")
 

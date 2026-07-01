@@ -178,6 +178,7 @@ export default function App() {
     label_status: "all" as "all" | "annotated" | "unannotated",
     class_id: "",
     edge_tag: "",
+    failure_type: "all" as "all" | "matched" | "false_positive" | "false_negative",
     altitude_min: "",
     altitude_max: "",
   });
@@ -589,6 +590,7 @@ export default function App() {
       label_status: "all" as const,
       class_id: "",
       edge_tag: "",
+      failure_type: "all" as const,
       altitude_min: "",
       altitude_max: "",
     };
@@ -2338,6 +2340,23 @@ export default function App() {
                 </option>
               ))}
             </select>
+            <label htmlFor="filter-failure-type">Failure</label>
+            <select
+              id="filter-failure-type"
+              value={imageFilters.failure_type}
+              disabled={!importedDataset}
+              onChange={(event) =>
+                setImageFilters((current) => ({
+                  ...current,
+                  failure_type: event.target.value as typeof imageFilters.failure_type,
+                }))
+              }
+            >
+              <option value="all">All failures</option>
+              <option value="matched">Matched</option>
+              <option value="false_positive">False positive</option>
+              <option value="false_negative">False negative</option>
+            </select>
             <label htmlFor="filter-edge-tag">Edge tag</label>
             <input
               id="filter-edge-tag"
@@ -2836,6 +2855,7 @@ function toImageFilterRequest(filters: {
   label_status: "all" | "annotated" | "unannotated";
   class_id: string;
   edge_tag: string;
+  failure_type: "all" | "matched" | "false_positive" | "false_negative";
   altitude_min: string;
   altitude_max: string;
 }) {
@@ -2844,6 +2864,7 @@ function toImageFilterRequest(filters: {
     label_status: filters.label_status,
     class_id: filters.class_id ? Number(filters.class_id) : undefined,
     edge_tag: filters.edge_tag.trim() || undefined,
+    failure_type: filters.failure_type,
     altitude_min: filters.altitude_min === "" ? undefined : Number(filters.altitude_min),
     altitude_max: filters.altitude_max === "" ? undefined : Number(filters.altitude_max),
   };

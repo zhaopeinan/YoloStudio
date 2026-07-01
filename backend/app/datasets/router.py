@@ -20,7 +20,7 @@ from app.datasets.schemas import (
     ProjectList,
     ProjectRead,
 )
-from app.db.models import Annotation, Dataset, Image, Project
+from app.db.models import Annotation, Dataset, Image, Prediction, Project
 from app.db.session import get_db
 
 
@@ -93,6 +93,7 @@ def list_dataset_images(
     label_status: str = Query("all", pattern="^(all|annotated|unannotated)$"),
     class_id: int | None = Query(None, ge=1),
     edge_tag: str | None = Query(None, max_length=80),
+    failure_type: str = Query("all", pattern="^(all|matched|false_positive|false_negative)$"),
     altitude_min: float | None = Query(None),
     altitude_max: float | None = Query(None),
     db: Session = Depends(get_db),
@@ -129,6 +130,13 @@ def list_dataset_images(
                     "EXISTS (SELECT 1 FROM json_each(annotations.edge_tags) "
                     "WHERE json_each.value = :edge_tag)"
                 ).bindparams(edge_tag=edge_tag),
+            )
+        )
+    if failure_type != "all":
+        conditions.append(
+            exists().where(
+                Prediction.image_id == Image.id,
+                Prediction.failure_type == failure_type,
             )
         )
 
