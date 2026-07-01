@@ -52,6 +52,9 @@ Set `Project name` and `Dataset name` before import. Imports that use the same p
 the project-level class library, so related datasets can share labels while each dataset keeps its
 own image list, annotations, quality review, and exported versions.
 
+After a restart or browser refresh, use `Saved dataset` and `Load Dataset` in Dataset Intake to
+reload an already imported dataset without copying the source files again.
+
 ## Annotation smoke workflow
 
 With both servers running:

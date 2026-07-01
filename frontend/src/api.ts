@@ -52,6 +52,25 @@ export type DatasetImportResponse = {
   groups: DatasetImportGroup[];
 };
 
+export type ProjectDatasetSummary = {
+  id: number;
+  project_id: number;
+  name: string;
+  source_type: string;
+  import_status: string;
+  image_count: number;
+};
+
+export type ProjectSummary = {
+  id: number;
+  name: string;
+  datasets: ProjectDatasetSummary[];
+};
+
+export type ProjectListResponse = {
+  items: ProjectSummary[];
+};
+
 export type DatasetImage = {
   id: number;
   relative_path: string;
@@ -408,6 +427,10 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function getHealth(): Promise<HealthResponse> {
   return requestJson<HealthResponse>("/api/health");
+}
+
+export function listProjects(): Promise<ProjectListResponse> {
+  return requestJson<ProjectListResponse>("/api/projects");
 }
 
 export function scanDataset(sourcePath: string): Promise<DatasetScanSummary> {

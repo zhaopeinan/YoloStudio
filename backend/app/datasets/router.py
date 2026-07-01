@@ -15,12 +15,48 @@ from app.datasets.schemas import (
     DatasetImportSummary,
     DatasetScanRequest,
     DatasetScanSummary,
+    ProjectDatasetRead,
+    ProjectList,
+    ProjectRead,
 )
-from app.db.models import Annotation, Dataset, Image
+from app.db.models import Annotation, Dataset, Image, Project
 from app.db.session import get_db
 
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
+
+
+projects_router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+@projects_router.get("", response_model=ProjectList)
+def list_projects(db: Session = Depends(get_db)) -> ProjectList:
+    projects = db.scalars(select(Project).order_by(Project.id)).all()
+    datasets = db.scalars(select(Dataset).order_by(Dataset.project_id, Dataset.id)).all()
+    datasets_by_project: dict[int, list[Dataset]] = {}
+    for dataset in datasets:
+        datasets_by_project.setdefault(dataset.project_id, []).append(dataset)
+
+    return ProjectList(
+        items=[
+            ProjectRead(
+                id=project.id,
+                name=project.name,
+                datasets=[
+                    ProjectDatasetRead(
+                        id=dataset.id,
+                        project_id=dataset.project_id,
+                        name=dataset.name,
+                        source_type=dataset.source_type,
+                        import_status=dataset.import_status,
+                        image_count=dataset.image_count,
+                    )
+                    for dataset in datasets_by_project.get(project.id, [])
+                ],
+            )
+            for project in projects
+        ]
+    )
 
 
 @router.post("/scan", response_model=DatasetScanSummary)

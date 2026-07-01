@@ -127,6 +127,42 @@ def test_import_dataset_persists_images_and_serves_files(tmp_path: Path):
         assert file_response.content == PNG_1X1
 
 
+def test_list_projects_returns_imported_dataset_summaries(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "Restore Test Project",
+                "dataset_name": "restore-sample",
+            },
+        )
+        assert response.status_code == 200
+        imported = response.json()
+
+        projects_response = client.get("/api/projects")
+
+        assert projects_response.status_code == 200
+        assert projects_response.json()["items"] == [
+            {
+                "id": imported["project_id"],
+                "name": "Restore Test Project",
+                "datasets": [
+                    {
+                        "id": imported["dataset_id"],
+                        "project_id": imported["project_id"],
+                        "name": "restore-sample",
+                        "source_type": "zip",
+                        "import_status": "imported",
+                        "image_count": 2,
+                    }
+                ],
+            }
+        ]
+
+
 def test_import_dataset_loads_yolo_classes_and_labels(tmp_path: Path):
     zip_path = tmp_path / "labeled.zip"
     create_labeled_yolo_zip(zip_path)

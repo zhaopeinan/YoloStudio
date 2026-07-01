@@ -30,6 +30,7 @@ import type {
   ExportCapabilities,
   HealthResponse,
   ProjectClass,
+  ProjectSummary,
   AnnotationWrite,
   ClassOutcome,
   ConfusionCell,
@@ -64,6 +65,7 @@ import {
   listImages,
   listPredictionJobs,
   listPredictions,
+  listProjects,
   listQualityIssues,
   listRunExports,
   listTrainingRuns,
@@ -126,6 +128,10 @@ export default function App() {
   const [scan, setScan] = useState<DatasetScanSummary | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [selectedSavedDataset, setSelectedSavedDataset] = useState("");
+  const [savedDatasetError, setSavedDatasetError] = useState<string | null>(null);
+  const [isLoadingSavedDataset, setIsLoadingSavedDataset] = useState(false);
   const [importedDataset, setImportedDataset] = useState<DatasetImportResponse | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -199,6 +205,7 @@ export default function App() {
     getHealth()
       .then(setHealth)
       .catch((error: Error) => setHealthError(error.message));
+    void refreshProjects();
   }, []);
 
   const totalGroupImages = useMemo(
@@ -321,40 +328,91 @@ export default function App() {
 
     try {
       const imported = await importDataset(datasetPath, projectName.trim(), datasetName.trim());
-      setImportedDataset(imported);
-
-      const [
-        classResponse,
-        imageResponse,
-        qualityResponse,
-        qualityIssueResponse,
-        versionResponse,
-      ] = await Promise.all([
-        listClasses(imported.project_id),
-        listImages(imported.dataset_id),
-        getQuality(imported.dataset_id),
-        listQualityIssues(imported.dataset_id),
-        listDatasetVersions(imported.dataset_id),
-      ]);
-      const runResponse = await listTrainingRuns(imported.project_id);
-
-      setClasses(classResponse.items);
-      setSelectedClassId(classResponse.items[0]?.id ?? null);
-      setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
-      setImages(imageResponse.items);
-      setSelectedImageId(imageResponse.items[0]?.id ?? null);
-      setQuality(qualityResponse);
-      setQualityIssues(qualityIssueResponse.items);
-      setVersions(versionResponse.items);
-      setRuns(runResponse.items);
-      if (runResponse.items[0]) {
-        await refreshRunSummary(runResponse.items[0].id);
-        await refreshPredictionJobs(runResponse.items[0].id);
-      }
+      await loadDatasetWorkspace(imported);
+      await refreshProjects();
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Dataset import failed");
     } finally {
       setIsImporting(false);
+    }
+  }
+
+  async function refreshProjects() {
+    try {
+      const response = await listProjects();
+      setProjects(response.items);
+      setSavedDatasetError(null);
+      setSelectedSavedDataset((current) => {
+        if (current && savedDatasetFromValue(response.items, current)) {
+          return current;
+        }
+        return firstSavedDatasetValue(response.items);
+      });
+    } catch (error) {
+      setSavedDatasetError(error instanceof Error ? error.message : "Saved datasets failed to load");
+    }
+  }
+
+  async function loadDatasetWorkspace(dataset: DatasetImportResponse) {
+    setImportedDataset(dataset);
+    setProjectName(dataset.project_name);
+    setDatasetName(dataset.dataset_name);
+
+    const [classResponse, imageResponse, qualityResponse, qualityIssueResponse, versionResponse] =
+      await Promise.all([
+        listClasses(dataset.project_id),
+        listImages(dataset.dataset_id),
+        getQuality(dataset.dataset_id),
+        listQualityIssues(dataset.dataset_id),
+        listDatasetVersions(dataset.dataset_id),
+      ]);
+    const runResponse = await listTrainingRuns(dataset.project_id);
+
+    setClasses(classResponse.items);
+    setSelectedClassId(classResponse.items[0]?.id ?? null);
+    setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
+    setImages(imageResponse.items);
+    setSelectedImageId(imageResponse.items[0]?.id ?? null);
+    setAnnotations([]);
+    setActiveReview(null);
+    setQuality(qualityResponse);
+    setQualityIssues(qualityIssueResponse.items);
+    setVersions(versionResponse.items);
+    setRuns(runResponse.items);
+    setPredictionJobs([]);
+    setPredictions([]);
+    setPredictionLogs({});
+    setExportCapabilities(null);
+    setExports([]);
+    if (runResponse.items[0]) {
+      await refreshRunSummary(runResponse.items[0].id);
+      await refreshPredictionJobs(runResponse.items[0].id);
+    } else {
+      setRunSummary(null);
+    }
+  }
+
+  async function handleLoadSavedDataset() {
+    const saved = savedDatasetFromValue(projects, selectedSavedDataset);
+    if (!saved) {
+      return;
+    }
+
+    setIsLoadingSavedDataset(true);
+    setSavedDatasetError(null);
+    try {
+      await loadDatasetWorkspace({
+        project_id: saved.project.id,
+        dataset_id: saved.dataset.id,
+        project_name: saved.project.name,
+        dataset_name: saved.dataset.name,
+        image_count: saved.dataset.image_count,
+        groups: [],
+      });
+    } catch (error) {
+      setSavedDatasetError(error instanceof Error ? error.message : "Dataset load failed");
+    } finally {
+      setIsLoadingSavedDataset(false);
     }
   }
 
@@ -1061,10 +1119,41 @@ export default function App() {
               />
             </label>
           </div>
+          <div className="saved-dataset-row" aria-label="Saved dataset loader">
+            <label htmlFor="saved-dataset">
+              Saved dataset
+              <select
+                id="saved-dataset"
+                value={selectedSavedDataset}
+                onChange={(event) => setSelectedSavedDataset(event.target.value)}
+              >
+                {projects.length === 0 ? <option value="">No saved datasets</option> : null}
+                {projects.flatMap((project) =>
+                  project.datasets.map((dataset) => (
+                    <option
+                      key={`${project.id}-${dataset.id}`}
+                      value={savedDatasetValue(project.id, dataset.id)}
+                    >
+                      {project.name} / {dataset.name} ({dataset.image_count} images)
+                    </option>
+                  )),
+                )}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={!selectedSavedDataset || isLoadingSavedDataset}
+              onClick={handleLoadSavedDataset}
+            >
+              {isLoadingSavedDataset ? "Loading" : "Load Dataset"}
+            </button>
+          </div>
         </form>
 
         {scanError ? <div className="error-banner">{scanError}</div> : null}
         {importError ? <div className="error-banner">{importError}</div> : null}
+        {savedDatasetError ? <div className="error-banner">{savedDatasetError}</div> : null}
 
         {scan ? (
           <div className="scan-results">
@@ -2370,6 +2459,26 @@ function formatImageAltitude(altitude: number | null) {
 
 function formatGeometryValue(value: number) {
   return Number(value.toFixed(4));
+}
+
+function savedDatasetValue(projectId: number, datasetId: number) {
+  return `${projectId}:${datasetId}`;
+}
+
+function firstSavedDatasetValue(projects: ProjectSummary[]) {
+  const project = projects.find((item) => item.datasets.length > 0);
+  const dataset = project?.datasets[0];
+  return project && dataset ? savedDatasetValue(project.id, dataset.id) : "";
+}
+
+function savedDatasetFromValue(projects: ProjectSummary[], value: string) {
+  const [projectId, datasetId] = value.split(":").map((part) => Number(part));
+  if (!projectId || !datasetId) {
+    return null;
+  }
+  const project = projects.find((item) => item.id === projectId);
+  const dataset = project?.datasets.find((item) => item.id === datasetId);
+  return project && dataset ? { project, dataset } : null;
 }
 
 function toImageFilterRequest(filters: {

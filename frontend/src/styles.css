@@ -149,6 +149,18 @@ h2 {
   gap: 6px;
 }
 
+.saved-dataset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.saved-dataset-row label {
+  display: grid;
+  gap: 6px;
+}
+
 .input-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1271,7 +1283,8 @@ input[type="color"] {
 @media (max-width: 820px) {
   .topbar,
   .input-row,
-  .import-name-grid {
+  .import-name-grid,
+  .saved-dataset-row {
     grid-template-columns: 1fr;
   }
 

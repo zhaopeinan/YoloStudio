@@ -53,6 +53,25 @@ class DatasetImportSummary(BaseModel):
     groups: list[DatasetImportGroupSummary]
 
 
+class ProjectDatasetRead(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    source_type: str
+    import_status: str
+    image_count: int
+
+
+class ProjectRead(BaseModel):
+    id: int
+    name: str
+    datasets: list[ProjectDatasetRead]
+
+
+class ProjectList(BaseModel):
+    items: list[ProjectRead]
+
+
 class DatasetImageRead(BaseModel):
     id: int
     relative_path: str

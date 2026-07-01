@@ -91,6 +91,24 @@ const apiMock = vi.hoisted(() => {
     image_count: 1,
     groups: [{ name: "iris", image_count: 1, metadata_rows: 1 }],
   }));
+  const listProjects = vi.fn(async () => ({
+    items: [
+      {
+        id: 1,
+        name: "Drone QA Project",
+        datasets: [
+          {
+            id: 1,
+            project_id: 1,
+            name: "camouflage-set",
+            source_type: "zip",
+            import_status: "imported",
+            image_count: 2,
+          },
+        ],
+      },
+    ],
+  }));
   const listImages = vi.fn(async (_datasetId: number, filters = {}) => ({
     items: [
       {
@@ -371,6 +389,7 @@ const apiMock = vi.hoisted(() => {
     listTrainingRuns,
     listPredictionJobs,
     importDataset,
+    listProjects,
     listImages,
     createDatasetVersion,
     createTrainingRun,
@@ -398,6 +417,7 @@ vi.mock("./api", () => ({
     database_path: "/tmp/workspace/app.db",
     devices: { selected: "cpu", available: ["cpu"], details: {} },
   }),
+  listProjects: apiMock.listProjects,
   scanDataset: async () => ({
     source_path: "/tmp/image_dataset.zip",
     archive_name: "image_dataset.zip",
@@ -594,6 +614,7 @@ describe("App", () => {
     apiMock.trainingRunsResponseQueue.length = 0;
     apiMock.predictionJobsResponseQueue.length = 0;
     apiMock.importDataset.mockClear();
+    apiMock.listProjects.mockClear();
     apiMock.listImages.mockClear();
     apiMock.createDatasetVersion.mockClear();
     apiMock.createTrainingRun.mockClear();
@@ -627,6 +648,8 @@ describe("App", () => {
     expect(screen.getByLabelText("Dataset path")).toBeInTheDocument();
     expect(screen.getByLabelText("Project name")).toBeInTheDocument();
     expect(screen.getByLabelText("Dataset name")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Saved dataset")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load Dataset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scan Dataset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Import Dataset" })).toBeInTheDocument();
     expect(screen.getByText("Class Library")).toBeInTheDocument();
@@ -805,6 +828,27 @@ describe("App", () => {
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
     expect(apiMock.getPredictionJobLogs).toHaveBeenCalledWith(2);
     expect(screen.getAllByText("Idle")).toHaveLength(2);
+  });
+
+  it("loads a saved dataset without re-importing source files", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByLabelText("Saved dataset")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Load Dataset" }));
+
+    expect(apiMock.importDataset).not.toHaveBeenCalled();
+    expect(apiMock.listImages).toHaveBeenCalledWith(1);
+    expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
+    expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
+    const summaries = await screen.findAllByText((_, element) =>
+      Boolean(
+        element?.classList.contains("summary-line") &&
+          element.textContent?.includes("Drone QA Project / camouflage-set"),
+      ),
+    );
+    expect(summaries).toHaveLength(1);
   });
 
   it("cancels an active training run from run history", async () => {
