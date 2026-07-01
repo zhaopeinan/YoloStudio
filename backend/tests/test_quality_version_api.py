@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
-from test_dataset_import_api import create_import_zip, isolated_client
+from test_dataset_import_api import PNG_1X1, create_import_zip, isolated_client
 
 
 def _import_dataset(client, zip_path: Path) -> dict:
@@ -26,6 +27,16 @@ def _create_class(client, project_id: int, name: str) -> dict:
     )
     assert response.status_code == 200
     return response.json()
+
+
+def _create_missing_metadata_zip(path: Path) -> None:
+    with ZipFile(path, "w") as archive:
+        archive.writestr("yolo_dataset/iris/images/raw/frame_iris_00001.png", PNG_1X1)
+        archive.writestr("yolo_dataset/vtol/images/raw/frame_vtol_00001.png", PNG_1X1)
+        archive.writestr(
+            "yolo_dataset/iris/meta.jsonl",
+            '{"file":"frame_iris_00001.png","drone":"iris","z":12.0,"t":2.0}\n',
+        )
 
 
 def test_dataset_quality_reports_training_readiness(tmp_path: Path):
@@ -319,3 +330,61 @@ def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path)
 
         assert missing_response.status_code == 400
         assert "Selected classes must belong" in missing_response.text
+
+
+def test_dataset_quality_reports_missing_metadata_without_blocking_export(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    _create_missing_metadata_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = _import_dataset(client, zip_path)
+        class_payload = _create_class(client, dataset["project_id"], "drone")
+        images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
+
+        for image in images:
+            response = client.put(
+                f"/api/images/{image['id']}/annotations",
+                json={
+                    "annotations": [
+                        {
+                            "class_id": class_payload["id"],
+                            "x_center": 0.5,
+                            "y_center": 0.5,
+                            "width": 0.25,
+                            "height": 0.25,
+                        }
+                    ]
+                },
+            )
+            assert response.status_code == 200
+
+        quality_response = client.get(f"/api/datasets/{dataset['dataset_id']}/quality")
+
+        assert quality_response.status_code == 200
+        quality = quality_response.json()
+        assert quality["ready_for_training"] is True
+        assert quality["missing_metadata_count"] == 1
+        assert "1 image is missing platform, altitude, timestamp, or source metadata." in quality[
+            "issues"
+        ]
+
+        issues_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/quality/issues?issue_type=missing_metadata"
+        )
+
+        assert issues_response.status_code == 200
+        issues = issues_response.json()
+        assert issues["total"] == 1
+        issue = issues["items"][0]
+        assert issue["issue_type"] == "missing_metadata"
+        assert issue["severity"] == "warning"
+        assert issue["image_id"] == images[1]["id"]
+        assert issue["image_path"].endswith("frame_vtol_00001.png")
+        assert issue["message"] == "Image is missing source metadata row, altitude, timestamp."
+
+        version_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "metadata-warning-ok"},
+        )
+
+        assert version_response.status_code == 200

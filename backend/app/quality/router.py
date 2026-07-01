@@ -17,6 +17,7 @@ QUALITY_ISSUE_TYPES = {
     "tiny_box",
     "invalid_box",
     "duplicate_box",
+    "missing_metadata",
     "unknown_class_reference",
 }
 
@@ -57,6 +58,19 @@ def _duplicate_box_count(annotations: list[Annotation]) -> int:
             duplicate_count += 1
         existing_annotations.append(annotation)
     return duplicate_count
+
+
+def missing_metadata_fields(image: Image) -> list[str]:
+    fields: list[str] = []
+    if not image.metadata_:
+        fields.append("source metadata row")
+    if not image.platform:
+        fields.append("platform")
+    if image.altitude is None:
+        fields.append("altitude")
+    if image.timestamp is None:
+        fields.append("timestamp")
+    return fields
 
 
 def _import_warnings(dataset: Dataset, warning_type: str | None = None) -> list[dict]:
@@ -113,6 +127,8 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     invalid_box_count = sum(1 for annotation, _ in rows if is_invalid_box(annotation))
     tiny_box_count = sum(1 for annotation, image in rows if is_tiny_box(annotation, image))
     duplicate_box_count = _duplicate_box_count([annotation for annotation, _ in rows])
+    images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
+    missing_metadata_count = sum(1 for image in images if missing_metadata_fields(image))
     unannotated_image_count = image_count - annotated_image_count
     unknown_class_reference_count = sum(
         int(warning.get("count") or 0)
@@ -138,6 +154,11 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     if duplicate_box_count > 0:
         noun = "box duplicates" if duplicate_box_count == 1 else "boxes duplicate"
         issues.append(f"{duplicate_box_count} {noun} another box on the same image and class.")
+    if missing_metadata_count > 0:
+        noun = "image is" if missing_metadata_count == 1 else "images are"
+        issues.append(
+            f"{missing_metadata_count} {noun} missing platform, altitude, timestamp, or source metadata."
+        )
     if unknown_class_reference_count > 0:
         noun = "label references" if unknown_class_reference_count == 1 else "label references"
         issues.append(f"{unknown_class_reference_count} {noun} unknown class indexes.")
@@ -159,6 +180,7 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
         tiny_box_count=tiny_box_count,
         invalid_box_count=invalid_box_count,
         duplicate_box_count=duplicate_box_count,
+        missing_metadata_count=missing_metadata_count,
         unknown_class_reference_count=unknown_class_reference_count,
         ready_for_training=ready_for_training,
         issues=issues,
@@ -295,6 +317,23 @@ def build_quality_issues(
 
     if issue_type in {"all", "duplicate_box"}:
         issues.extend(_duplicate_box_issues(rows))
+
+    if issue_type in {"all", "missing_metadata"}:
+        images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
+        for image in images:
+            missing_fields = missing_metadata_fields(image)
+            if not missing_fields:
+                continue
+            issues.append(
+                DatasetQualityIssue(
+                    issue_type="missing_metadata",
+                    severity="warning",
+                    message=f"Image is missing {', '.join(missing_fields)}.",
+                    image_id=image.id,
+                    image_path=image.relative_path,
+                    image_url=f"/api/images/{image.id}/file",
+                )
+            )
 
     if issue_type in {"all", "unknown_class_reference"}:
         images_by_id = {

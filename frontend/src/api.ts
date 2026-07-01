@@ -148,6 +148,7 @@ export type DatasetQualitySummary = {
   tiny_box_count: number;
   invalid_box_count: number;
   duplicate_box_count: number;
+  missing_metadata_count: number;
   unknown_class_reference_count: number;
   ready_for_training: boolean;
   issues: string[];
@@ -159,6 +160,7 @@ export type DatasetQualityIssue = {
     | "tiny_box"
     | "invalid_box"
     | "duplicate_box"
+    | "missing_metadata"
     | "unknown_class_reference";
   severity: "warning" | "error";
   message: string;

@@ -1241,6 +1241,10 @@ export default function App() {
                   label="Duplicate boxes"
                   value={quality.duplicate_box_count.toLocaleString()}
                 />
+                <Metric
+                  label="Missing metadata"
+                  value={quality.missing_metadata_count.toLocaleString()}
+                />
               </div>
 
               {quality.issues.length > 0 ? (
