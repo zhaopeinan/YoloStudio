@@ -552,8 +552,47 @@ export default function App() {
     );
   }
 
+  function updateAnnotationGeometry(
+    localId: string,
+    field: keyof Pick<DraftBox, "x_center" | "y_center" | "width" | "height">,
+    value: number,
+  ) {
+    const nextValue =
+      field === "width" || field === "height"
+        ? clampDimension(value)
+        : clamp(value);
+    updateAnnotation(localId, { [field]: nextValue });
+  }
+
   function deleteAnnotation(localId: string) {
     setAnnotations((current) => current.filter((annotation) => annotation.local_id !== localId));
+  }
+
+  async function copyAdjacentAnnotations(direction: "previous" | "next") {
+    if (!selectedImageId) {
+      return;
+    }
+
+    const selectedIndex = images.findIndex((image) => image.id === selectedImageId);
+    const adjacent = images[selectedIndex + (direction === "previous" ? -1 : 1)];
+    if (!adjacent) {
+      return;
+    }
+
+    setAnnotationError(null);
+    try {
+      const response = await getAnnotations(adjacent.id);
+      setAnnotations(
+        response.items.map((annotation, index) => ({
+          ...toDraftBox(annotation, index),
+          id: undefined,
+          image_id: selectedImageId,
+          local_id: `copy-${adjacent.id}-${Date.now()}-${index}`,
+        })),
+      );
+    } catch (error) {
+      setAnnotationError(error instanceof Error ? error.message : "Copy annotations failed");
+    }
   }
 
   function addPredictionAsAnnotation(prediction: Prediction) {
@@ -1599,14 +1638,35 @@ export default function App() {
               <div className="box-list">
                 <div className="box-list-heading">
                   <strong>Boxes</strong>
-                  <button
-                    type="button"
-                    onClick={handleSaveAnnotations}
-                    disabled={isSavingAnnotations || !selectedImage}
-                  >
-                    <Save size={16} />
-                    {isSavingAnnotations ? "Saving" : "Save Annotations"}
-                  </button>
+                  <div className="box-list-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => copyAdjacentAnnotations("previous")}
+                      disabled={images.findIndex((image) => image.id === selectedImage.id) <= 0}
+                    >
+                      Copy Previous
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => copyAdjacentAnnotations("next")}
+                      disabled={
+                        images.findIndex((image) => image.id === selectedImage.id) >=
+                        images.length - 1
+                      }
+                    >
+                      Copy Next
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveAnnotations}
+                      disabled={isSavingAnnotations || !selectedImage}
+                    >
+                      <Save size={16} />
+                      {isSavingAnnotations ? "Saving" : "Save Annotations"}
+                    </button>
+                  </div>
                 </div>
 
                 {annotationError ? <div className="error-banner">{annotationError}</div> : null}
@@ -1711,6 +1771,81 @@ export default function App() {
                         </button>
                       </div>
 
+                      <div className="geometry-grid" aria-label={`Box ${index + 1} geometry`}>
+                        <label htmlFor={`box-x-${annotation.local_id}`}>
+                          X
+                          <input
+                            id={`box-x-${annotation.local_id}`}
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.001}
+                            value={formatGeometryValue(annotation.x_center)}
+                            onChange={(event) =>
+                              updateAnnotationGeometry(
+                                annotation.local_id,
+                                "x_center",
+                                Number(event.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                        <label htmlFor={`box-y-${annotation.local_id}`}>
+                          Y
+                          <input
+                            id={`box-y-${annotation.local_id}`}
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.001}
+                            value={formatGeometryValue(annotation.y_center)}
+                            onChange={(event) =>
+                              updateAnnotationGeometry(
+                                annotation.local_id,
+                                "y_center",
+                                Number(event.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                        <label htmlFor={`box-w-${annotation.local_id}`}>
+                          W
+                          <input
+                            id={`box-w-${annotation.local_id}`}
+                            type="number"
+                            min={0.001}
+                            max={1}
+                            step={0.001}
+                            value={formatGeometryValue(annotation.width)}
+                            onChange={(event) =>
+                              updateAnnotationGeometry(
+                                annotation.local_id,
+                                "width",
+                                Number(event.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                        <label htmlFor={`box-h-${annotation.local_id}`}>
+                          H
+                          <input
+                            id={`box-h-${annotation.local_id}`}
+                            type="number"
+                            min={0.001}
+                            max={1}
+                            step={0.001}
+                            value={formatGeometryValue(annotation.height)}
+                            onChange={(event) =>
+                              updateAnnotationGeometry(
+                                annotation.local_id,
+                                "height",
+                                Number(event.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+
                       <label htmlFor={`track-${annotation.local_id}`}>Track ID</label>
                       <input
                         id={`track-${annotation.local_id}`}
@@ -1755,6 +1890,10 @@ function formatAltitude(minimum: number | null, maximum: number | null) {
 
 function formatImageAltitude(altitude: number | null) {
   return altitude === null ? "altitude n/a" : `${altitude.toFixed(1)}m`;
+}
+
+function formatGeometryValue(value: number) {
+  return Number(value.toFixed(4));
 }
 
 function toImageFilterRequest(filters: {
@@ -1855,6 +1994,10 @@ function rectangleToAnnotation(startX: number, startY: number, endX: number, end
 
 function clamp(value: number) {
   return Math.min(1, Math.max(0, value));
+}
+
+function clampDimension(value: number) {
+  return Math.min(1, Math.max(0.001, value));
 }
 
 function mergeTags(existing: string[] | undefined, tags: string[]) {

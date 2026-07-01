@@ -1100,6 +1100,18 @@ input[type="color"] {
   padding: 0 12px;
 }
 
+.box-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.box-list-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .box-editor {
   border: 1px solid #d9e3ea;
   border-radius: 8px;
@@ -1117,6 +1129,22 @@ input[type="color"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.geometry-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.geometry-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.geometry-grid input {
+  min-height: 34px;
+  padding: 0 8px;
 }
 
 .icon-button {

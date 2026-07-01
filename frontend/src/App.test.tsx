@@ -87,10 +87,19 @@ const apiMock = vi.hoisted(() => {
         annotation_count: filters.label_status === "unannotated" ? 0 : 1,
         image_url: "/api/images/10/file",
       },
+      {
+        id: 11,
+        relative_path: "iris/frame002.jpg",
+        platform: "iris",
+        altitude: 13,
+        timestamp: 2,
+        annotation_count: 1,
+        image_url: "/api/images/11/file",
+      },
     ],
     limit: 50,
     offset: 0,
-    total: 1,
+    total: 2,
   }));
   const createDatasetVersion = vi.fn(async (_datasetId: number, name?: string, classIds?: number[]) => ({
     id: 2,
@@ -102,6 +111,46 @@ const apiMock = vi.hoisted(() => {
     artifact_path: "/tmp/workspace/projects/1/versions/2",
     frozen: true,
     created_at: "2026-06-30T00:01:00",
+  }));
+  const getAnnotations = vi.fn(async (imageId: number) => ({
+    items:
+      imageId === 11
+        ? [
+            {
+              id: 101,
+              image_id: 11,
+              class_id: 1,
+              class_name: "target",
+              class_color: "#ef4444",
+              x_center: 0.6,
+              y_center: 0.55,
+              width: 0.25,
+              height: 0.2,
+              track_id: "copy-source",
+              edge_tags: ["occluded"],
+            },
+          ]
+        : [],
+  }));
+  const replaceAnnotations = vi.fn(async (
+    _imageId: number,
+    annotations: Array<{
+      class_id: number;
+      x_center: number;
+      y_center: number;
+      width: number;
+      height: number;
+      track_id?: string | null;
+      edge_tags?: string[];
+    }>,
+  ) => ({
+    items: annotations.map((annotation, index: number) => ({
+      id: index + 1,
+      image_id: _imageId,
+      class_name: "target",
+      class_color: "#ef4444",
+      ...annotation,
+    })),
   }));
   const getTrainingRunLogs = vi.fn(async (runId: number) => ({
     run_id: runId,
@@ -219,6 +268,8 @@ const apiMock = vi.hoisted(() => {
     listPredictionJobs,
     listImages,
     createDatasetVersion,
+    getAnnotations,
+    replaceAnnotations,
     getTrainingRunLogs,
     getPredictionJobLogs,
     getTrainingRunSummary,
@@ -299,8 +350,8 @@ vi.mock("./api", () => ({
     description: null,
     active: true,
   }),
-  getAnnotations: async () => ({ items: [] }),
-  replaceAnnotations: async () => ({ items: [] }),
+  getAnnotations: apiMock.getAnnotations,
+  replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: async () => ({
     dataset_id: 1,
     image_count: 1,
@@ -483,6 +534,8 @@ describe("App", () => {
     apiMock.predictionJobsResponseQueue.length = 0;
     apiMock.listImages.mockClear();
     apiMock.createDatasetVersion.mockClear();
+    apiMock.getAnnotations.mockClear();
+    apiMock.replaceAnnotations.mockClear();
     apiMock.listTrainingRuns.mockClear();
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
@@ -577,6 +630,26 @@ describe("App", () => {
     expect(
       await screen.findByDisplayValue("occluded, false_negative, reviewed_prediction"),
     ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Copy Next" }));
+    expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+    const xInput = screen.getByLabelText("X");
+    await user.clear(xInput);
+    await user.type(xInput, "0.42");
+    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+    expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
+      10,
+      expect.arrayContaining([
+        expect.objectContaining({
+          x_center: 0.42,
+          y_center: 0.55,
+          width: 0.25,
+          height: 0.2,
+          track_id: "copy-source",
+        }),
+      ]),
+    );
   });
 
   it("auto-refreshes active training runs and prediction jobs until idle", async () => {
