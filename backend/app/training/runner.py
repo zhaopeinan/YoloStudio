@@ -164,6 +164,19 @@ def complete_training_run(run_id: int, bind=None) -> None:
     append_run_log(run_id, "training completed", bind=bind)
 
 
+def cancel_training_run(run_id: int, bind=None) -> bool:
+    session_factory = _session_factory(bind)
+    with session_factory() as db:
+        run = db.get(TrainingRun, run_id)
+        if run is None or run.status not in ACTIVE_STATUSES:
+            return False
+        run.status = "cancelled"
+        run.ended_at = _now()
+        db.commit()
+    append_run_log(run_id, "training cancelled", bind=bind)
+    return True
+
+
 def run_post_training_threshold_scan(
     run_id: int,
     bind=None,

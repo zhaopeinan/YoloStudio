@@ -119,6 +119,8 @@ After a dataset version exists:
 5. Check `Run History` for status, artifact path, latest metrics, errors, and logs.
 6. While a run is `queued`, `preparing`, or `running`, the frontend shows `Auto refresh on` and
    refreshes run status plus logs automatically.
+7. Click `Cancel Run` on an active run to mark it `cancelled`, write a cancellation log, and allow
+   another run to be queued.
 
 The backend creates persistent run artifacts under:
 
@@ -130,7 +132,7 @@ workspace/projects/<project_id>/runs/<run_id>/
 ```
 
 Only one run can be active for a project at a time. Run status can be `queued`, `preparing`,
-`running`, `completed`, or `failed`.
+`running`, `completed`, `failed`, or `cancelled`.
 
 Real training uses Ultralytics when it is installed in the backend Python environment:
 

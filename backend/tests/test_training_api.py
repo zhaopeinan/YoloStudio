@@ -289,3 +289,48 @@ def test_training_run_rejects_when_another_run_is_active(tmp_path: Path, monkeyp
 
         assert second.status_code == 400
         assert "Another training run is already active" in second.text
+
+
+def test_training_run_can_be_cancelled_and_releases_active_lock(tmp_path: Path, monkeypatch):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    def leave_run_active(run_id: int, bind, _settings) -> None:
+        from app.training.runner import append_run_log, mark_training_run_running
+
+        mark_training_run_running(run_id, bind=bind)
+        append_run_log(run_id, "waiting for cancel", bind=bind)
+
+    monkeypatch.setattr("app.training.router.execute_training_run", leave_run_active)
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+
+        first = client.post(
+            "/api/training/runs",
+            json={"version_id": version["id"], "epochs": 1, "image_size": 320, "batch_size": 1},
+        )
+        assert first.status_code == 200
+        run_id = first.json()["id"]
+
+        cancel_response = client.post(f"/api/training/runs/{run_id}/cancel")
+
+        assert cancel_response.status_code == 200
+        assert cancel_response.json()["status"] == "cancelled"
+
+        logs_response = client.get(f"/api/training/runs/{run_id}/logs")
+
+        assert logs_response.status_code == 200
+        assert "training cancelled" in logs_response.json()["text"]
+
+        second = client.post(
+            "/api/training/runs",
+            json={"version_id": version["id"], "epochs": 1, "image_size": 320, "batch_size": 1},
+        )
+
+        assert second.status_code == 200
+
+        completed_cancel = client.post(f"/api/training/runs/{run_id}/cancel")
+
+        assert completed_cancel.status_code == 400
+        assert "Training run is not active" in completed_cancel.text

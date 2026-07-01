@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.experiments.schemas import RunExperimentSummary
 from app.experiments.summary import build_run_experiment_summary
 from app.training.runner import (
+    cancel_training_run,
     create_queued_run,
     execute_training_run,
     latest_metrics_for_run,
@@ -75,6 +76,17 @@ def get_training_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunR
     run = db.get(TrainingRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Training run was not found")
+    return _read_run(db, run)
+
+
+@router.post("/training/runs/{run_id}/cancel", response_model=TrainingRunRead)
+def cancel_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunRead:
+    run = db.get(TrainingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+    if not cancel_training_run(run_id, bind=db.get_bind()):
+        raise HTTPException(status_code=400, detail="Training run is not active")
+    db.refresh(run)
     return _read_run(db, run)
 
 

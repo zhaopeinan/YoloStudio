@@ -42,6 +42,7 @@ import type {
   TrainingRun,
 } from "./api";
 import {
+  cancelTrainingRun,
   createClass,
   createDatasetVersion,
   createPredictionJob,
@@ -157,6 +158,7 @@ export default function App() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
+  const [cancellingRunId, setCancellingRunId] = useState<number | null>(null);
   const [trainingModel, setTrainingModel] = useState("yolov8n.pt");
   const [trainingEpochs, setTrainingEpochs] = useState(50);
   const [trainingImageSize, setTrainingImageSize] = useState(640);
@@ -793,6 +795,24 @@ export default function App() {
     }
   }
 
+  async function handleCancelTrainingRun(runId: number) {
+    setCancellingRunId(runId);
+    setTrainingError(null);
+
+    try {
+      const run = await cancelTrainingRun(runId);
+      setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      await loadRunLogs(run.id);
+      if (importedDataset) {
+        await refreshTrainingRuns(importedDataset.project_id);
+      }
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "Training run cancel failed");
+    } finally {
+      setCancellingRunId(null);
+    }
+  }
+
   async function handleCreatePredictionJob() {
     const run = runs[0];
     if (!run) {
@@ -1375,6 +1395,16 @@ export default function App() {
                   >
                     Load Logs
                   </button>
+                  {isActiveRun(run.status) ? (
+                    <button
+                      type="button"
+                      className="secondary-button danger-button"
+                      disabled={cancellingRunId === run.id}
+                      onClick={() => handleCancelTrainingRun(run.id)}
+                    >
+                      {cancellingRunId === run.id ? "Cancelling" : "Cancel Run"}
+                    </button>
+                  ) : null}
                   {runLogs[run.id] ? <pre className="log-preview">{runLogs[run.id]}</pre> : null}
                 </div>
               ))

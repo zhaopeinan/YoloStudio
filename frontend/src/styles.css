@@ -171,6 +171,11 @@ button {
   background: #dfeaec;
 }
 
+.danger-button {
+  color: #7c2d12;
+  background: #ffe7dc;
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.6;

@@ -478,6 +478,12 @@ export function createTrainingRun(body: TrainingRunCreate): Promise<TrainingRun>
   });
 }
 
+export function cancelTrainingRun(runId: number): Promise<TrainingRun> {
+  return requestJson<TrainingRun>(`/api/training/runs/${runId}/cancel`, {
+    method: "POST",
+  });
+}
+
 export function getTrainingRunLogs(runId: number): Promise<TrainingRunLogsResponse> {
   return requestJson<TrainingRunLogsResponse>(`/api/training/runs/${runId}/logs`);
 }

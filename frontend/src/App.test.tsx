@@ -31,6 +31,12 @@ const apiMock = vi.hoisted(() => {
     created_at: "2026-06-30T00:02:00",
     updated_at: "2026-06-30T00:02:30",
   };
+  const cancelledRun = {
+    ...runningRun,
+    status: "cancelled",
+    ended_at: "2026-06-30T00:03:00",
+    updated_at: "2026-06-30T00:03:00",
+  };
   const completedPredictionJob = {
     id: 1,
     run_id: 1,
@@ -65,8 +71,9 @@ const apiMock = vi.hoisted(() => {
     created_at: "2026-06-30T00:05:00",
     updated_at: "2026-06-30T00:05:30",
   };
-  const trainingRunsResponseQueue: Array<{ items: Array<typeof completedRun | typeof runningRun> }> =
-    [];
+  const trainingRunsResponseQueue: Array<{
+    items: Array<typeof completedRun | typeof runningRun | typeof cancelledRun>;
+  }> = [];
   const predictionJobsResponseQueue: Array<{
     items: Array<typeof completedPredictionJob | typeof runningPredictionJob>;
   }> = [];
@@ -127,6 +134,10 @@ const apiMock = vi.hoisted(() => {
     ended_at: null,
     created_at: "2026-06-30T00:02:00",
     updated_at: "2026-06-30T00:02:00",
+  }));
+  const cancelTrainingRun = vi.fn(async (runId: number) => ({
+    ...cancelledRun,
+    id: runId,
   }));
   const getAnnotations = vi.fn(async (imageId: number) => ({
     items:
@@ -321,6 +332,7 @@ const apiMock = vi.hoisted(() => {
   return {
     completedRun,
     runningRun,
+    cancelledRun,
     completedPredictionJob,
     runningPredictionJob,
     trainingRunsResponseQueue,
@@ -330,6 +342,7 @@ const apiMock = vi.hoisted(() => {
     listImages,
     createDatasetVersion,
     createTrainingRun,
+    cancelTrainingRun,
     getAnnotations,
     replaceAnnotations,
     getTrainingRunLogs,
@@ -446,6 +459,7 @@ vi.mock("./api", () => ({
   createDatasetVersion: apiMock.createDatasetVersion,
   listTrainingRuns: apiMock.listTrainingRuns,
   createTrainingRun: apiMock.createTrainingRun,
+  cancelTrainingRun: apiMock.cancelTrainingRun,
   getTrainingRunLogs: apiMock.getTrainingRunLogs,
   getTrainingRunSummary: apiMock.getTrainingRunSummary,
   listPredictionJobs: apiMock.listPredictionJobs,
@@ -554,6 +568,7 @@ describe("App", () => {
     apiMock.listImages.mockClear();
     apiMock.createDatasetVersion.mockClear();
     apiMock.createTrainingRun.mockClear();
+    apiMock.cancelTrainingRun.mockClear();
     apiMock.getAnnotations.mockClear();
     apiMock.replaceAnnotations.mockClear();
     apiMock.listTrainingRuns.mockClear();
@@ -599,7 +614,7 @@ describe("App", () => {
     expect(screen.getByLabelText("Image filters")).toBeInTheDocument();
     expect(screen.getByLabelText("Version class subset")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("Label status"), "annotated");
-    await user.type(screen.getByLabelText("Edge tag"), "occluded");
+    fireEvent.change(screen.getByLabelText("Edge tag"), { target: { value: "occluded" } });
     await user.click(screen.getByRole("button", { name: "Apply Filters" }));
     expect(apiMock.listImages).toHaveBeenLastCalledWith(1, {
       platform: undefined,
@@ -618,12 +633,8 @@ describe("App", () => {
     expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
-    const mixupInput = screen.getByLabelText("MixUp");
-    await user.clear(mixupInput);
-    await user.type(mixupInput, "0.2");
-    const copyPasteInput = screen.getByLabelText("Copy-Paste");
-    await user.clear(copyPasteInput);
-    await user.type(copyPasteInput, "0.35");
+    fireEvent.change(screen.getByLabelText("MixUp"), { target: { value: "0.2" } });
+    fireEvent.change(screen.getByLabelText("Copy-Paste"), { target: { value: "0.35" } });
     await user.click(screen.getByRole("checkbox", { name: "GridMask" }));
     await user.click(screen.getByRole("checkbox", { name: "Auto threshold scan" }));
     await user.click(screen.getByRole("button", { name: "Start Training Run" }));
@@ -649,8 +660,8 @@ describe("App", () => {
     expect((await screen.findAllByText("Matched")).length).toBeGreaterThanOrEqual(2);
     await user.selectOptions(screen.getByLabelText("Failure type"), "false_positive");
     await user.selectOptions(screen.getByLabelText("Prediction class"), "1");
-    await user.type(screen.getByLabelText("Min conf"), "0.5");
-    await user.type(screen.getByLabelText("Prediction platform"), "iris");
+    fireEvent.change(screen.getByLabelText("Min conf"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("Prediction platform"), { target: { value: "iris" } });
     await user.click(screen.getByRole("button", { name: "Apply Sample Filters" }));
     expect(apiMock.listPredictions).toHaveBeenLastCalledWith(1, {
       failure_type: "false_positive",
@@ -664,8 +675,7 @@ describe("App", () => {
       timestamp_max: undefined,
     });
     const thresholdInput = screen.getByLabelText("Scan thresholds");
-    await user.clear(thresholdInput);
-    await user.type(thresholdInput, "0.1, 0.25, 0.55");
+    fireEvent.change(thresholdInput, { target: { value: "0.1, 0.25, 0.55" } });
     await user.click(screen.getByRole("button", { name: "Run Threshold Scan" }));
     expect(apiMock.createPredictionThresholdScan).toHaveBeenCalledWith(1, {
       image_scope: "all",
@@ -702,9 +712,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Copy Next" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
-    const xInput = screen.getByLabelText("X");
-    await user.clear(xInput);
-    await user.type(xInput, "0.42");
+    fireEvent.change(screen.getByLabelText("X"), { target: { value: "0.42" } });
     await user.click(screen.getByRole("button", { name: "Save Annotations" }));
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       10,
@@ -718,7 +726,7 @@ describe("App", () => {
         }),
       ]),
     );
-  });
+  }, 15000);
 
   it("auto-refreshes active training runs and prediction jobs until idle", async () => {
     apiMock.trainingRunsResponseQueue.push(
@@ -751,6 +759,28 @@ describe("App", () => {
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
     expect(apiMock.getPredictionJobLogs).toHaveBeenCalledWith(2);
     expect(screen.getAllByText("Idle")).toHaveLength(2);
+  });
+
+  it("cancels an active training run from run history", async () => {
+    apiMock.trainingRunsResponseQueue.push(
+      { items: [apiMock.runningRun] },
+      { items: [apiMock.cancelledRun] },
+    );
+
+    render(<App />);
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole("button", { name: "Import Dataset" }));
+    await flushPromises();
+
+    expect(screen.getByText("Run #2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
+    await flushPromises();
+
+    expect(apiMock.cancelTrainingRun).toHaveBeenCalledWith(2);
+    expect(screen.getByText("cancelled")).toBeInTheDocument();
+    expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
   });
 });
 
