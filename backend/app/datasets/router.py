@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
 from app.datasets.importer import import_dataset
-from app.datasets.scanner import scan_dataset_zip
+from app.datasets.scanner import scan_dataset_source
 from app.datasets.schemas import (
     DatasetImageList,
     DatasetImageRead,
@@ -26,9 +26,9 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 @router.post("/scan", response_model=DatasetScanSummary)
 def scan_dataset(request: DatasetScanRequest) -> DatasetScanSummary:
     try:
-        return scan_dataset_zip(request.source_path)
+        return scan_dataset_source(request.source_path)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Dataset archive was not found") from exc
+        raise HTTPException(status_code=404, detail="Dataset source was not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -42,7 +42,7 @@ def import_dataset_endpoint(
     try:
         return import_dataset(db, settings, request)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Dataset archive was not found") from exc
+        raise HTTPException(status_code=404, detail="Dataset source was not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -34,6 +34,21 @@ def create_import_zip(path: Path) -> None:
         )
 
 
+def create_import_folder(path: Path) -> None:
+    (path / "yolo_dataset/vtol/images/raw").mkdir(parents=True)
+    (path / "yolo_dataset/iris/images/raw").mkdir(parents=True)
+    (path / "yolo_dataset/vtol/images/raw/frame_vtol_00001.png").write_bytes(PNG_1X1)
+    (path / "yolo_dataset/iris/images/raw/frame_iris_00001.png").write_bytes(PNG_1X1)
+    (path / "yolo_dataset/vtol/meta.jsonl").write_text(
+        '{"file":"frame_vtol_00001.png","drone":"vtol","z":25.5,"t":1.0}\n',
+        encoding="utf-8",
+    )
+    (path / "yolo_dataset/iris/meta.jsonl").write_text(
+        '{"file":"frame_iris_00001.png","drone":"iris","z":12.0,"t":2.0}\n',
+        encoding="utf-8",
+    )
+
+
 @contextmanager
 def isolated_client(tmp_path: Path) -> Generator[TestClient, None, None]:
     settings = Settings(workspace_root=tmp_path / "workspace")
@@ -88,6 +103,44 @@ def test_import_dataset_persists_images_and_serves_files(tmp_path: Path):
         assert len(images) == 2
         assert images[0]["image_url"].startswith("/api/images/")
         assert images[0]["annotation_count"] == 0
+        assert {image["platform"] for image in images} == {"iris", "vtol"}
+        assert {image["altitude"] for image in images} == {12.0, 25.5}
+
+        file_response = client.get(images[0]["image_url"])
+
+        assert file_response.status_code == 200
+        assert file_response.headers["content-type"] == "image/png"
+        assert file_response.content == PNG_1X1
+
+
+def test_import_dataset_accepts_folder_and_serves_files(tmp_path: Path):
+    source_path = tmp_path / "sample-folder"
+    create_import_folder(source_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(source_path),
+                "project_name": "Folder Import Project",
+                "dataset_name": "folder-sample",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["project_name"] == "Folder Import Project"
+        assert payload["dataset_name"] == "folder-sample"
+        assert payload["image_count"] == 2
+        assert payload["groups"] == [
+            {"name": "iris", "image_count": 1, "metadata_rows": 1},
+            {"name": "vtol", "image_count": 1, "metadata_rows": 1},
+        ]
+
+        images_response = client.get(f"/api/datasets/{payload['dataset_id']}/images")
+
+        assert images_response.status_code == 200
+        images = images_response.json()["items"]
+        assert len(images) == 2
         assert {image["platform"] for image in images} == {"iris", "vtol"}
         assert {image["altitude"] for image in images} == {12.0, 25.5}
 

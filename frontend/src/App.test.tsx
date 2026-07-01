@@ -594,7 +594,7 @@ describe("App", () => {
 
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
     expect(await screen.findByText("cpu")).toBeInTheDocument();
-    expect(screen.getByLabelText("Dataset zip path")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dataset path")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scan Dataset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Import Dataset" })).toBeInTheDocument();
     expect(screen.getByText("Class Library")).toBeInTheDocument();

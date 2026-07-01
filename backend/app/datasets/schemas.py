@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class DatasetScanRequest(BaseModel):
-    source_path: Path = Field(..., description="Absolute path to a local dataset zip file")
+    source_path: Path = Field(..., description="Absolute path to a local dataset zip file or folder")
 
 
 class DatasetGroupSummary(BaseModel):
@@ -33,7 +33,7 @@ class DatasetScanSummary(BaseModel):
 
 
 class DatasetImportRequest(BaseModel):
-    source_path: Path = Field(..., description="Absolute path to a local dataset zip file")
+    source_path: Path = Field(..., description="Absolute path to a local dataset zip file or folder")
     project_name: str = Field(..., min_length=1, max_length=160)
     dataset_name: str = Field(..., min_length=1, max_length=160)
 

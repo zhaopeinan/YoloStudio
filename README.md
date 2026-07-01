@@ -19,7 +19,7 @@ Health check:
 curl http://127.0.0.1:8000/api/health
 ```
 
-Dataset scan check:
+Dataset scan check. `source_path` accepts either a `.zip` archive or a local dataset folder:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/datasets/scan \
@@ -42,7 +42,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`, keep the backend running, and scan:
+Open `http://127.0.0.1:5173`, keep the backend running, and scan a zip or folder path:
 
 ```text
 /Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip
@@ -53,8 +53,8 @@ Open `http://127.0.0.1:5173`, keep the backend running, and scan:
 With both servers running:
 
 1. Open `http://127.0.0.1:5173`.
-2. Click `Scan Dataset` to preview the zip.
-3. Click `Import Dataset` to copy the archive images into the managed workspace and create SQLite rows.
+2. Click `Scan Dataset` to preview the zip or folder.
+3. Click `Import Dataset` to copy the source images into the managed workspace and create SQLite rows.
 4. In `Class Library`, create a class such as `target`.
 5. Select an image in `Image Browser`.
 6. Drag on the image in `Annotation` to create a bounding box.

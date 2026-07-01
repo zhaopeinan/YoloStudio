@@ -970,13 +970,13 @@ export default function App() {
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Dataset Intake</p>
-            <h2>Scan Local Zip</h2>
+            <h2>Scan Local Dataset</h2>
           </div>
           <FolderSearch size={22} />
         </div>
 
         <form className="scan-form" onSubmit={handleScan}>
-          <label htmlFor="dataset-path">Dataset zip path</label>
+          <label htmlFor="dataset-path">Dataset path</label>
           <div className="input-row">
             <input
               id="dataset-path"
