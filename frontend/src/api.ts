@@ -106,6 +106,11 @@ export type DatasetImageFilters = {
   altitude_max?: number;
 };
 
+export type DatasetImageListOptions = {
+  limit?: number;
+  offset?: number;
+};
+
 export type ProjectClass = {
   id: number;
   project_id: number;
@@ -490,8 +495,12 @@ export function importDataset(
 export function listImages(
   datasetId: number,
   filters: DatasetImageFilters = {},
+  options: DatasetImageListOptions = {},
 ): Promise<DatasetImageListResponse> {
-  const params = new URLSearchParams({ limit: "50", offset: "0" });
+  const params = new URLSearchParams({
+    limit: String(options.limit ?? 50),
+    offset: String(options.offset ?? 0),
+  });
   Object.entries(filters).forEach(([key, value]) => {
     if (value !== undefined && value !== "" && value !== "all") {
       params.set(key, String(value));

@@ -80,6 +80,7 @@ const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset
 const defaultProjectName = "YOLO Trainer Project";
 const defaultDatasetName = "image_dataset";
 const defaultClassColor = "#ef4444";
+const imagePageSize = 50;
 const monitorRefreshMs = 2500;
 const activeRunStatuses = new Set(["queued", "preparing", "running"]);
 const activePredictionStatuses = new Set(["queued", "running"]);
@@ -164,6 +165,7 @@ export default function App() {
   const [classError, setClassError] = useState<string | null>(null);
   const [isCreatingClass, setIsCreatingClass] = useState(false);
   const [images, setImages] = useState<DatasetImage[]>([]);
+  const [imagePage, setImagePage] = useState({ limit: imagePageSize, offset: 0, total: 0 });
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
   const [imageFilters, setImageFilters] = useState({
     platform: "",
@@ -278,6 +280,10 @@ export default function App() {
   );
   const latestRunId = runs[0]?.id ?? null;
   const latestRun = runs[0] ?? null;
+  const imagePageStart = imagePage.total === 0 ? 0 : imagePage.offset + 1;
+  const imagePageEnd = Math.min(imagePage.offset + images.length, imagePage.total);
+  const canPageImagesPrevious = imagePage.offset > 0;
+  const canPageImagesNext = imagePage.offset + imagePage.limit < imagePage.total;
 
   useEffect(() => {
     if (!selectedImageId) {
@@ -398,7 +404,7 @@ export default function App() {
     const [classResponse, imageResponse, qualityResponse, qualityIssueResponse, versionResponse] =
       await Promise.all([
         listClasses(dataset.project_id),
-        listImages(dataset.dataset_id),
+        listImages(dataset.dataset_id, {}, { limit: imagePageSize, offset: 0 }),
         getQuality(dataset.dataset_id),
         listQualityIssues(dataset.dataset_id, qualityIssueType),
         listDatasetVersions(dataset.dataset_id),
@@ -409,6 +415,11 @@ export default function App() {
     setSelectedClassId(classResponse.items[0]?.id ?? null);
     setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
     setImages(imageResponse.items);
+    setImagePage({
+      limit: imageResponse.limit,
+      offset: imageResponse.offset,
+      total: imageResponse.total,
+    });
     setSelectedImageId(imageResponse.items[0]?.id ?? null);
     setAnnotations([]);
     setActiveReview(null);
@@ -499,15 +510,26 @@ export default function App() {
     }
   }
 
-  async function refreshImages(datasetId = importedDataset?.dataset_id) {
+  async function refreshImages(
+    datasetId = importedDataset?.dataset_id,
+    offset = imagePage.offset,
+  ) {
     if (!datasetId) {
       return;
     }
 
     setImageFilterError(null);
     try {
-      const response = await listImages(datasetId, toImageFilterRequest(imageFilters));
+      const response = await listImages(datasetId, toImageFilterRequest(imageFilters), {
+        limit: imagePageSize,
+        offset,
+      });
       setImages(response.items);
+      setImagePage({
+        limit: response.limit,
+        offset: response.offset,
+        total: response.total,
+      });
       setSelectedImageId((current) => {
         if (response.items.some((image) => image.id === current)) {
           return current;
@@ -542,7 +564,17 @@ export default function App() {
   }
 
   function handleApplyImageFilters() {
-    void refreshImages();
+    void refreshImages(importedDataset?.dataset_id, 0);
+  }
+
+  function handlePreviousImagePage() {
+    const nextOffset = Math.max(0, imagePage.offset - imagePage.limit);
+    void refreshImages(importedDataset?.dataset_id, nextOffset);
+  }
+
+  function handleNextImagePage() {
+    const nextOffset = imagePage.offset + imagePage.limit;
+    void refreshImages(importedDataset?.dataset_id, nextOffset);
   }
 
   function handleResetImageFilters() {
@@ -557,9 +589,14 @@ export default function App() {
     setImageFilters(nextFilters);
     if (importedDataset) {
       setImageFilterError(null);
-      listImages(importedDataset.dataset_id)
+      listImages(importedDataset.dataset_id, {}, { limit: imagePageSize, offset: 0 })
         .then((response) => {
           setImages(response.items);
+          setImagePage({
+            limit: response.limit,
+            offset: response.offset,
+            total: response.total,
+          });
           setSelectedImageId(response.items[0]?.id ?? null);
         })
         .catch((error: Error) => setImageFilterError(error.message));
@@ -2258,6 +2295,30 @@ export default function App() {
           </div>
 
           {imageFilterError ? <div className="error-banner">{imageFilterError}</div> : null}
+
+          <div className="image-pager" aria-label="Image pagination">
+            <span>
+              {imagePageStart}-{imagePageEnd} of {imagePage.total}
+            </span>
+            <div>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!importedDataset || !canPageImagesPrevious}
+                onClick={handlePreviousImagePage}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!importedDataset || !canPageImagesNext}
+                onClick={handleNextImagePage}
+              >
+                Next
+              </button>
+            </div>
+          </div>
 
           <div className="image-list" aria-label="Imported images">
             {images.length === 0 ? (

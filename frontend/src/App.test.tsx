@@ -110,35 +110,64 @@ const apiMock = vi.hoisted(() => {
       },
     ],
   }));
-  const listImages = vi.fn(async (_datasetId: number, filters = {}) => ({
-    items: [
-      {
-        id: 10,
-        relative_path: "iris/frame001.jpg",
-        width: 640,
-        height: 480,
-        platform: "iris",
-        altitude: 12,
-        timestamp: 1,
-        annotation_count: filters.label_status === "unannotated" ? 0 : 1,
-        image_url: "/api/images/10/file",
-      },
-      {
-        id: 11,
-        relative_path: "iris/frame002.jpg",
-        width: 640,
-        height: 480,
-        platform: "iris",
-        altitude: 13,
-        timestamp: 2,
-        annotation_count: 1,
-        image_url: "/api/images/11/file",
-      },
-    ],
-    limit: 50,
-    offset: 0,
-    total: 2,
-  }));
+  const datasetImages = [
+    {
+      id: 10,
+      relative_path: "iris/frame001.jpg",
+      width: 640,
+      height: 480,
+      platform: "iris",
+      altitude: 12,
+      timestamp: 1,
+      annotation_count: 1,
+      image_url: "/api/images/10/file",
+    },
+    {
+      id: 11,
+      relative_path: "iris/frame002.jpg",
+      width: 640,
+      height: 480,
+      platform: "iris",
+      altitude: 13,
+      timestamp: 2,
+      annotation_count: 1,
+      image_url: "/api/images/11/file",
+    },
+    {
+      id: 12,
+      relative_path: "iris/frame051.jpg",
+      width: 640,
+      height: 480,
+      platform: "iris",
+      altitude: 14,
+      timestamp: 3,
+      annotation_count: 0,
+      image_url: "/api/images/12/file",
+    },
+  ];
+  const listImages = vi.fn(
+    async (
+      _datasetId: number,
+      filters: { label_status?: "all" | "annotated" | "unannotated" } = {},
+      options: { limit?: number; offset?: number } = {},
+    ) => {
+      const offset = options.offset ?? 0;
+      const limit = options.limit ?? 50;
+      const items =
+        offset >= 50
+          ? [datasetImages[2]]
+          : datasetImages.slice(0, 2).map((image, index) => ({
+              ...image,
+              annotation_count: filters.label_status === "unannotated" && index === 0 ? 0 : 1,
+            }));
+      return {
+        items,
+        limit,
+        offset,
+        total: 51,
+      };
+    },
+  );
   const createDatasetVersion = vi.fn(async (_datasetId: number, name?: string, classIds?: number[]) => ({
     id: 2,
     project_id: 1,
@@ -732,14 +761,56 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("Label status"), "annotated");
     fireEvent.change(screen.getByLabelText("Edge tag"), { target: { value: "occluded" } });
     await user.click(screen.getByRole("button", { name: "Apply Filters" }));
-    expect(apiMock.listImages).toHaveBeenLastCalledWith(1, {
-      platform: undefined,
-      label_status: "annotated",
-      class_id: undefined,
-      edge_tag: "occluded",
-      altitude_min: undefined,
-      altitude_max: undefined,
-    });
+    expect(apiMock.listImages).toHaveBeenLastCalledWith(
+      1,
+      {
+        platform: undefined,
+        label_status: "annotated",
+        class_id: undefined,
+        edge_tag: "occluded",
+        altitude_min: undefined,
+        altitude_max: undefined,
+      },
+      {
+        limit: 50,
+        offset: 0,
+      },
+    );
+    expect(screen.getByLabelText("Image pagination")).toHaveTextContent("1-2 of 51");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(apiMock.listImages).toHaveBeenLastCalledWith(
+      1,
+      {
+        platform: undefined,
+        label_status: "annotated",
+        class_id: undefined,
+        edge_tag: "occluded",
+        altitude_min: undefined,
+        altitude_max: undefined,
+      },
+      {
+        limit: 50,
+        offset: 50,
+      },
+    );
+    expect(await screen.findByText("iris/frame051.jpg")).toBeInTheDocument();
+    expect(screen.getByLabelText("Image pagination")).toHaveTextContent("51-51 of 51");
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(apiMock.listImages).toHaveBeenLastCalledWith(
+      1,
+      {
+        platform: undefined,
+        label_status: "annotated",
+        class_id: undefined,
+        edge_tag: "occluded",
+        altitude_min: undefined,
+        altitude_max: undefined,
+      },
+      {
+        limit: 50,
+        offset: 0,
+      },
+    );
     expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
     expect(
@@ -940,7 +1011,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Load Dataset" }));
 
     expect(apiMock.importDataset).not.toHaveBeenCalled();
-    expect(apiMock.listImages).toHaveBeenCalledWith(1);
+    expect(apiMock.listImages).toHaveBeenCalledWith(1, {}, { limit: 50, offset: 0 });
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
     const summaries = await screen.findAllByText((_, element) =>
