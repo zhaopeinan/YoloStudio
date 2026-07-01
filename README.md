@@ -95,16 +95,18 @@ After importing a dataset and saving at least one annotation:
 
 1. Check `Quality Review` for image, annotated image, class, box, tiny-box, and issue counts.
 2. Use `Quality issue type` to inspect actionable tiny, duplicate, invalid, metadata, and unannotated samples.
-3. Click `Apply Auto Tags` to write annotation-level quality tags such as `tiny_box`,
+3. Check `Dataset Coverage` to see platform, altitude-band, class, and edge-tag coverage before
+   freezing a version.
+4. Click `Apply Auto Tags` to write annotation-level quality tags such as `tiny_box`,
    `duplicate_box`, and `invalid_box` into each affected annotation's `edge_tags`.
-4. Use the Image Browser `Edge tag` filter to create follow-up correction queues from those tags.
-5. Confirm the panel says `Ready to export`.
-6. Enter an optional version name in `Version Export`.
-7. Select the class subset to freeze for this version. Leaving all classes selected exports the full
+5. Use the Image Browser `Edge tag` filter to create follow-up correction queues from those tags.
+6. Confirm the panel says `Ready to export`.
+7. Enter an optional version name in `Version Export`.
+8. Select the class subset to freeze for this version. Leaving all classes selected exports the full
    active project class library; selecting a subset exports only images and labels that contain those
    classes.
-8. Click `Create Dataset Version`.
-9. Confirm the new version appears with train/val/test counts and an artifact path.
+9. Click `Create Dataset Version`.
+10. Confirm the new version appears with train/val/test counts and an artifact path.
 
 The backend writes frozen YOLO artifacts under:
 

@@ -438,6 +438,63 @@ const apiMock = vi.hoisted(() => {
       },
     ],
   });
+  const defaultCoverage = () => ({
+    dataset_id: 1,
+    image_count: 2,
+    annotated_image_count: 1,
+    annotation_count: 1,
+    platforms: [
+      {
+        label: "iris",
+        image_count: 1,
+        annotated_image_count: 1,
+        annotation_count: 1,
+      },
+      {
+        label: "vtol",
+        image_count: 1,
+        annotated_image_count: 0,
+        annotation_count: 0,
+      },
+    ],
+    altitude_bands: [
+      {
+        label: "<20m",
+        image_count: 1,
+        annotated_image_count: 1,
+        annotation_count: 1,
+      },
+      {
+        label: "20-50m",
+        image_count: 1,
+        annotated_image_count: 0,
+        annotation_count: 0,
+      },
+    ],
+    classes: [
+      {
+        class_id: 1,
+        class_name: "target",
+        class_color: "#ef4444",
+        image_count: 1,
+        annotation_count: 1,
+      },
+      {
+        class_id: 2,
+        class_name: "vehicle",
+        class_color: "#22c55e",
+        image_count: 0,
+        annotation_count: 0,
+      },
+    ],
+    edge_tags: [
+      {
+        tag: "occluded",
+        image_count: 1,
+        annotation_count: 1,
+      },
+    ],
+  });
   const defaultClasses = () => [
     {
       id: 1,
@@ -474,6 +531,7 @@ const apiMock = vi.hoisted(() => {
     }),
   );
   const getQuality = vi.fn(async () => defaultQuality());
+  const getDatasetCoverage = vi.fn(async () => defaultCoverage());
   const listQualityIssues = vi.fn(async () => defaultQualityIssues());
   const applyQualityTags = vi.fn(async () => ({
     dataset_id: 1,
@@ -658,10 +716,12 @@ const apiMock = vi.hoisted(() => {
     createPredictionThresholdScan,
     listPredictions,
     getQuality,
+    getDatasetCoverage,
     listQualityIssues,
     applyQualityTags,
     refreshImageDimensions,
     defaultQuality,
+    defaultCoverage,
     defaultQualityIssues,
     defaultClasses,
     listClasses,
@@ -726,6 +786,7 @@ vi.mock("./api", () => ({
   getAnnotations: apiMock.getAnnotations,
   replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: apiMock.getQuality,
+  getDatasetCoverage: apiMock.getDatasetCoverage,
   listQualityIssues: apiMock.listQualityIssues,
   applyQualityTags: apiMock.applyQualityTags,
   refreshImageDimensions: apiMock.refreshImageDimensions,
@@ -886,6 +947,8 @@ describe("App", () => {
     apiMock.listPredictions.mockClear();
     apiMock.getQuality.mockReset();
     apiMock.getQuality.mockImplementation(async () => apiMock.defaultQuality());
+    apiMock.getDatasetCoverage.mockReset();
+    apiMock.getDatasetCoverage.mockImplementation(async () => apiMock.defaultCoverage());
     apiMock.listQualityIssues.mockReset();
     apiMock.listQualityIssues.mockImplementation(async () => apiMock.defaultQualityIssues());
     apiMock.applyQualityTags.mockReset();
@@ -1016,6 +1079,17 @@ describe("App", () => {
     expect(
       within(screen.getByLabelText("Quality metrics")).getByText("Duplicate boxes"),
     ).toBeInTheDocument();
+    expect(apiMock.getDatasetCoverage).toHaveBeenCalledWith(1);
+    const coveragePanel = screen.getByLabelText("Dataset coverage");
+    expect(within(coveragePanel).getByText("Dataset Coverage")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("1/2 images | 1 boxes")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("Platforms")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("Altitude")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("Edge Tags")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("iris")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("20-50m")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("vehicle")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("occluded")).toBeInTheDocument();
     expect(await screen.findByText("tiny box")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open Issue" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);

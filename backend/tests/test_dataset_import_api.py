@@ -204,6 +204,141 @@ def test_list_projects_returns_imported_dataset_summaries(tmp_path: Path):
         ]
 
 
+def test_dataset_coverage_summary_reports_diversity(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "Coverage Test Project",
+                "dataset_name": "coverage-sample",
+            },
+        )
+        assert response.status_code == 200
+        dataset = response.json()
+        drone_response = client.post(
+            f"/api/projects/{dataset['project_id']}/classes",
+            json={"name": "drone", "color": "#ef4444"},
+        )
+        decoy_response = client.post(
+            f"/api/projects/{dataset['project_id']}/classes",
+            json={"name": "decoy", "color": "#22c55e"},
+        )
+        vehicle_response = client.post(
+            f"/api/projects/{dataset['project_id']}/classes",
+            json={"name": "vehicle", "color": "#2f80ed"},
+        )
+        assert drone_response.status_code == 200
+        assert decoy_response.status_code == 200
+        assert vehicle_response.status_code == 200
+        drone_class = drone_response.json()
+        decoy_class = decoy_response.json()
+        vehicle_class = vehicle_response.json()
+
+        images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
+        iris_image = next(image for image in images if image["platform"] == "iris")
+        vtol_image = next(image for image in images if image["platform"] == "vtol")
+
+        iris_annotations = client.put(
+            f"/api/images/{iris_image['id']}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": drone_class["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                        "edge_tags": ["occluded", "camouflaged"],
+                    }
+                ]
+            },
+        )
+        vtol_annotations = client.put(
+            f"/api/images/{vtol_image['id']}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": decoy_class["id"],
+                        "x_center": 0.4,
+                        "y_center": 0.4,
+                        "width": 0.3,
+                        "height": 0.3,
+                        "edge_tags": ["occluded"],
+                    }
+                ]
+            },
+        )
+        assert iris_annotations.status_code == 200
+        assert vtol_annotations.status_code == 200
+
+        coverage_response = client.get(f"/api/datasets/{dataset['dataset_id']}/coverage")
+
+        assert coverage_response.status_code == 200
+        coverage = coverage_response.json()
+        assert coverage["dataset_id"] == dataset["dataset_id"]
+        assert coverage["image_count"] == 2
+        assert coverage["annotated_image_count"] == 2
+        assert coverage["annotation_count"] == 2
+        assert coverage["platforms"] == [
+            {
+                "label": "iris",
+                "image_count": 1,
+                "annotated_image_count": 1,
+                "annotation_count": 1,
+            },
+            {
+                "label": "vtol",
+                "image_count": 1,
+                "annotated_image_count": 1,
+                "annotation_count": 1,
+            },
+        ]
+        assert coverage["altitude_bands"] == [
+            {
+                "label": "<20m",
+                "image_count": 1,
+                "annotated_image_count": 1,
+                "annotation_count": 1,
+            },
+            {
+                "label": "20-50m",
+                "image_count": 1,
+                "annotated_image_count": 1,
+                "annotation_count": 1,
+            },
+        ]
+        assert coverage["classes"] == [
+            {
+                "class_id": drone_class["id"],
+                "class_name": "drone",
+                "class_color": "#ef4444",
+                "image_count": 1,
+                "annotation_count": 1,
+            },
+            {
+                "class_id": decoy_class["id"],
+                "class_name": "decoy",
+                "class_color": "#22c55e",
+                "image_count": 1,
+                "annotation_count": 1,
+            },
+            {
+                "class_id": vehicle_class["id"],
+                "class_name": "vehicle",
+                "class_color": "#2f80ed",
+                "image_count": 0,
+                "annotation_count": 0,
+            },
+        ]
+        assert coverage["edge_tags"] == [
+            {"tag": "occluded", "image_count": 2, "annotation_count": 2},
+            {"tag": "camouflaged", "image_count": 1, "annotation_count": 1},
+        ]
+
+
 def test_import_dataset_loads_yolo_classes_and_labels(tmp_path: Path):
     zip_path = tmp_path / "labeled.zip"
     create_labeled_yolo_zip(zip_path)

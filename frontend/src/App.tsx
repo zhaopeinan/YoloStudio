@@ -26,6 +26,7 @@ import type { FormEvent, PointerEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Annotation,
+  DatasetCoverageSummary,
   DatasetDimensionRefreshSummary,
   DatasetImageFilters,
   DatasetImage,
@@ -65,6 +66,7 @@ import {
   createRunExport,
   createTrainingRun,
   getAnnotations,
+  getDatasetCoverage,
   getExportCapabilities,
   getHealth,
   getPredictionJobLogs,
@@ -225,6 +227,7 @@ export default function App() {
   const stopBoxMoveTrackingRef = useRef<(() => void) | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [quality, setQuality] = useState<DatasetQualitySummary | null>(null);
+  const [coverage, setCoverage] = useState<DatasetCoverageSummary | null>(null);
   const [qualityIssues, setQualityIssues] = useState<DatasetQualityIssue[]>([]);
   const [qualityIssueType, setQualityIssueType] = useState<DatasetQualityIssueType>("all");
   const [qualityError, setQualityError] = useState<string | null>(null);
@@ -440,6 +443,7 @@ export default function App() {
     setQualityError(null);
     setVersionError(null);
     setQualityIssues([]);
+    setCoverage(null);
     setDimensionRefresh(null);
 
     try {
@@ -474,14 +478,21 @@ export default function App() {
     setProjectName(dataset.project_name);
     setDatasetName(dataset.dataset_name);
 
-    const [classResponse, imageResponse, qualityResponse, qualityIssueResponse, versionResponse] =
-      await Promise.all([
-        listClasses(dataset.project_id),
-        listImages(dataset.dataset_id, {}, { limit: imagePageSize, offset: 0 }),
-        getQuality(dataset.dataset_id),
-        listQualityIssues(dataset.dataset_id, qualityIssueType),
-        listDatasetVersions(dataset.dataset_id),
-      ]);
+    const [
+      classResponse,
+      imageResponse,
+      qualityResponse,
+      coverageResponse,
+      qualityIssueResponse,
+      versionResponse,
+    ] = await Promise.all([
+      listClasses(dataset.project_id),
+      listImages(dataset.dataset_id, {}, { limit: imagePageSize, offset: 0 }),
+      getQuality(dataset.dataset_id),
+      getDatasetCoverage(dataset.dataset_id),
+      listQualityIssues(dataset.dataset_id, qualityIssueType),
+      listDatasetVersions(dataset.dataset_id),
+    ]);
     const runResponse = await listTrainingRuns(dataset.project_id);
 
     setClasses(classResponse.items);
@@ -497,6 +508,7 @@ export default function App() {
     setAnnotations([]);
     setActiveReview(null);
     setQuality(qualityResponse);
+    setCoverage(coverageResponse);
     setQualityIssues(qualityIssueResponse.items);
     setDimensionRefresh(null);
     setVersions(versionResponse.items);
@@ -549,12 +561,14 @@ export default function App() {
     setQualityError(null);
 
     try {
-      const [qualityResponse, qualityIssueResponse, versionResponse] = await Promise.all([
+      const [qualityResponse, coverageResponse, qualityIssueResponse, versionResponse] = await Promise.all([
         getQuality(datasetId),
+        getDatasetCoverage(datasetId),
         listQualityIssues(datasetId, qualityIssueType),
         listDatasetVersions(datasetId),
       ]);
       setQuality(qualityResponse);
+      setCoverage(coverageResponse);
       setQualityIssues(qualityIssueResponse.items);
       setVersions(versionResponse.items);
       if (importedDataset) {
@@ -1761,6 +1775,8 @@ export default function App() {
               {dimensionRefresh ? (
                 <p className="summary-line">{formatDimensionRefresh(dimensionRefresh)}</p>
               ) : null}
+
+              <DatasetCoveragePanel coverage={coverage} />
 
               <label className="quality-issue-filter" htmlFor="quality-issue-type">
                 Quality issue type
@@ -4031,6 +4047,95 @@ function annotationGuidance(
     return "Select a class before drawing boxes.";
   }
   return "Drag over the image to add a bounding box.";
+}
+
+function DatasetCoveragePanel(props: { coverage: DatasetCoverageSummary | null }) {
+  const { coverage } = props;
+  return (
+    <div className="coverage-panel" aria-label="Dataset coverage">
+      <div className="coverage-heading">
+        <strong>Dataset Coverage</strong>
+        {coverage ? (
+          <span>
+            {coverage.annotated_image_count}/{coverage.image_count} images |{" "}
+            {coverage.annotation_count} boxes
+          </span>
+        ) : null}
+      </div>
+      {!coverage ? (
+        <p className="empty-state">Import a dataset to inspect scene and label coverage.</p>
+      ) : (
+        <div className="coverage-grid">
+          <CoverageBucketList title="Platforms" rows={coverage.platforms} />
+          <CoverageBucketList title="Altitude" rows={coverage.altitude_bands} />
+          <ClassCoverageList rows={coverage.classes} />
+          <EdgeTagCoverageList rows={coverage.edge_tags} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CoverageBucketList(props: { title: string; rows: DatasetCoverageSummary["platforms"] }) {
+  return (
+    <div className="coverage-card">
+      <strong>{props.title}</strong>
+      {props.rows.length === 0 ? (
+        <p className="empty-state">No samples yet.</p>
+      ) : (
+        props.rows.map((row) => (
+          <div className="coverage-row" key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.annotation_count}</strong>
+            <small>
+              {row.annotated_image_count}/{row.image_count} images
+            </small>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function ClassCoverageList(props: { rows: DatasetCoverageSummary["classes"] }) {
+  return (
+    <div className="coverage-card">
+      <strong>Classes</strong>
+      {props.rows.length === 0 ? (
+        <p className="empty-state">Create classes to track label coverage.</p>
+      ) : (
+        props.rows.map((row) => (
+          <div className="coverage-row class-coverage-row" key={row.class_id}>
+            <span>
+              <i style={{ background: row.class_color }} />
+              {row.class_name}
+            </span>
+            <strong>{row.annotation_count}</strong>
+            <small>{row.image_count} images</small>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function EdgeTagCoverageList(props: { rows: DatasetCoverageSummary["edge_tags"] }) {
+  return (
+    <div className="coverage-card">
+      <strong>Edge Tags</strong>
+      {props.rows.length === 0 ? (
+        <p className="empty-state">Add tags such as occluded or camouflaged.</p>
+      ) : (
+        props.rows.slice(0, 6).map((row) => (
+          <div className="coverage-row" key={row.tag}>
+            <span>{row.tag}</span>
+            <strong>{row.annotation_count}</strong>
+            <small>{row.image_count} images</small>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 function Metric(props: { label: string; value: string }) {

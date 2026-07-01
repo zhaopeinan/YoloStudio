@@ -9,6 +9,9 @@ from app.core.settings import Settings, get_settings
 from app.datasets.importer import import_dataset, read_image_dimensions
 from app.datasets.scanner import scan_dataset_source
 from app.datasets.schemas import (
+    ClassCoverageBucket,
+    CoverageBucket,
+    DatasetCoverageSummary,
     DatasetImageList,
     DatasetImageRead,
     DatasetDimensionRefreshSummary,
@@ -20,7 +23,7 @@ from app.datasets.schemas import (
     ProjectList,
     ProjectRead,
 )
-from app.db.models import Annotation, Dataset, Image, Prediction, Project
+from app.db.models import Annotation, ClassDef, Dataset, Image, Prediction, Project
 from app.db.session import get_db
 
 
@@ -29,6 +32,32 @@ FAILURE_TYPE_PATTERN = "^(all|matched|false_positive|false_negative|class_confus
 
 
 projects_router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+def _altitude_band(altitude: float | None) -> str:
+    if altitude is None:
+        return "missing"
+    if altitude < 20:
+        return "<20m"
+    if altitude < 50:
+        return "20-50m"
+    if altitude < 100:
+        return "50-100m"
+    return ">=100m"
+
+
+def _coverage_bucket(
+    label: str,
+    image_ids: set[int],
+    annotated_image_ids: set[int],
+    annotation_count: int,
+) -> CoverageBucket:
+    return CoverageBucket(
+        label=label,
+        image_count=len(image_ids),
+        annotated_image_count=len(image_ids & annotated_image_ids),
+        annotation_count=annotation_count,
+    )
 
 
 @projects_router.get("", response_model=ProjectList)
@@ -169,6 +198,133 @@ def list_dataset_images(
         limit=limit,
         offset=offset,
         total=total,
+    )
+
+
+@router.get("/{dataset_id}/coverage", response_model=DatasetCoverageSummary)
+def get_dataset_coverage(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+) -> DatasetCoverageSummary:
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset was not found")
+
+    images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
+    image_ids = {image.id for image in images}
+    rows = db.execute(
+        select(Annotation, Image, ClassDef)
+        .join(Image, Annotation.image_id == Image.id)
+        .join(ClassDef, Annotation.class_id == ClassDef.id)
+        .where(Image.dataset_id == dataset_id)
+        .order_by(ClassDef.id, Annotation.id)
+    ).all()
+    project_classes = db.scalars(
+        select(ClassDef)
+        .where(ClassDef.project_id == dataset.project_id, ClassDef.active == 1)
+        .order_by(ClassDef.id)
+    ).all()
+    annotated_image_ids = {annotation.image_id for annotation, _, _ in rows}
+    annotation_count = len(rows)
+
+    platform_image_ids: dict[str, set[int]] = {}
+    altitude_image_ids: dict[str, set[int]] = {}
+    for image in images:
+        platform_label = image.platform or "missing"
+        platform_image_ids.setdefault(platform_label, set()).add(image.id)
+        altitude_image_ids.setdefault(_altitude_band(image.altitude), set()).add(image.id)
+
+    platform_annotation_counts = {label: 0 for label in platform_image_ids}
+    altitude_annotation_counts = {label: 0 for label in altitude_image_ids}
+    class_rows: dict[int, dict] = {}
+    edge_tag_rows: dict[str, dict[str, set[int] | int]] = {}
+    for annotation, image, class_def in rows:
+        platform_annotation_counts[image.platform or "missing"] += 1
+        altitude_annotation_counts[_altitude_band(image.altitude)] += 1
+
+        class_row = class_rows.setdefault(
+            class_def.id,
+            {
+                "class": class_def,
+                "image_ids": set(),
+                "annotation_count": 0,
+            },
+        )
+        class_row["image_ids"].add(image.id)
+        class_row["annotation_count"] += 1
+
+        for raw_tag in annotation.edge_tags or []:
+            tag = str(raw_tag).strip()
+            if not tag:
+                continue
+            tag_row = edge_tag_rows.setdefault(
+                tag,
+                {
+                    "image_ids": set(),
+                    "annotation_count": 0,
+                },
+            )
+            tag_row["image_ids"].add(image.id)
+            tag_row["annotation_count"] += 1
+
+    platforms = [
+        _coverage_bucket(
+            label,
+            platform_image_ids[label],
+            annotated_image_ids,
+            platform_annotation_counts[label],
+        )
+        for label in sorted(platform_image_ids)
+    ]
+    altitude_order = {"<20m": 0, "20-50m": 1, "50-100m": 2, ">=100m": 3, "missing": 4}
+    altitude_bands = [
+        _coverage_bucket(
+            label,
+            altitude_image_ids[label],
+            annotated_image_ids,
+            altitude_annotation_counts[label],
+        )
+        for label in sorted(altitude_image_ids, key=lambda item: altitude_order.get(item, 99))
+    ]
+    classes = []
+    for class_def in project_classes:
+        row = class_rows.get(
+            class_def.id,
+            {
+                "image_ids": set(),
+                "annotation_count": 0,
+            },
+        )
+        classes.append(
+            ClassCoverageBucket(
+                class_id=class_def.id,
+                class_name=class_def.name,
+                class_color=class_def.color,
+                image_count=len(row["image_ids"]),
+                annotation_count=int(row["annotation_count"]),
+            )
+        )
+    edge_tags = [
+        {
+            "tag": tag,
+            "image_count": len(row["image_ids"]),
+            "annotation_count": int(row["annotation_count"]),
+        }
+        for tag, row in sorted(
+            edge_tag_rows.items(),
+            key=lambda item: (-int(item[1]["annotation_count"]), item[0]),
+        )
+    ]
+
+    return DatasetCoverageSummary(
+        dataset_id=dataset.id,
+        image_count=len(image_ids),
+        annotated_image_count=len(annotated_image_ids),
+        annotation_count=annotation_count,
+        platforms=platforms,
+        altitude_bands=altitude_bands,
+        classes=classes,
+        edge_tags=edge_tags,
     )
 
 

@@ -96,3 +96,35 @@ class DatasetDimensionRefreshSummary(BaseModel):
     scanned_count: int
     updated_count: int
     missing_count: int
+
+
+class CoverageBucket(BaseModel):
+    label: str
+    image_count: int
+    annotated_image_count: int
+    annotation_count: int
+
+
+class ClassCoverageBucket(BaseModel):
+    class_id: int
+    class_name: str
+    class_color: str
+    image_count: int
+    annotation_count: int
+
+
+class EdgeTagCoverageBucket(BaseModel):
+    tag: str
+    image_count: int
+    annotation_count: int
+
+
+class DatasetCoverageSummary(BaseModel):
+    dataset_id: int
+    image_count: int
+    annotated_image_count: int
+    annotation_count: int
+    platforms: list[CoverageBucket]
+    altitude_bands: list[CoverageBucket]
+    classes: list[ClassCoverageBucket]
+    edge_tags: list[EdgeTagCoverageBucket]

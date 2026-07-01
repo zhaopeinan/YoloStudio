@@ -97,6 +97,38 @@ export type DatasetDimensionRefreshSummary = {
   missing_count: number;
 };
 
+export type CoverageBucket = {
+  label: string;
+  image_count: number;
+  annotated_image_count: number;
+  annotation_count: number;
+};
+
+export type ClassCoverageBucket = {
+  class_id: number;
+  class_name: string;
+  class_color: string;
+  image_count: number;
+  annotation_count: number;
+};
+
+export type EdgeTagCoverageBucket = {
+  tag: string;
+  image_count: number;
+  annotation_count: number;
+};
+
+export type DatasetCoverageSummary = {
+  dataset_id: number;
+  image_count: number;
+  annotated_image_count: number;
+  annotation_count: number;
+  platforms: CoverageBucket[];
+  altitude_bands: CoverageBucket[];
+  classes: ClassCoverageBucket[];
+  edge_tags: EdgeTagCoverageBucket[];
+};
+
 export type PredictionFailureType =
   | "all"
   | "matched"
@@ -559,6 +591,10 @@ export function refreshImageDimensions(
     `/api/datasets/${datasetId}/refresh-image-dimensions`,
     { method: "POST" },
   );
+}
+
+export function getDatasetCoverage(datasetId: number): Promise<DatasetCoverageSummary> {
+  return requestJson<DatasetCoverageSummary>(`/api/datasets/${datasetId}/coverage`);
 }
 
 export function listClasses(projectId: number): Promise<ClassListResponse> {
