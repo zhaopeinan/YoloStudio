@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DatasetQualitySummary(BaseModel):
@@ -42,3 +42,15 @@ class DatasetQualityIssueList(BaseModel):
     offset: int
     total: int
     items: list[DatasetQualityIssue]
+
+
+class QualityTagApplyRequest(BaseModel):
+    issue_type: str = Field(default="all")
+
+
+class QualityTagApplySummary(BaseModel):
+    dataset_id: int
+    issue_type: str
+    scanned_issue_count: int
+    updated_annotation_count: int
+    applied_tag_count: int

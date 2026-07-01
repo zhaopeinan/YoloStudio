@@ -387,6 +387,13 @@ const apiMock = vi.hoisted(() => {
   );
   const getQuality = vi.fn(async () => defaultQuality());
   const listQualityIssues = vi.fn(async () => defaultQualityIssues());
+  const applyQualityTags = vi.fn(async () => ({
+    dataset_id: 1,
+    issue_type: "duplicate_box",
+    scanned_issue_count: 1,
+    updated_annotation_count: 1,
+    applied_tag_count: 1,
+  }));
   const refreshImageDimensions = vi.fn(async () => ({
     dataset_id: 1,
     scanned_count: 2,
@@ -524,6 +531,7 @@ const apiMock = vi.hoisted(() => {
     listPredictions,
     getQuality,
     listQualityIssues,
+    applyQualityTags,
     refreshImageDimensions,
     defaultQuality,
     defaultQualityIssues,
@@ -590,6 +598,7 @@ vi.mock("./api", () => ({
   replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: apiMock.getQuality,
   listQualityIssues: apiMock.listQualityIssues,
+  applyQualityTags: apiMock.applyQualityTags,
   refreshImageDimensions: apiMock.refreshImageDimensions,
   listDatasetVersions: async () => ({
     items: [
@@ -768,6 +777,14 @@ describe("App", () => {
     apiMock.getQuality.mockImplementation(async () => apiMock.defaultQuality());
     apiMock.listQualityIssues.mockReset();
     apiMock.listQualityIssues.mockImplementation(async () => apiMock.defaultQualityIssues());
+    apiMock.applyQualityTags.mockReset();
+    apiMock.applyQualityTags.mockImplementation(async () => ({
+      dataset_id: 1,
+      issue_type: "duplicate_box",
+      scanned_issue_count: 1,
+      updated_annotation_count: 1,
+      applied_tag_count: 1,
+    }));
     apiMock.refreshImageDimensions.mockReset();
     apiMock.refreshImageDimensions.mockImplementation(async () => ({
       dataset_id: 1,
@@ -1217,6 +1234,11 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("Quality issue type"), "duplicate_box");
 
     expect(apiMock.listQualityIssues).toHaveBeenLastCalledWith(1, "duplicate_box");
+
+    await user.click(screen.getByRole("button", { name: "Apply Auto Tags" }));
+
+    expect(apiMock.applyQualityTags).toHaveBeenCalledWith(1, "duplicate_box");
+    expect(await screen.findByText("1 tags applied to 1 annotations")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Open Issue" }));
 

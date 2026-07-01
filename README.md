@@ -92,13 +92,17 @@ curl "http://127.0.0.1:8000/api/datasets/1/images?altitude_min=20&altitude_max=4
 After importing a dataset and saving at least one annotation:
 
 1. Check `Quality Review` for image, annotated image, class, box, tiny-box, and issue counts.
-2. Confirm the panel says `Ready to export`.
-3. Enter an optional version name in `Version Export`.
-4. Select the class subset to freeze for this version. Leaving all classes selected exports the full
+2. Use `Quality issue type` to inspect actionable tiny, duplicate, invalid, metadata, and unannotated samples.
+3. Click `Apply Auto Tags` to write annotation-level quality tags such as `tiny_box`,
+   `duplicate_box`, and `invalid_box` into each affected annotation's `edge_tags`.
+4. Use the Image Browser `Edge tag` filter to create follow-up correction queues from those tags.
+5. Confirm the panel says `Ready to export`.
+6. Enter an optional version name in `Version Export`.
+7. Select the class subset to freeze for this version. Leaving all classes selected exports the full
    active project class library; selecting a subset exports only images and labels that contain those
    classes.
-5. Click `Create Dataset Version`.
-6. Confirm the new version appears with train/val/test counts and an artifact path.
+8. Click `Create Dataset Version`.
+9. Confirm the new version appears with train/val/test counts and an artifact path.
 
 The backend writes frozen YOLO artifacts under:
 

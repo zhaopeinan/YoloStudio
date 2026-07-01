@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 from app.db.models import Annotation, ClassDef, Dataset, Image
 from app.db.session import get_db
 from app.prediction.matching import annotation_box, iou
-from app.quality.schemas import DatasetQualityIssue, DatasetQualityIssueList, DatasetQualitySummary
+from app.quality.schemas import (
+    DatasetQualityIssue,
+    DatasetQualityIssueList,
+    DatasetQualitySummary,
+    QualityTagApplyRequest,
+    QualityTagApplySummary,
+)
 
 
 router = APIRouter(prefix="/api/datasets", tags=["quality"])
@@ -21,6 +27,7 @@ QUALITY_ISSUE_TYPES = {
     "missing_image_dimensions",
     "unknown_class_reference",
 }
+ANNOTATION_TAG_ISSUE_TYPES = {"tiny_box", "duplicate_box", "invalid_box"}
 
 
 def is_invalid_box(annotation: Annotation) -> bool:
@@ -253,6 +260,16 @@ def _duplicate_box_issues(
     return issues
 
 
+def _merge_tags(existing_tags: list[str] | None, new_tags: list[str]) -> tuple[list[str], int]:
+    merged = list(existing_tags or [])
+    applied_count = 0
+    for tag in new_tags:
+        if tag not in merged:
+            merged.append(tag)
+            applied_count += 1
+    return merged, applied_count
+
+
 def build_quality_issues(
     db: Session,
     dataset_id: int,
@@ -395,6 +412,58 @@ def build_quality_issues(
     )
 
 
+def apply_quality_tags(
+    db: Session,
+    dataset_id: int,
+    issue_type: str = "all",
+) -> QualityTagApplySummary:
+    if issue_type != "all" and issue_type not in QUALITY_ISSUE_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported quality issue type")
+
+    issues = build_quality_issues(db, dataset_id, issue_type, limit=200, offset=0)
+    applicable_issues = [
+        issue
+        for issue in issues.items
+        if issue.issue_type in ANNOTATION_TAG_ISSUE_TYPES and issue.annotation_id is not None
+    ]
+    if not applicable_issues:
+        return QualityTagApplySummary(
+            dataset_id=dataset_id,
+            issue_type=issue_type,
+            scanned_issue_count=issues.total,
+            updated_annotation_count=0,
+            applied_tag_count=0,
+        )
+    annotations_by_id = {
+        annotation.id: annotation
+        for annotation in db.scalars(
+            select(Annotation).where(
+                Annotation.id.in_([issue.annotation_id for issue in applicable_issues])
+            )
+        ).all()
+    }
+
+    updated_annotation_ids: set[int] = set()
+    applied_tag_count = 0
+    for issue in applicable_issues:
+        annotation = annotations_by_id.get(issue.annotation_id)
+        if annotation is None:
+            continue
+        annotation.edge_tags, added_count = _merge_tags(annotation.edge_tags, [issue.issue_type])
+        if added_count:
+            updated_annotation_ids.add(annotation.id)
+            applied_tag_count += added_count
+
+    db.commit()
+    return QualityTagApplySummary(
+        dataset_id=dataset_id,
+        issue_type=issue_type,
+        scanned_issue_count=issues.total,
+        updated_annotation_count=len(updated_annotation_ids),
+        applied_tag_count=applied_tag_count,
+    )
+
+
 @router.get("/{dataset_id}/quality", response_model=DatasetQualitySummary)
 def get_dataset_quality(dataset_id: int, db: Session = Depends(get_db)) -> DatasetQualitySummary:
     return build_quality_summary(db, dataset_id)
@@ -409,3 +478,12 @@ def get_dataset_quality_issues(
     db: Session = Depends(get_db),
 ) -> DatasetQualityIssueList:
     return build_quality_issues(db, dataset_id, issue_type, limit, offset)
+
+
+@router.post("/{dataset_id}/quality/apply-tags", response_model=QualityTagApplySummary)
+def apply_dataset_quality_tags(
+    dataset_id: int,
+    request: QualityTagApplyRequest,
+    db: Session = Depends(get_db),
+) -> QualityTagApplySummary:
+    return apply_quality_tags(db, dataset_id, request.issue_type)

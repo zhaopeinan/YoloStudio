@@ -280,6 +280,18 @@ th {
   font-weight: 700;
 }
 
+.quality-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.quality-actions .summary-line {
+  margin-top: 0;
+}
+
 .warnings {
   display: flex;
   gap: 10px;

@@ -14,6 +14,7 @@ import {
   Radar,
   Save,
   Share2,
+  Tags,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -43,11 +44,13 @@ import type {
   PredictionFilters,
   PredictionImageReview,
   PredictionJob,
+  QualityTagApplySummary,
   RunExperimentSummary,
   TrainingAugmentationConfig,
   TrainingRun,
 } from "./api";
 import {
+  applyQualityTags,
   cancelTrainingRun,
   createClass,
   createDatasetVersion,
@@ -112,6 +115,12 @@ const edgeTagPresets = [
   "dense",
   "hard_negative",
 ];
+const qualityAutoTagIssueTypes = new Set<DatasetQualityIssueType>([
+  "all",
+  "tiny_box",
+  "invalid_box",
+  "duplicate_box",
+]);
 const defaultAugmentation: TrainingAugmentationConfig = {
   mosaic: 1,
   mixup: 0,
@@ -200,6 +209,8 @@ export default function App() {
   const [qualityIssueType, setQualityIssueType] = useState<DatasetQualityIssueType>("all");
   const [qualityError, setQualityError] = useState<string | null>(null);
   const [isLoadingQuality, setIsLoadingQuality] = useState(false);
+  const [isApplyingQualityTags, setIsApplyingQualityTags] = useState(false);
+  const [qualityTagSummary, setQualityTagSummary] = useState<QualityTagApplySummary | null>(null);
   const [dimensionRefresh, setDimensionRefresh] =
     useState<DatasetDimensionRefreshSummary | null>(null);
   const [isRefreshingDimensions, setIsRefreshingDimensions] = useState(false);
@@ -299,6 +310,15 @@ export default function App() {
   const imagePageEnd = Math.min(imagePage.offset + images.length, imagePage.total);
   const canPageImagesPrevious = imagePage.offset > 0;
   const canPageImagesNext = imagePage.offset + imagePage.limit < imagePage.total;
+  const hasApplicableQualityIssues = qualityIssues.some(
+    (issue) =>
+      qualityAutoTagIssueTypes.has(issue.issue_type) && issue.annotation_id,
+  );
+  const canApplyQualityTags =
+    Boolean(importedDataset) &&
+    qualityAutoTagIssueTypes.has(qualityIssueType) &&
+    hasApplicableQualityIssues &&
+    !isApplyingQualityTags;
 
   useEffect(() => {
     if (!selectedImageId) {
@@ -311,11 +331,7 @@ export default function App() {
 
     setAnnotationError(null);
     setActiveReview(null);
-    getAnnotations(selectedImageId)
-      .then((response) => {
-        setAnnotations(response.items.map(toDraftBox));
-      })
-      .catch((error: Error) => setAnnotationError(error.message));
+    void loadAnnotations(selectedImageId);
   }, [activeReview?.image.id, selectedImageId]);
 
   useEffect(() => {
@@ -525,6 +541,15 @@ export default function App() {
     }
   }
 
+  async function loadAnnotations(imageId: number) {
+    try {
+      const response = await getAnnotations(imageId);
+      setAnnotations(response.items.map(toDraftBox));
+    } catch (error) {
+      setAnnotationError(error instanceof Error ? error.message : "Annotations failed to load");
+    }
+  }
+
   async function refreshImages(
     datasetId = importedDataset?.dataset_id,
     offset = imagePage.offset,
@@ -553,6 +578,30 @@ export default function App() {
       });
     } catch (error) {
       setImageFilterError(error instanceof Error ? error.message : "Image filters failed");
+    }
+  }
+
+  async function handleApplyQualityTags() {
+    if (!importedDataset) {
+      return;
+    }
+
+    setIsApplyingQualityTags(true);
+    setQualityError(null);
+    setQualityTagSummary(null);
+
+    try {
+      const response = await applyQualityTags(importedDataset.dataset_id, qualityIssueType);
+      setQualityTagSummary(response);
+      await Promise.all([
+        refreshTrainingPrep(importedDataset.dataset_id),
+        refreshImages(importedDataset.dataset_id),
+        selectedImageId ? loadAnnotations(selectedImageId) : Promise.resolve(),
+      ]);
+    } catch (error) {
+      setQualityError(error instanceof Error ? error.message : "Quality tags failed to apply");
+    } finally {
+      setIsApplyingQualityTags(false);
     }
   }
 
@@ -1481,6 +1530,21 @@ export default function App() {
                   ))}
                 </select>
               </label>
+
+              <div className="quality-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!canApplyQualityTags}
+                  onClick={handleApplyQualityTags}
+                >
+                  <Tags size={16} />
+                  {isApplyingQualityTags ? "Applying Tags" : "Apply Auto Tags"}
+                </button>
+                {qualityTagSummary ? (
+                  <span className="summary-line">{formatQualityTagSummary(qualityTagSummary)}</span>
+                ) : null}
+              </div>
 
               {qualityIssues.length > 0 ? (
                 <div className="quality-issue-list" aria-label="Quality issue samples">
@@ -3408,6 +3472,10 @@ function formatPercent(value: number) {
 
 function formatDimensionRefresh(summary: DatasetDimensionRefreshSummary) {
   return `${summary.scanned_count} scanned, ${summary.updated_count} updated, ${summary.missing_count} still missing`;
+}
+
+function formatQualityTagSummary(summary: QualityTagApplySummary) {
+  return `${summary.applied_tag_count} tags applied to ${summary.updated_annotation_count} annotations`;
 }
 
 function annotationGuidance(

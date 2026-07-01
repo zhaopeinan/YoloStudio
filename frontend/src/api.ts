@@ -211,6 +211,14 @@ export type DatasetQualityIssueListResponse = {
   items: DatasetQualityIssue[];
 };
 
+export type QualityTagApplySummary = {
+  dataset_id: number;
+  issue_type: DatasetQualityIssueType;
+  scanned_issue_count: number;
+  updated_annotation_count: number;
+  applied_tag_count: number;
+};
+
 export type DatasetVersion = {
   id: number;
   project_id: number;
@@ -580,6 +588,16 @@ export function listQualityIssues(
   return requestJson<DatasetQualityIssueListResponse>(
     `/api/datasets/${datasetId}/quality/issues?${params}`,
   );
+}
+
+export function applyQualityTags(
+  datasetId: number,
+  issueType: DatasetQualityIssueType = "all",
+): Promise<QualityTagApplySummary> {
+  return requestJson<QualityTagApplySummary>(`/api/datasets/${datasetId}/quality/apply-tags`, {
+    method: "POST",
+    body: JSON.stringify({ issue_type: issueType }),
+  });
 }
 
 export function createDatasetVersion(

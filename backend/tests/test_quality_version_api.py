@@ -174,6 +174,88 @@ def test_dataset_quality_reports_training_readiness(tmp_path: Path):
         assert "dataset has duplicate boxes" in version_response.text
 
 
+def test_apply_quality_tags_merges_annotation_issue_tags(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = _import_dataset(client, zip_path)
+        class_payload = _create_class(client, dataset["project_id"], "drone")
+        image_id = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"][0][
+            "id"
+        ]
+
+        annotation_response = client.put(
+            f"/api/images/{image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.5,
+                        "height": 0.5,
+                        "edge_tags": ["manual_review"],
+                    },
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.5,
+                        "height": 0.5,
+                    },
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.2,
+                        "y_center": 0.2,
+                        "width": 0.005,
+                        "height": 0.005,
+                    },
+                ]
+            },
+        )
+        assert annotation_response.status_code == 200
+
+        apply_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/quality/apply-tags",
+            json={"issue_type": "all"},
+        )
+
+        assert apply_response.status_code == 200
+        assert apply_response.json() == {
+            "dataset_id": dataset["dataset_id"],
+            "issue_type": "all",
+            "scanned_issue_count": 5,
+            "updated_annotation_count": 3,
+            "applied_tag_count": 4,
+        }
+
+        annotations_response = client.get(f"/api/images/{image_id}/annotations")
+
+        assert annotations_response.status_code == 200
+        annotations = annotations_response.json()["items"]
+        assert annotations[0]["edge_tags"] == ["manual_review", "tiny_box"]
+        assert annotations[1]["edge_tags"] == ["tiny_box", "duplicate_box"]
+        assert annotations[2]["edge_tags"] == ["tiny_box"]
+
+        filtered_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/images?edge_tag=duplicate_box"
+        )
+
+        assert filtered_response.status_code == 200
+        assert [image["id"] for image in filtered_response.json()["items"]] == [image_id]
+
+        reapply_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/quality/apply-tags",
+            json={"issue_type": "duplicate_box"},
+        )
+
+        assert reapply_response.status_code == 200
+        assert reapply_response.json()["scanned_issue_count"] == 1
+        assert reapply_response.json()["updated_annotation_count"] == 0
+        assert reapply_response.json()["applied_tag_count"] == 0
+
+
 def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)
