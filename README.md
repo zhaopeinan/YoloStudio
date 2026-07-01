@@ -48,6 +48,10 @@ Open `http://127.0.0.1:5173`, keep the backend running, and scan a zip or folder
 /Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip
 ```
 
+Set `Project name` and `Dataset name` before import. Imports that use the same project name reuse
+the project-level class library, so related datasets can share labels while each dataset keeps its
+own image list, annotations, quality review, and exported versions.
+
 ## Annotation smoke workflow
 
 With both servers running:

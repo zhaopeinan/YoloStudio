@@ -72,6 +72,8 @@ import {
 } from "./api";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
+const defaultProjectName = "YOLO Trainer Project";
+const defaultDatasetName = "image_dataset";
 const defaultClassColor = "#ef4444";
 const monitorRefreshMs = 2500;
 const activeRunStatuses = new Set(["queued", "preparing", "running"]);
@@ -119,6 +121,8 @@ export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [datasetPath, setDatasetPath] = useState(defaultDatasetPath);
+  const [projectName, setProjectName] = useState(defaultProjectName);
+  const [datasetName, setDatasetName] = useState(defaultDatasetName);
   const [scan, setScan] = useState<DatasetScanSummary | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -316,7 +320,7 @@ export default function App() {
     setQualityIssues([]);
 
     try {
-      const imported = await importDataset(datasetPath);
+      const imported = await importDataset(datasetPath, projectName.trim(), datasetName.trim());
       setImportedDataset(imported);
 
       const [
@@ -1027,12 +1031,35 @@ export default function App() {
             <button
               type="button"
               className="secondary-button"
-              disabled={isImporting || datasetPath.trim().length === 0}
+              disabled={
+                isImporting ||
+                datasetPath.trim().length === 0 ||
+                projectName.trim().length === 0 ||
+                datasetName.trim().length === 0
+              }
               onClick={handleImportDataset}
             >
               <Upload size={16} />
               {isImporting ? "Importing" : "Import Dataset"}
             </button>
+          </div>
+          <div className="import-name-grid">
+            <label htmlFor="project-name">
+              Project name
+              <input
+                id="project-name"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+              />
+            </label>
+            <label htmlFor="dataset-name">
+              Dataset name
+              <input
+                id="dataset-name"
+                value={datasetName}
+                onChange={(event) => setDatasetName(event.target.value)}
+              />
+            </label>
           </div>
         </form>
 

@@ -83,6 +83,14 @@ const apiMock = vi.hoisted(() => {
   const listPredictionJobs = vi.fn(async () => {
     return predictionJobsResponseQueue.shift() ?? { items: [completedPredictionJob] };
   });
+  const importDataset = vi.fn(async () => ({
+    project_id: 1,
+    dataset_id: 1,
+    project_name: "Drone QA Project",
+    dataset_name: "camouflage-set",
+    image_count: 1,
+    groups: [{ name: "iris", image_count: 1, metadata_rows: 1 }],
+  }));
   const listImages = vi.fn(async (_datasetId: number, filters = {}) => ({
     items: [
       {
@@ -362,6 +370,7 @@ const apiMock = vi.hoisted(() => {
     predictionJobsResponseQueue,
     listTrainingRuns,
     listPredictionJobs,
+    importDataset,
     listImages,
     createDatasetVersion,
     createTrainingRun,
@@ -422,14 +431,7 @@ vi.mock("./api", () => ({
     ],
     warnings: ["No YOLO label .txt files were found"],
   }),
-  importDataset: async () => ({
-    project_id: 1,
-    dataset_id: 1,
-    project_name: "YOLO Trainer Project",
-    dataset_name: "image_dataset",
-    image_count: 1,
-    groups: [{ name: "iris", image_count: 1, metadata_rows: 1 }],
-  }),
+  importDataset: apiMock.importDataset,
   listImages: apiMock.listImages,
   listClasses: async () => ({
     items: [
@@ -590,6 +592,7 @@ describe("App", () => {
   beforeEach(() => {
     apiMock.trainingRunsResponseQueue.length = 0;
     apiMock.predictionJobsResponseQueue.length = 0;
+    apiMock.importDataset.mockClear();
     apiMock.listImages.mockClear();
     apiMock.createDatasetVersion.mockClear();
     apiMock.createTrainingRun.mockClear();
@@ -621,6 +624,8 @@ describe("App", () => {
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
     expect(await screen.findByText("cpu")).toBeInTheDocument();
     expect(screen.getByLabelText("Dataset path")).toBeInTheDocument();
+    expect(screen.getByLabelText("Project name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Dataset name")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Scan Dataset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Import Dataset" })).toBeInTheDocument();
     expect(screen.getByText("Class Library")).toBeInTheDocument();
@@ -633,7 +638,17 @@ describe("App", () => {
     expect(screen.getByText("Run History")).toBeInTheDocument();
     expect(screen.getByText("Prediction Analysis")).toBeInTheDocument();
 
+    await user.clear(screen.getByLabelText("Project name"));
+    await user.type(screen.getByLabelText("Project name"), "Drone QA Project");
+    await user.clear(screen.getByLabelText("Dataset name"));
+    await user.type(screen.getByLabelText("Dataset name"), "camouflage-set");
     await user.click(screen.getByRole("button", { name: "Import Dataset" }));
+
+    expect(apiMock.importDataset).toHaveBeenCalledWith(
+      "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip",
+      "Drone QA Project",
+      "camouflage-set",
+    );
 
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();

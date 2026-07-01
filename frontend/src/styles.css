@@ -138,6 +138,17 @@ h2 {
   gap: 8px;
 }
 
+.import-name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.import-name-grid label {
+  display: grid;
+  gap: 6px;
+}
+
 .input-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1259,7 +1270,8 @@ input[type="color"] {
 
 @media (max-width: 820px) {
   .topbar,
-  .input-row {
+  .input-row,
+  .import-name-grid {
     grid-template-columns: 1fr;
   }
 
