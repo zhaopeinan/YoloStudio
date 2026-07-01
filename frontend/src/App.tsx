@@ -241,6 +241,7 @@ export default function App() {
   const [runSummary, setRunSummary] = useState<RunExperimentSummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [trainingError, setTrainingError] = useState<string | null>(null);
+  const [trainingNotice, setTrainingNotice] = useState<string | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<number | null>(null);
   const [trainingModel, setTrainingModel] = useState("yolov8n.pt");
@@ -718,6 +719,52 @@ export default function App() {
     value: number,
   ) {
     setAugmentation((current) => ({ ...current, [field]: value }));
+  }
+
+  function buildTrainingRunRequest(versionId: number) {
+    return {
+      version_id: versionId,
+      model: trainingModel.trim() || "yolov8n.pt",
+      epochs: trainingEpochs,
+      image_size: trainingImageSize,
+      batch_size: trainingBatchSize,
+      device: trainingDevice.trim() || undefined,
+      augmentation_preset: augmentationPreset,
+      augmentation,
+      tta: trainingTta,
+      threshold_scan: thresholdScan,
+    };
+  }
+
+  function requestFromRunConfig(versionId: number, run: TrainingRun) {
+    const config = run.config;
+    return {
+      version_id: versionId,
+      model: stringConfig(config, "model", trainingModel.trim() || "yolov8n.pt"),
+      epochs: numberConfig(config, "epochs", trainingEpochs),
+      image_size: numberConfig(config, "image_size", trainingImageSize),
+      batch_size: numberConfig(config, "batch_size", trainingBatchSize),
+      device: stringConfig(config, "device", trainingDevice.trim()) || undefined,
+      augmentation_preset: stringConfig(config, "augmentation_preset", augmentationPreset),
+      augmentation: augmentationConfig(config, augmentation),
+      tta: booleanConfig(config, "tta", trainingTta),
+      threshold_scan: booleanConfig(config, "threshold_scan", thresholdScan),
+    };
+  }
+
+  function applyRunConfigToForm(run: TrainingRun) {
+    const config = run.config;
+    setTrainingModel(stringConfig(config, "model", "yolov8n.pt"));
+    setTrainingEpochs(numberConfig(config, "epochs", 50));
+    setTrainingImageSize(numberConfig(config, "image_size", 640));
+    setTrainingBatchSize(numberConfig(config, "batch_size", 8));
+    setTrainingDevice(stringConfig(config, "device", ""));
+    setAugmentationPreset(stringConfig(config, "augmentation_preset", "balanced"));
+    setAugmentation(augmentationConfig(config, defaultAugmentation));
+    setTrainingTta(booleanConfig(config, "tta", false));
+    setThresholdScan(booleanConfig(config, "threshold_scan", false));
+    setTrainingNotice(`Loaded config from Run #${run.id}`);
+    setTrainingError(null);
   }
 
   async function refreshTrainingRuns(projectId = importedDataset?.project_id) {
@@ -1230,26 +1277,40 @@ export default function App() {
 
     setIsStartingRun(true);
     setTrainingError(null);
+    setTrainingNotice(null);
 
     try {
-      const run = await createTrainingRun({
-        version_id: version.id,
-        model: trainingModel.trim() || "yolov8n.pt",
-        epochs: trainingEpochs,
-        image_size: trainingImageSize,
-        batch_size: trainingBatchSize,
-        device: trainingDevice.trim() || undefined,
-        augmentation_preset: augmentationPreset,
-        augmentation,
-        tta: trainingTta,
-        threshold_scan: thresholdScan,
-      });
+      const run = await createTrainingRun(buildTrainingRunRequest(version.id));
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
       await refreshTrainingRuns(importedDataset.project_id);
       await refreshRunSummary(run.id);
       await loadRunLogs(run.id);
     } catch (error) {
       setTrainingError(error instanceof Error ? error.message : "Training run failed to start");
+    } finally {
+      setIsStartingRun(false);
+    }
+  }
+
+  async function handleRerunTrainingRun(sourceRun: TrainingRun) {
+    const version = versions[0];
+    if (!version || !importedDataset) {
+      return;
+    }
+
+    setIsStartingRun(true);
+    setTrainingError(null);
+    setTrainingNotice(null);
+
+    try {
+      const run = await createTrainingRun(requestFromRunConfig(version.id, sourceRun));
+      setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      setTrainingNotice(`Started rerun from Run #${sourceRun.id}`);
+      await refreshTrainingRuns(importedDataset.project_id);
+      await refreshRunSummary(run.id);
+      await loadRunLogs(run.id);
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "Training rerun failed to start");
     } finally {
       setIsStartingRun(false);
     }
@@ -1994,6 +2055,7 @@ export default function App() {
           </div>
 
           {trainingError ? <div className="error-banner">{trainingError}</div> : null}
+          {trainingNotice ? <div className="success-banner">{trainingNotice}</div> : null}
         </section>
 
         <section className="panel training-panel">
@@ -2039,6 +2101,21 @@ export default function App() {
                     onClick={() => loadRunLogs(run.id)}
                   >
                     Load Logs
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => applyRunConfigToForm(run)}
+                  >
+                    Load Config
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={versions.length === 0 || hasActiveRun || isStartingRun}
+                    onClick={() => handleRerunTrainingRun(run)}
+                  >
+                    Rerun
                   </button>
                   {isActiveRun(run.status) ? (
                     <button
@@ -3226,6 +3303,45 @@ function toPredictionFilterRequest(filters: ReturnType<typeof defaultPredictionF
     altitude_max: filters.altitude_max === "" ? undefined : Number(filters.altitude_max),
     timestamp_min: filters.timestamp_min === "" ? undefined : Number(filters.timestamp_min),
     timestamp_max: filters.timestamp_max === "" ? undefined : Number(filters.timestamp_max),
+  };
+}
+
+function stringConfig(config: Record<string, unknown>, key: string, fallback: string) {
+  const value = config[key];
+  return typeof value === "string" ? value : fallback;
+}
+
+function numberConfig(config: Record<string, unknown>, key: string, fallback: number) {
+  const value = config[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function booleanConfig(config: Record<string, unknown>, key: string, fallback: boolean) {
+  const value = config[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function augmentationConfig(
+  config: Record<string, unknown>,
+  fallback: TrainingAugmentationConfig,
+): TrainingAugmentationConfig {
+  const raw = config.augmentation;
+  const source =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    mosaic: numberConfig(source, "mosaic", fallback.mosaic),
+    mixup: numberConfig(source, "mixup", fallback.mixup),
+    copy_paste: numberConfig(source, "copy_paste", fallback.copy_paste),
+    hsv_h: numberConfig(source, "hsv_h", fallback.hsv_h),
+    hsv_s: numberConfig(source, "hsv_s", fallback.hsv_s),
+    hsv_v: numberConfig(source, "hsv_v", fallback.hsv_v),
+    translate: numberConfig(source, "translate", fallback.translate),
+    scale: numberConfig(source, "scale", fallback.scale),
+    fliplr: numberConfig(source, "fliplr", fallback.fliplr),
+    erasing: numberConfig(source, "erasing", fallback.erasing),
+    gridmask: booleanConfig(source, "gridmask", fallback.gridmask),
   };
 }
 

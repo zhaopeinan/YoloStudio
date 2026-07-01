@@ -227,6 +227,15 @@ button:disabled {
   background: #fff1e7;
 }
 
+.success-banner {
+  margin-top: 14px;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #14532d;
+  background: #e8f7ee;
+  font-weight: 800;
+}
+
 .scan-results {
   margin-top: 20px;
 }

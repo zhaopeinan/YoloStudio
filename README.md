@@ -135,7 +135,10 @@ After a dataset version exists:
 5. Check `Run History` for status, artifact path, latest metrics, errors, and logs.
 6. While a run is `queued`, `preparing`, or `running`, the frontend shows `Auto refresh on` and
    refreshes run status plus logs automatically.
-7. Click `Cancel Run` on an active run to mark it `cancelled`, write a cancellation log, and allow
+7. Click `Load Config` on a historical run to restore its model, hyperparameters, augmentation,
+   TTA, and threshold-scan settings into Training Setup.
+8. Click `Rerun` to start a new run from that historical config on the latest dataset version.
+9. Click `Cancel Run` on an active run to mark it `cancelled`, write a cancellation log, and allow
    another run to be queued.
 
 The backend creates persistent run artifacts under:

@@ -22,7 +22,29 @@ const apiMock = vi.hoisted(() => {
     version_id: 1,
     status: "completed",
     device: "cpu",
-    config: { model: "yolov8n.pt", epochs: 2 },
+    config: {
+      model: "custom-drone.pt",
+      epochs: 12,
+      image_size: 512,
+      batch_size: 4,
+      device: "mps",
+      augmentation_preset: "edge-case",
+      augmentation: {
+        mosaic: 0.8,
+        mixup: 0.15,
+        copy_paste: 0.25,
+        hsv_h: 0.02,
+        hsv_s: 0.6,
+        hsv_v: 0.5,
+        translate: 0.08,
+        scale: 0.7,
+        fliplr: 0.4,
+        erasing: 0.2,
+        gridmask: true,
+      },
+      tta: true,
+      threshold_scan: true,
+    },
     artifact_path: "/tmp/workspace/projects/1/runs/1",
     log_path: "/tmp/workspace/projects/1/runs/1/logs.txt",
     error_message: null,
@@ -195,13 +217,13 @@ const apiMock = vi.hoisted(() => {
     frozen: true,
     created_at: "2026-06-30T00:01:00",
   }));
-  const createTrainingRun = vi.fn(async () => ({
+  const createTrainingRun = vi.fn(async (body: { version_id: number }) => ({
     id: 2,
     project_id: 1,
-    version_id: 1,
+    version_id: body.version_id,
     status: "queued",
     device: "cpu",
-    config: { model: "yolov8n.pt", epochs: 50 },
+    config: body,
     artifact_path: "/tmp/workspace/projects/1/runs/2",
     log_path: "/tmp/workspace/projects/1/runs/2/logs.txt",
     error_message: null,
@@ -1287,6 +1309,52 @@ describe("App", () => {
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
     expect(apiMock.getPredictionJobLogs).toHaveBeenCalledWith(2);
     expect(screen.getAllByText("Idle")).toHaveLength(2);
+  });
+
+  it("loads a historical run config and reruns it on the latest version", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    expect(await screen.findByText("Run #1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Load Config" }));
+
+    expect(screen.getByLabelText("Model preset or local weights")).toHaveValue("custom-drone.pt");
+    expect(screen.getByLabelText("Epochs")).toHaveValue(12);
+    expect(screen.getByLabelText("Image size")).toHaveValue(512);
+    expect(screen.getByLabelText("Batch")).toHaveValue(4);
+    expect(screen.getByLabelText("Device")).toHaveValue("mps");
+    expect(screen.getByLabelText("Strategy name")).toHaveValue("edge-case");
+    expect(screen.getByLabelText("Mosaic")).toHaveValue(0.8);
+    expect(screen.getByLabelText("MixUp")).toHaveValue(0.15);
+    expect(screen.getByRole("checkbox", { name: "GridMask" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "TTA" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Auto threshold scan" })).toBeChecked();
+    expect(await screen.findByText("Loaded config from Run #1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Rerun" }));
+
+    expect(apiMock.createTrainingRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        version_id: 1,
+        model: "custom-drone.pt",
+        epochs: 12,
+        image_size: 512,
+        batch_size: 4,
+        device: "mps",
+        augmentation_preset: "edge-case",
+        tta: true,
+        threshold_scan: true,
+        augmentation: expect.objectContaining({
+          mosaic: 0.8,
+          mixup: 0.15,
+          copy_paste: 0.25,
+          gridmask: true,
+        }),
+      }),
+    );
+    expect(await screen.findByText("Started rerun from Run #1")).toBeInTheDocument();
   });
 
   it("loads a saved dataset without re-importing source files", async () => {
