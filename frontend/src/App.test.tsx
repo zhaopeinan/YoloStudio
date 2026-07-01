@@ -5,6 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { DatasetQualityIssueListResponse, DatasetQualitySummary } from "./api";
 
+function pointerEvent(type: string, clientX: number, clientY: number) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    clientX: { value: clientX },
+    clientY: { value: clientY },
+    pointerId: { value: 1 },
+  });
+  return event;
+}
+
 const apiMock = vi.hoisted(() => {
   const completedRun = {
     id: 1,
@@ -1194,6 +1204,49 @@ describe("App", () => {
           class_id: 2,
           x_center: 0.6,
           y_center: 0.55,
+          width: 0.25,
+          height: 0.2,
+          track_id: "copy-source",
+          edge_tags: ["occluded"],
+        }),
+      ]),
+    );
+  });
+
+  it("moves an existing annotation box from the canvas and nudge controls", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByText("iris/frame002.jpg"));
+    expect(
+      await screen.findByText("target", { selector: ".box-editor-title strong" }),
+    ).toBeInTheDocument();
+
+    const canvas = screen.getByLabelText("Annotation canvas");
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 1000, height: 1000, right: 1000, bottom: 1000 }),
+    });
+
+    const canvasBox = screen.getByTestId("annotation-box-annotation-101");
+    fireEvent(canvasBox, pointerEvent("pointerdown", 600, 550));
+    expect(canvasBox).toHaveClass("selected");
+    await act(async () => {
+      fireEvent(window, pointerEvent("pointermove", 650, 520));
+      fireEvent(window, pointerEvent("pointerup", 650, 520));
+    });
+    await user.click(screen.getByRole("button", { name: "Move box 1 left" }));
+
+    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+
+    expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
+      11,
+      expect.arrayContaining([
+        expect.objectContaining({
+          class_id: 1,
+          x_center: 0.64,
+          y_center: 0.52,
           width: 0.25,
           height: 0.2,
           track_id: "copy-source",

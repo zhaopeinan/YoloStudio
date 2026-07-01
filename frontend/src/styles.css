@@ -1351,6 +1351,15 @@ input[type="color"] {
   cursor: crosshair;
 }
 
+.annotation-box {
+  cursor: move;
+  outline: none;
+}
+
+.annotation-box.selected {
+  filter: drop-shadow(0 0 3px rgba(31, 111, 120, 0.75));
+}
+
 .box-list-heading,
 .box-editor-title {
   display: flex;
@@ -1381,6 +1390,23 @@ input[type="color"] {
   border-radius: 8px;
   padding: 12px;
   background: #f8fafb;
+}
+
+.box-editor.selected {
+  border-color: #1f6f78;
+  box-shadow: 0 0 0 2px rgba(31, 111, 120, 0.12);
+}
+
+.nudge-controls {
+  display: grid;
+  grid-template-columns: repeat(4, 34px);
+  gap: 6px;
+  margin: 10px 0 8px;
+}
+
+.nudge-controls .icon-button {
+  color: #234047;
+  background: #eef4f6;
 }
 
 .edge-tag-presets {

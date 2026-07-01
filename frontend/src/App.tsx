@@ -12,6 +12,10 @@ import {
   PackageCheck,
   Play,
   Radar,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Save,
   Share2,
   Tags,
@@ -19,7 +23,7 @@ import {
   Upload,
 } from "lucide-react";
 import type { FormEvent, PointerEvent, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Annotation,
   DatasetDimensionRefreshSummary,
@@ -161,6 +165,14 @@ type DragState = {
   currentY: number;
 };
 
+type BoxMoveState = {
+  localId: string;
+  startX: number;
+  startY: number;
+  originalX: number;
+  originalY: number;
+};
+
 export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -205,6 +217,11 @@ export default function App() {
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   const [isSavingAnnotations, setIsSavingAnnotations] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [boxMoveState, setBoxMoveState] = useState<BoxMoveState | null>(null);
+  const boxMoveStateRef = useRef<BoxMoveState | null>(null);
+  const annotationCanvasRef = useRef<SVGSVGElement | null>(null);
+  const stopBoxMoveTrackingRef = useRef<(() => void) | null>(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [quality, setQuality] = useState<DatasetQualitySummary | null>(null);
   const [qualityIssues, setQualityIssues] = useState<DatasetQualityIssue[]>([]);
   const [qualityIssueType, setQualityIssueType] = useState<DatasetQualityIssueType>("all");
@@ -339,6 +356,9 @@ export default function App() {
   useEffect(() => {
     if (!selectedImageId) {
       setAnnotations([]);
+      setSelectedAnnotationId(null);
+      setDragState(null);
+      setActiveBoxMoveState(null);
       return;
     }
     if (activeReview?.image.id === selectedImageId) {
@@ -561,6 +581,7 @@ export default function App() {
     try {
       const response = await getAnnotations(imageId);
       setAnnotations(response.items.map(toDraftBox));
+      setSelectedAnnotationId(null);
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "Annotations failed to load");
     }
@@ -875,6 +896,15 @@ export default function App() {
     }
   }
 
+  function setActiveBoxMoveState(nextState: BoxMoveState | null) {
+    if (!nextState && stopBoxMoveTrackingRef.current) {
+      stopBoxMoveTrackingRef.current();
+      stopBoxMoveTrackingRef.current = null;
+    }
+    boxMoveStateRef.current = nextState;
+    setBoxMoveState(nextState);
+  }
+
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
     if (!selectedClass || !selectedImage) {
       return;
@@ -887,10 +917,15 @@ export default function App() {
       currentX: point.x,
       currentY: point.y,
     });
-    event.currentTarget.setPointerCapture(event.pointerId);
+    setPointerCaptureSafe(event.currentTarget, event.pointerId);
   }
 
   function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
+    if (boxMoveStateRef.current) {
+      moveActiveAnnotation(getRelativePoint(event));
+      return;
+    }
+
     if (!dragState) {
       return;
     }
@@ -902,6 +937,12 @@ export default function App() {
   }
 
   function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
+    if (boxMoveStateRef.current) {
+      setActiveBoxMoveState(null);
+      releasePointerCaptureSafe(event.currentTarget, event.pointerId);
+      return;
+    }
+
     if (!dragState || !selectedClass) {
       setDragState(null);
       return;
@@ -915,6 +956,7 @@ export default function App() {
       return;
     }
 
+    const localId = `draft-${Date.now()}`;
     setAnnotations((current) => [
       ...current,
       {
@@ -922,11 +964,88 @@ export default function App() {
         class_id: selectedClass.id,
         class_name: selectedClass.name,
         class_color: selectedClass.color,
-        local_id: `draft-${Date.now()}-${current.length}`,
+        local_id: localId,
         track_id: "",
         edge_tags: [],
       },
     ]);
+    setSelectedAnnotationId(localId);
+  }
+
+  function handlePointerCancel() {
+    setDragState(null);
+    setActiveBoxMoveState(null);
+  }
+
+  function beginMoveAnnotation(
+    event: PointerEvent<SVGElement>,
+    annotation: DraftBox,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getRelativePoint(event);
+    setSelectedAnnotationId(annotation.local_id);
+    setDragState(null);
+    setActiveBoxMoveState({
+      localId: annotation.local_id,
+      startX: point.x,
+      startY: point.y,
+      originalX: annotation.x_center,
+      originalY: annotation.y_center,
+    });
+    startBoxMoveWindowTracking();
+    setPointerCaptureSafe(event.currentTarget.ownerSVGElement, event.pointerId);
+  }
+
+  function moveActiveAnnotation(point: { x: number; y: number }) {
+    const activeBoxMoveState = boxMoveStateRef.current;
+    if (!activeBoxMoveState) {
+      return;
+    }
+    const annotation = annotations.find((item) => item.local_id === activeBoxMoveState.localId);
+    if (!annotation) {
+      setActiveBoxMoveState(null);
+      return;
+    }
+    const nextX = clampCenter(
+      activeBoxMoveState.originalX + point.x - activeBoxMoveState.startX,
+      annotation.width,
+    );
+    const nextY = clampCenter(
+      activeBoxMoveState.originalY + point.y - activeBoxMoveState.startY,
+      annotation.height,
+    );
+    updateAnnotation(activeBoxMoveState.localId, { x_center: nextX, y_center: nextY });
+  }
+
+  function startBoxMoveWindowTracking() {
+    if (stopBoxMoveTrackingRef.current) {
+      stopBoxMoveTrackingRef.current();
+    }
+
+    function handleWindowPointerMove(event: globalThis.PointerEvent) {
+      if (!annotationCanvasRef.current) {
+        return;
+      }
+      moveActiveAnnotation(
+        getRelativePointFromClient(
+          annotationCanvasRef.current,
+          event.clientX,
+          event.clientY,
+        ),
+      );
+    }
+
+    function handleWindowPointerUp() {
+      setActiveBoxMoveState(null);
+    }
+
+    window.addEventListener("pointermove", handleWindowPointerMove);
+    window.addEventListener("pointerup", handleWindowPointerUp);
+    stopBoxMoveTrackingRef.current = () => {
+      window.removeEventListener("pointermove", handleWindowPointerMove);
+      window.removeEventListener("pointerup", handleWindowPointerUp);
+    };
   }
 
   function updateAnnotation(localId: string, patch: Partial<DraftBox>) {
@@ -964,6 +1083,24 @@ export default function App() {
 
   function deleteAnnotation(localId: string) {
     setAnnotations((current) => current.filter((annotation) => annotation.local_id !== localId));
+    if (selectedAnnotationId === localId) {
+      setSelectedAnnotationId(null);
+    }
+  }
+
+  function nudgeAnnotation(localId: string, deltaX: number, deltaY: number) {
+    setSelectedAnnotationId(localId);
+    setAnnotations((current) =>
+      current.map((annotation) =>
+        annotation.local_id === localId
+          ? {
+              ...annotation,
+              x_center: clampCenter(annotation.x_center + deltaX, annotation.width),
+              y_center: clampCenter(annotation.y_center + deltaY, annotation.height),
+            }
+          : annotation,
+      ),
+    );
   }
 
   async function copyAdjacentAnnotations(direction: "previous" | "next") {
@@ -988,6 +1125,7 @@ export default function App() {
           local_id: `copy-${adjacent.id}-${Date.now()}-${index}`,
         })),
       );
+      setSelectedAnnotationId(null);
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "Copy annotations failed");
     }
@@ -1032,10 +1170,19 @@ export default function App() {
 
     setIsSavingAnnotations(true);
     setAnnotationError(null);
+    const selectedIndex = annotations.findIndex(
+      (annotation) => annotation.local_id === selectedAnnotationId,
+    );
 
     try {
       const response = await replaceAnnotations(selectedImageId, annotations.map(toAnnotationWrite));
-      setAnnotations(response.items.map(toDraftBox));
+      const nextAnnotations = response.items.map(toDraftBox);
+      setAnnotations(nextAnnotations);
+      setSelectedAnnotationId(
+        selectedIndex >= 0
+          ? nextAnnotations[selectedIndex]?.local_id ?? null
+          : nextAnnotations[0]?.local_id ?? null,
+      );
       setImages((current) =>
         current.map((image) =>
           image.id === selectedImageId
@@ -2596,6 +2743,7 @@ export default function App() {
                 <div className="image-stage">
                   <img src={selectedImage.image_url} alt={selectedImage.relative_path} />
                   <svg
+                    ref={annotationCanvasRef}
                     aria-label="Annotation canvas"
                     className={selectedClass ? "annotation-overlay drawable" : "annotation-overlay"}
                     viewBox="0 0 1 1"
@@ -2611,6 +2759,8 @@ export default function App() {
                             key={annotation.local_id}
                             annotation={annotation}
                             color={resolveClassColor(annotation, classById)}
+                            selected={annotation.local_id === selectedAnnotationId}
+                            onPointerDown={beginMoveAnnotation}
                           />
                         ))
                       : null}
@@ -2747,7 +2897,15 @@ export default function App() {
                   </p>
                 ) : (
                   annotations.map((annotation, index) => (
-                    <div className="box-editor" key={annotation.local_id}>
+                    <div
+                      className={
+                        annotation.local_id === selectedAnnotationId
+                          ? "box-editor selected"
+                          : "box-editor"
+                      }
+                      key={annotation.local_id}
+                      onClick={() => setSelectedAnnotationId(annotation.local_id)}
+                    >
                       <div className="box-editor-title">
                         <span
                           style={{ background: resolveClassColor(annotation, classById) }}
@@ -2764,6 +2922,44 @@ export default function App() {
                           onClick={() => deleteAnnotation(annotation.local_id)}
                         >
                           <Trash2 size={16} />
+                        </button>
+                      </div>
+                      <div className="nudge-controls" aria-label={`Move box ${index + 1}`}>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Move box ${index + 1} left`}
+                          title="Move left"
+                          onClick={() => nudgeAnnotation(annotation.local_id, -0.01, 0)}
+                        >
+                          <ArrowLeft size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Move box ${index + 1} up`}
+                          title="Move up"
+                          onClick={() => nudgeAnnotation(annotation.local_id, 0, -0.01)}
+                        >
+                          <ArrowUp size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Move box ${index + 1} down`}
+                          title="Move down"
+                          onClick={() => nudgeAnnotation(annotation.local_id, 0, 0.01)}
+                        >
+                          <ArrowDown size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Move box ${index + 1} right`}
+                          title="Move right"
+                          onClick={() => nudgeAnnotation(annotation.local_id, 0.01, 0)}
+                        >
+                          <ArrowRight size={15} />
                         </button>
                       </div>
 
@@ -3114,11 +3310,18 @@ function toAnnotationWrite(annotation: DraftBox): AnnotationWrite {
   };
 }
 
-function getRelativePoint(event: PointerEvent<SVGSVGElement>) {
-  const rect = event.currentTarget.getBoundingClientRect();
+function getRelativePoint(event: PointerEvent<SVGElement>) {
+  const svg = event.currentTarget.ownerSVGElement ?? event.currentTarget;
+  return getRelativePointFromClient(svg, event.clientX, event.clientY);
+}
+
+function getRelativePointFromClient(svg: SVGElement, rawClientX: number, rawClientY: number) {
+  const rect = svg.getBoundingClientRect();
+  const clientX = Number.isFinite(rawClientX) ? rawClientX : rect.left;
+  const clientY = Number.isFinite(rawClientY) ? rawClientY : rect.top;
   return {
-    x: clamp((event.clientX - rect.left) / rect.width),
-    y: clamp((event.clientY - rect.top) / rect.height),
+    x: clamp((clientX - rect.left) / rect.width),
+    y: clamp((clientY - rect.top) / rect.height),
   };
 }
 
@@ -3148,6 +3351,31 @@ function clamp(value: number) {
 
 function clampDimension(value: number) {
   return Math.min(1, Math.max(0.001, value));
+}
+
+function clampCenter(value: number, size: number) {
+  const halfSize = Math.min(0.5, Math.max(0, size / 2));
+  return Math.min(1 - halfSize, Math.max(halfSize, value));
+}
+
+function setPointerCaptureSafe(element: Element | null, pointerId: number) {
+  if (
+    element instanceof SVGElement &&
+    typeof element.setPointerCapture === "function"
+  ) {
+    element.setPointerCapture(pointerId);
+  }
+}
+
+function releasePointerCaptureSafe(element: Element, pointerId: number) {
+  if (
+    element instanceof SVGElement &&
+    typeof element.hasPointerCapture === "function" &&
+    typeof element.releasePointerCapture === "function" &&
+    element.hasPointerCapture(pointerId)
+  ) {
+    element.releasePointerCapture(pointerId);
+  }
 }
 
 function mergeTags(existing: string[] | undefined, tags: string[]) {
@@ -3182,19 +3410,47 @@ function resolveClassColor(annotation: DraftBox, classById: Map<number, ProjectC
   return classById.get(annotation.class_id)?.color ?? annotation.class_color ?? defaultClassColor;
 }
 
-function BoxRect(props: { annotation: DraftBox; color: string }) {
-  const { annotation, color } = props;
+function BoxRect(props: {
+  annotation: DraftBox;
+  color: string;
+  selected: boolean;
+  onPointerDown: (event: PointerEvent<SVGElement>, annotation: DraftBox) => void;
+}) {
+  const { annotation, color, selected, onPointerDown } = props;
+  const left = annotation.x_center - annotation.width / 2;
+  const top = annotation.y_center - annotation.height / 2;
   return (
-    <rect
-      x={annotation.x_center - annotation.width / 2}
-      y={annotation.y_center - annotation.height / 2}
-      width={annotation.width}
-      height={annotation.height}
-      fill="transparent"
-      stroke={color}
-      strokeWidth={0.004}
-      vectorEffect="non-scaling-stroke"
-    />
+    <g
+      className={selected ? "annotation-box selected" : "annotation-box"}
+      onPointerDown={(event) => onPointerDown(event, annotation)}
+      role="button"
+      aria-label={`Select box ${annotation.class_name ?? annotation.class_id}`}
+      tabIndex={0}
+      data-testid={`annotation-box-${annotation.local_id}`}
+    >
+      <rect
+        x={left}
+        y={top}
+        width={annotation.width}
+        height={annotation.height}
+        fill="transparent"
+        stroke="transparent"
+        strokeWidth={0.025}
+        vectorEffect="non-scaling-stroke"
+        onPointerDown={(event) => onPointerDown(event, annotation)}
+      />
+      <rect
+        x={left}
+        y={top}
+        width={annotation.width}
+        height={annotation.height}
+        fill={selected ? "rgba(31, 111, 120, 0.08)" : "transparent"}
+        stroke={color}
+        strokeWidth={selected ? 0.007 : 0.004}
+        vectorEffect="non-scaling-stroke"
+        onPointerDown={(event) => onPointerDown(event, annotation)}
+      />
+    </g>
   );
 }
 
