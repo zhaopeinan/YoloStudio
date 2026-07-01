@@ -12,6 +12,7 @@ class DatasetQualitySummary(BaseModel):
     class_count: int
     tiny_box_count: int
     invalid_box_count: int
+    duplicate_box_count: int
     unknown_class_reference_count: int
     ready_for_training: bool
     issues: list[str]

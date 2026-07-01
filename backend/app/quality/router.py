@@ -6,14 +6,17 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Annotation, ClassDef, Dataset, Image
 from app.db.session import get_db
+from app.prediction.matching import annotation_box, iou
 from app.quality.schemas import DatasetQualityIssue, DatasetQualityIssueList, DatasetQualitySummary
 
 
 router = APIRouter(prefix="/api/datasets", tags=["quality"])
+duplicate_iou_threshold = 0.95
 QUALITY_ISSUE_TYPES = {
     "unannotated_image",
     "tiny_box",
     "invalid_box",
+    "duplicate_box",
     "unknown_class_reference",
 }
 
@@ -39,6 +42,21 @@ def is_tiny_box(annotation: Annotation, image: Image) -> bool:
     if image.width is None or image.height is None:
         return False
     return annotation.width * image.width < 10 or annotation.height * image.height < 10
+
+
+def _duplicate_box_count(annotations: list[Annotation]) -> int:
+    seen_by_image_class: dict[tuple[int, int], list[Annotation]] = {}
+    duplicate_count = 0
+    for annotation in annotations:
+        key = (annotation.image_id, annotation.class_id)
+        existing_annotations = seen_by_image_class.setdefault(key, [])
+        if any(
+            iou(annotation_box(existing), annotation_box(annotation)) >= duplicate_iou_threshold
+            for existing in existing_annotations
+        ):
+            duplicate_count += 1
+        existing_annotations.append(annotation)
+    return duplicate_count
 
 
 def _import_warnings(dataset: Dataset, warning_type: str | None = None) -> list[dict]:
@@ -94,6 +112,7 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     ).all()
     invalid_box_count = sum(1 for annotation, _ in rows if is_invalid_box(annotation))
     tiny_box_count = sum(1 for annotation, image in rows if is_tiny_box(annotation, image))
+    duplicate_box_count = _duplicate_box_count([annotation for annotation, _ in rows])
     unannotated_image_count = image_count - annotated_image_count
     unknown_class_reference_count = sum(
         int(warning.get("count") or 0)
@@ -116,12 +135,19 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     if tiny_box_count > 0:
         noun = "box is" if tiny_box_count == 1 else "boxes are"
         issues.append(f"{tiny_box_count} {noun} smaller than 10x10 pixels.")
+    if duplicate_box_count > 0:
+        noun = "box duplicates" if duplicate_box_count == 1 else "boxes duplicate"
+        issues.append(f"{duplicate_box_count} {noun} another box on the same image and class.")
     if unknown_class_reference_count > 0:
         noun = "label references" if unknown_class_reference_count == 1 else "label references"
         issues.append(f"{unknown_class_reference_count} {noun} unknown class indexes.")
 
     ready_for_training = (
-        image_count > 0 and class_count > 0 and annotation_count > 0 and invalid_box_count == 0
+        image_count > 0
+        and class_count > 0
+        and annotation_count > 0
+        and invalid_box_count == 0
+        and duplicate_box_count == 0
     )
     return DatasetQualitySummary(
         dataset_id=dataset.id,
@@ -132,6 +158,7 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
         class_count=class_count,
         tiny_box_count=tiny_box_count,
         invalid_box_count=invalid_box_count,
+        duplicate_box_count=duplicate_box_count,
         unknown_class_reference_count=unknown_class_reference_count,
         ready_for_training=ready_for_training,
         issues=issues,
@@ -161,6 +188,37 @@ def _annotation_issue(
         width=annotation.width,
         height=annotation.height,
     )
+
+
+def _duplicate_box_issues(
+    rows: list[tuple[Annotation, Image, ClassDef]],
+) -> list[DatasetQualityIssue]:
+    seen_by_image_class: dict[tuple[int, int], list[Annotation]] = {}
+    issues: list[DatasetQualityIssue] = []
+    for annotation, image, class_def in rows:
+        key = (image.id, annotation.class_id)
+        existing_annotations = seen_by_image_class.setdefault(key, [])
+        matched_annotation = next(
+            (
+                existing
+                for existing in existing_annotations
+                if iou(annotation_box(existing), annotation_box(annotation)) >= duplicate_iou_threshold
+            ),
+            None,
+        )
+        if matched_annotation is not None:
+            issues.append(
+                _annotation_issue(
+                    "duplicate_box",
+                    "error",
+                    f"Box duplicates annotation {matched_annotation.id} on the same image and class.",
+                    annotation,
+                    image,
+                    class_def,
+                )
+            )
+        existing_annotations.append(annotation)
+    return issues
 
 
 def build_quality_issues(
@@ -234,6 +292,9 @@ def build_quality_issues(
                     class_def,
                 )
             )
+
+    if issue_type in {"all", "duplicate_box"}:
+        issues.extend(_duplicate_box_issues(rows))
 
     if issue_type in {"all", "unknown_class_reference"}:
         images_by_id = {

@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import type { DatasetQualityIssueListResponse, DatasetQualitySummary } from "./api";
 
 const apiMock = vi.hoisted(() => {
   const completedRun = {
@@ -258,7 +259,21 @@ const apiMock = vi.hoisted(() => {
       },
     ],
   }));
-  const listQualityIssues = vi.fn(async () => ({
+  const defaultQuality = (): DatasetQualitySummary => ({
+    dataset_id: 1,
+    image_count: 1,
+    annotated_image_count: 1,
+    unannotated_image_count: 0,
+    annotation_count: 1,
+    class_count: 1,
+    tiny_box_count: 0,
+    invalid_box_count: 0,
+    duplicate_box_count: 0,
+    unknown_class_reference_count: 0,
+    ready_for_training: true,
+    issues: [],
+  });
+  const defaultQualityIssues = (): DatasetQualityIssueListResponse => ({
     dataset_id: 1,
     limit: 50,
     offset: 0,
@@ -280,7 +295,9 @@ const apiMock = vi.hoisted(() => {
         height: 0.2,
       },
     ],
-  }));
+  });
+  const getQuality = vi.fn(async () => defaultQuality());
+  const listQualityIssues = vi.fn(async () => defaultQualityIssues());
   const getTrainingRunSummary = vi.fn(async (runId: number) => ({
     run_id: runId,
     metric_series: [
@@ -400,7 +417,10 @@ const apiMock = vi.hoisted(() => {
     getPredictionJobLogs,
     createPredictionThresholdScan,
     listPredictions,
+    getQuality,
     listQualityIssues,
+    defaultQuality,
+    defaultQualityIssues,
     getTrainingRunSummary,
     getExportCapabilities,
     listRunExports,
@@ -475,19 +495,7 @@ vi.mock("./api", () => ({
   }),
   getAnnotations: apiMock.getAnnotations,
   replaceAnnotations: apiMock.replaceAnnotations,
-  getQuality: async () => ({
-    dataset_id: 1,
-    image_count: 1,
-    annotated_image_count: 1,
-    unannotated_image_count: 0,
-    annotation_count: 1,
-    class_count: 1,
-    tiny_box_count: 0,
-    invalid_box_count: 0,
-    unknown_class_reference_count: 0,
-    ready_for_training: true,
-    issues: [],
-  }),
+  getQuality: apiMock.getQuality,
   listQualityIssues: apiMock.listQualityIssues,
   listDatasetVersions: async () => ({
     items: [
@@ -627,7 +635,10 @@ describe("App", () => {
     apiMock.getPredictionJobLogs.mockClear();
     apiMock.createPredictionThresholdScan.mockClear();
     apiMock.listPredictions.mockClear();
-    apiMock.listQualityIssues.mockClear();
+    apiMock.getQuality.mockReset();
+    apiMock.getQuality.mockImplementation(async () => apiMock.defaultQuality());
+    apiMock.listQualityIssues.mockReset();
+    apiMock.listQualityIssues.mockImplementation(async () => apiMock.defaultQualityIssues());
     apiMock.getTrainingRunSummary.mockClear();
     apiMock.getExportCapabilities.mockClear();
     apiMock.listRunExports.mockClear();
@@ -691,6 +702,7 @@ describe("App", () => {
     });
     expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
     expect(await screen.findByText("Ready to export")).toBeInTheDocument();
+    expect(await screen.findByText("Duplicate boxes")).toBeInTheDocument();
     expect(await screen.findByText("tiny box")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Open Issue" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
@@ -849,6 +861,52 @@ describe("App", () => {
       ),
     );
     expect(summaries).toHaveLength(1);
+  });
+
+  it("surfaces duplicate box quality issues", async () => {
+    const user = userEvent.setup();
+    apiMock.getQuality.mockImplementation(async () => ({
+      ...apiMock.defaultQuality(),
+      duplicate_box_count: 1,
+      ready_for_training: false,
+      issues: ["1 box duplicates another box on the same image and class."],
+    }));
+    apiMock.listQualityIssues.mockImplementation(async () => ({
+      ...apiMock.defaultQualityIssues(),
+      total: 1,
+      items: [
+        {
+          issue_type: "duplicate_box",
+          severity: "error",
+          message: "Box duplicates annotation 1 on the same image and class.",
+          image_id: 11,
+          image_path: "iris/frame002.jpg",
+          image_url: "/api/images/11/file",
+          annotation_id: 102,
+          class_id: 1,
+          class_name: "target",
+          x_center: 0.6,
+          y_center: 0.55,
+          width: 0.25,
+          height: 0.2,
+        },
+      ],
+    }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+
+    expect(await screen.findByText("Needs attention")).toBeInTheDocument();
+    expect(await screen.findByText("Duplicate boxes")).toBeInTheDocument();
+    expect(await screen.findByText("duplicate box")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Box duplicates annotation 1 on the same image and class."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open Issue" }));
+
+    expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
   });
 
   it("cancels an active training run from run history", async () => {

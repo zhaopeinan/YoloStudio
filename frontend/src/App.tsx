@@ -1237,6 +1237,10 @@ export default function App() {
                 />
                 <Metric label="Classes" value={quality.class_count.toLocaleString()} />
                 <Metric label="Tiny boxes" value={quality.tiny_box_count.toLocaleString()} />
+                <Metric
+                  label="Duplicate boxes"
+                  value={quality.duplicate_box_count.toLocaleString()}
+                />
               </div>
 
               {quality.issues.length > 0 ? (

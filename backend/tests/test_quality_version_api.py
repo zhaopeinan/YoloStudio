@@ -60,6 +60,15 @@ def test_dataset_quality_reports_training_readiness(tmp_path: Path):
                     },
                     {
                         "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.5,
+                        "height": 0.5,
+                        "track_id": "track-duplicate",
+                        "edge_tags": ["duplicate"],
+                    },
+                    {
+                        "class_id": class_payload["id"],
                         "x_center": 0.2,
                         "y_center": 0.2,
                         "width": 0.005,
@@ -78,15 +87,17 @@ def test_dataset_quality_reports_training_readiness(tmp_path: Path):
         assert payload["image_count"] == 2
         assert payload["annotated_image_count"] == 1
         assert payload["unannotated_image_count"] == 1
-        assert payload["annotation_count"] == 2
+        assert payload["annotation_count"] == 3
         assert payload["class_count"] == 1
-        assert payload["tiny_box_count"] == 2
+        assert payload["tiny_box_count"] == 3
         assert payload["invalid_box_count"] == 0
+        assert payload["duplicate_box_count"] == 1
         assert payload["unknown_class_reference_count"] == 0
-        assert payload["ready_for_training"] is True
+        assert payload["ready_for_training"] is False
         assert payload["issues"] == [
             "1 image has no annotations.",
-            "2 boxes are smaller than 10x10 pixels.",
+            "3 boxes are smaller than 10x10 pixels.",
+            "1 box duplicates another box on the same image and class.",
         ]
 
         issues_response = client.get(f"/api/datasets/{dataset['dataset_id']}/quality/issues")
@@ -96,11 +107,13 @@ def test_dataset_quality_reports_training_readiness(tmp_path: Path):
         assert issues_payload["dataset_id"] == dataset["dataset_id"]
         assert issues_payload["limit"] == 50
         assert issues_payload["offset"] == 0
-        assert issues_payload["total"] == 3
+        assert issues_payload["total"] == 5
         assert [item["issue_type"] for item in issues_payload["items"]] == [
             "unannotated_image",
             "tiny_box",
             "tiny_box",
+            "tiny_box",
+            "duplicate_box",
         ]
         tiny_issue = issues_payload["items"][1]
         assert tiny_issue["image_id"] == image_id
@@ -108,15 +121,37 @@ def test_dataset_quality_reports_training_readiness(tmp_path: Path):
         assert tiny_issue["class_name"] == "drone"
         assert tiny_issue["message"] == "Box is smaller than 10x10 pixels."
         assert tiny_issue["image_url"].startswith("/api/images/")
+        duplicate_issue = issues_payload["items"][4]
+        assert duplicate_issue["severity"] == "error"
+        assert duplicate_issue["image_id"] == image_id
+        assert duplicate_issue["annotation_id"] == annotation_response.json()["items"][1]["id"]
+        assert duplicate_issue["class_name"] == "drone"
+        assert duplicate_issue["message"] == "Box duplicates annotation 1 on the same image and class."
 
         tiny_only_response = client.get(
             f"/api/datasets/{dataset['dataset_id']}/quality/issues?issue_type=tiny_box&limit=1"
         )
 
         assert tiny_only_response.status_code == 200
-        assert tiny_only_response.json()["total"] == 2
+        assert tiny_only_response.json()["total"] == 3
         assert len(tiny_only_response.json()["items"]) == 1
         assert tiny_only_response.json()["items"][0]["issue_type"] == "tiny_box"
+
+        duplicate_only_response = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/quality/issues?issue_type=duplicate_box"
+        )
+
+        assert duplicate_only_response.status_code == 200
+        assert duplicate_only_response.json()["total"] == 1
+        assert duplicate_only_response.json()["items"][0]["issue_type"] == "duplicate_box"
+
+        version_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "blocked-duplicates"},
+        )
+
+        assert version_response.status_code == 400
+        assert "dataset has duplicate boxes" in version_response.text
 
 
 def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
