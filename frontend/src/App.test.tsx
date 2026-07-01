@@ -1429,6 +1429,53 @@ describe("App", () => {
     );
   });
 
+  it("resizes an existing annotation box from the canvas handles", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByText("iris/frame002.jpg"));
+    expect(
+      await screen.findByText("target", { selector: ".box-editor-title strong" }),
+    ).toBeInTheDocument();
+
+    const canvas = screen.getByLabelText("Annotation canvas");
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, width: 1000, height: 1000, right: 1000, bottom: 1000 }),
+    });
+
+    const canvasBox = screen.getByTestId("annotation-box-annotation-101");
+    fireEvent(canvasBox, pointerEvent("pointerdown", 600, 550));
+    await act(async () => {
+      fireEvent(window, pointerEvent("pointerup", 600, 550));
+    });
+
+    const resizeHandle = await screen.findByTestId("resize-handle-annotation-101-bottom-right");
+    fireEvent(resizeHandle, pointerEvent("pointerdown", 725, 650));
+    await act(async () => {
+      fireEvent(window, pointerEvent("pointermove", 875, 750));
+      fireEvent(window, pointerEvent("pointerup", 875, 750));
+    });
+
+    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+
+    expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
+      11,
+      expect.arrayContaining([
+        expect.objectContaining({
+          class_id: 1,
+          x_center: 0.675,
+          y_center: 0.6,
+          width: 0.4,
+          height: 0.3,
+          track_id: "copy-source",
+          edge_tags: ["occluded"],
+        }),
+      ]),
+    );
+  });
+
   it("auto-refreshes active training runs and prediction jobs until idle", async () => {
     apiMock.trainingRunsResponseQueue.push(
       { items: [apiMock.runningRun] },

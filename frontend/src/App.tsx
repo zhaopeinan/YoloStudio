@@ -179,6 +179,17 @@ type BoxMoveState = {
   originalY: number;
 };
 
+type BoxResizeHandle = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+type BoxResizeState = {
+  localId: string;
+  handle: BoxResizeHandle;
+  originalLeft: number;
+  originalTop: number;
+  originalRight: number;
+  originalBottom: number;
+};
+
 export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -225,8 +236,10 @@ export default function App() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [boxMoveState, setBoxMoveState] = useState<BoxMoveState | null>(null);
   const boxMoveStateRef = useRef<BoxMoveState | null>(null);
+  const [boxResizeState, setBoxResizeState] = useState<BoxResizeState | null>(null);
+  const boxResizeStateRef = useRef<BoxResizeState | null>(null);
   const annotationCanvasRef = useRef<SVGSVGElement | null>(null);
-  const stopBoxMoveTrackingRef = useRef<(() => void) | null>(null);
+  const stopBoxInteractionTrackingRef = useRef<(() => void) | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [quality, setQuality] = useState<DatasetQualitySummary | null>(null);
   const [coverage, setCoverage] = useState<DatasetCoverageSummary | null>(null);
@@ -1004,12 +1017,21 @@ export default function App() {
   }
 
   function setActiveBoxMoveState(nextState: BoxMoveState | null) {
-    if (!nextState && stopBoxMoveTrackingRef.current) {
-      stopBoxMoveTrackingRef.current();
-      stopBoxMoveTrackingRef.current = null;
+    if (!nextState && stopBoxInteractionTrackingRef.current && !boxResizeStateRef.current) {
+      stopBoxInteractionTrackingRef.current();
+      stopBoxInteractionTrackingRef.current = null;
     }
     boxMoveStateRef.current = nextState;
     setBoxMoveState(nextState);
+  }
+
+  function setActiveBoxResizeState(nextState: BoxResizeState | null) {
+    if (!nextState && stopBoxInteractionTrackingRef.current && !boxMoveStateRef.current) {
+      stopBoxInteractionTrackingRef.current();
+      stopBoxInteractionTrackingRef.current = null;
+    }
+    boxResizeStateRef.current = nextState;
+    setBoxResizeState(nextState);
   }
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
@@ -1033,6 +1055,11 @@ export default function App() {
       return;
     }
 
+    if (boxResizeStateRef.current) {
+      resizeActiveAnnotation(getRelativePoint(event));
+      return;
+    }
+
     if (!dragState) {
       return;
     }
@@ -1046,6 +1073,12 @@ export default function App() {
   function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
     if (boxMoveStateRef.current) {
       setActiveBoxMoveState(null);
+      releasePointerCaptureSafe(event.currentTarget, event.pointerId);
+      return;
+    }
+
+    if (boxResizeStateRef.current) {
+      setActiveBoxResizeState(null);
       releasePointerCaptureSafe(event.currentTarget, event.pointerId);
       return;
     }
@@ -1082,6 +1115,7 @@ export default function App() {
   function handlePointerCancel() {
     setDragState(null);
     setActiveBoxMoveState(null);
+    setActiveBoxResizeState(null);
   }
 
   function beginMoveAnnotation(
@@ -1100,7 +1134,34 @@ export default function App() {
       originalX: annotation.x_center,
       originalY: annotation.y_center,
     });
-    startBoxMoveWindowTracking();
+    setActiveBoxResizeState(null);
+    startBoxInteractionWindowTracking();
+    setPointerCaptureSafe(event.currentTarget.ownerSVGElement, event.pointerId);
+  }
+
+  function beginResizeAnnotation(
+    event: PointerEvent<SVGElement>,
+    annotation: DraftBox,
+    handle: BoxResizeHandle,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    const left = annotation.x_center - annotation.width / 2;
+    const top = annotation.y_center - annotation.height / 2;
+    const right = annotation.x_center + annotation.width / 2;
+    const bottom = annotation.y_center + annotation.height / 2;
+    setSelectedAnnotationId(annotation.local_id);
+    setDragState(null);
+    setActiveBoxMoveState(null);
+    setActiveBoxResizeState({
+      localId: annotation.local_id,
+      handle,
+      originalLeft: left,
+      originalTop: top,
+      originalRight: right,
+      originalBottom: bottom,
+    });
+    startBoxInteractionWindowTracking();
     setPointerCaptureSafe(event.currentTarget.ownerSVGElement, event.pointerId);
   }
 
@@ -1125,31 +1186,65 @@ export default function App() {
     updateAnnotation(activeBoxMoveState.localId, { x_center: nextX, y_center: nextY });
   }
 
-  function startBoxMoveWindowTracking() {
-    if (stopBoxMoveTrackingRef.current) {
-      stopBoxMoveTrackingRef.current();
+  function resizeActiveAnnotation(point: { x: number; y: number }) {
+    const activeBoxResizeState = boxResizeStateRef.current;
+    if (!activeBoxResizeState) {
+      return;
+    }
+    const annotation = annotations.find((item) => item.local_id === activeBoxResizeState.localId);
+    if (!annotation) {
+      setActiveBoxResizeState(null);
+      return;
+    }
+
+    const resizingLeft = activeBoxResizeState.handle.endsWith("left");
+    const resizingTop = activeBoxResizeState.handle.startsWith("top");
+    const nextLeft = resizingLeft
+      ? Math.min(point.x, activeBoxResizeState.originalRight - 0.001)
+      : activeBoxResizeState.originalLeft;
+    const nextRight = resizingLeft
+      ? activeBoxResizeState.originalRight
+      : Math.max(point.x, activeBoxResizeState.originalLeft + 0.001);
+    const nextTop = resizingTop
+      ? Math.min(point.y, activeBoxResizeState.originalBottom - 0.001)
+      : activeBoxResizeState.originalTop;
+    const nextBottom = resizingTop
+      ? activeBoxResizeState.originalBottom
+      : Math.max(point.y, activeBoxResizeState.originalTop + 0.001);
+    const nextBox = edgesToAnnotation(nextLeft, nextTop, nextRight, nextBottom);
+
+    updateAnnotation(activeBoxResizeState.localId, nextBox);
+  }
+
+  function startBoxInteractionWindowTracking() {
+    if (stopBoxInteractionTrackingRef.current) {
+      stopBoxInteractionTrackingRef.current();
     }
 
     function handleWindowPointerMove(event: globalThis.PointerEvent) {
       if (!annotationCanvasRef.current) {
         return;
       }
-      moveActiveAnnotation(
-        getRelativePointFromClient(
-          annotationCanvasRef.current,
-          event.clientX,
-          event.clientY,
-        ),
+      const point = getRelativePointFromClient(
+        annotationCanvasRef.current,
+        event.clientX,
+        event.clientY,
       );
+      if (boxMoveStateRef.current) {
+        moveActiveAnnotation(point);
+      } else if (boxResizeStateRef.current) {
+        resizeActiveAnnotation(point);
+      }
     }
 
     function handleWindowPointerUp() {
       setActiveBoxMoveState(null);
+      setActiveBoxResizeState(null);
     }
 
     window.addEventListener("pointermove", handleWindowPointerMove);
     window.addEventListener("pointerup", handleWindowPointerUp);
-    stopBoxMoveTrackingRef.current = () => {
+    stopBoxInteractionTrackingRef.current = () => {
       window.removeEventListener("pointermove", handleWindowPointerMove);
       window.removeEventListener("pointerup", handleWindowPointerUp);
     };
@@ -2904,6 +2999,7 @@ export default function App() {
                             color={resolveClassColor(annotation, classById)}
                             selected={annotation.local_id === selectedAnnotationId}
                             onPointerDown={beginMoveAnnotation}
+                            onResizePointerDown={beginResizeAnnotation}
                           />
                         ))
                       : null}
@@ -3483,10 +3579,10 @@ function predictionToDraftBox(
 function toAnnotationWrite(annotation: DraftBox): AnnotationWrite {
   return {
     class_id: annotation.class_id,
-    x_center: annotation.x_center,
-    y_center: annotation.y_center,
-    width: annotation.width,
-    height: annotation.height,
+    x_center: roundGeometry(annotation.x_center),
+    y_center: roundGeometry(annotation.y_center),
+    width: roundGeometry(annotation.width),
+    height: roundGeometry(annotation.height),
     track_id: annotation.track_id?.trim() ? annotation.track_id.trim() : null,
     edge_tags: annotation.edge_tags ?? [],
   };
@@ -3527,6 +3623,21 @@ function rectangleToAnnotation(startX: number, startY: number, endX: number, end
   };
 }
 
+function edgesToAnnotation(left: number, top: number, right: number, bottom: number) {
+  const clampedLeft = clamp(left);
+  const clampedTop = clamp(top);
+  const clampedRight = clamp(right);
+  const clampedBottom = clamp(bottom);
+  const width = clampDimension(clampedRight - clampedLeft);
+  const height = clampDimension(clampedBottom - clampedTop);
+  return {
+    x_center: clampCenter(clampedLeft + width / 2, width),
+    y_center: clampCenter(clampedTop + height / 2, height),
+    width,
+    height,
+  };
+}
+
 function clamp(value: number) {
   return Math.min(1, Math.max(0, value));
 }
@@ -3538,6 +3649,10 @@ function clampDimension(value: number) {
 function clampCenter(value: number, size: number) {
   const halfSize = Math.min(0.5, Math.max(0, size / 2));
   return Math.min(1 - halfSize, Math.max(halfSize, value));
+}
+
+function roundGeometry(value: number) {
+  return Number(value.toFixed(6));
 }
 
 function setPointerCaptureSafe(element: Element | null, pointerId: number) {
@@ -3597,10 +3712,24 @@ function BoxRect(props: {
   color: string;
   selected: boolean;
   onPointerDown: (event: PointerEvent<SVGElement>, annotation: DraftBox) => void;
+  onResizePointerDown: (
+    event: PointerEvent<SVGElement>,
+    annotation: DraftBox,
+    handle: BoxResizeHandle,
+  ) => void;
 }) {
-  const { annotation, color, selected, onPointerDown } = props;
+  const { annotation, color, selected, onPointerDown, onResizePointerDown } = props;
   const left = annotation.x_center - annotation.width / 2;
   const top = annotation.y_center - annotation.height / 2;
+  const right = annotation.x_center + annotation.width / 2;
+  const bottom = annotation.y_center + annotation.height / 2;
+  const handles: Array<{ handle: BoxResizeHandle; x: number; y: number }> = [
+    { handle: "top-left", x: left, y: top },
+    { handle: "top-right", x: right, y: top },
+    { handle: "bottom-left", x: left, y: bottom },
+    { handle: "bottom-right", x: right, y: bottom },
+  ];
+
   return (
     <g
       className={selected ? "annotation-box selected" : "annotation-box"}
@@ -3632,6 +3761,31 @@ function BoxRect(props: {
         vectorEffect="non-scaling-stroke"
         onPointerDown={(event) => onPointerDown(event, annotation)}
       />
+      {selected
+        ? handles.map((handle) => (
+            <rect
+              key={handle.handle}
+              className={`resize-handle ${handle.handle}`}
+              x={handle.x - 0.012}
+              y={handle.y - 0.012}
+              width={0.024}
+              height={0.024}
+              rx={0.004}
+              fill="#ffffff"
+              stroke={color}
+              strokeWidth={0.004}
+              vectorEffect="non-scaling-stroke"
+              role="button"
+              aria-label={`Resize box ${annotation.class_name ?? annotation.class_id} ${handle.handle.replace(
+                "-",
+                " ",
+              )}`}
+              tabIndex={0}
+              data-testid={`resize-handle-${annotation.local_id}-${handle.handle}`}
+              onPointerDown={(event) => onResizePointerDown(event, annotation, handle.handle)}
+            />
+          ))
+        : null}
     </g>
   );
 }

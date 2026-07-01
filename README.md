@@ -65,8 +65,8 @@ With both servers running:
 4. In `Class Library`, create a class such as `target`.
 5. Select an image in `Image Browser`.
 6. Drag on the image in `Annotation` to create a bounding box.
-7. Select an existing box on the image to move it, or use the arrow buttons in the box editor to
-   nudge it precisely.
+7. Select an existing box on the image to move it, drag a selected corner to resize it, or use the
+   arrow buttons in the box editor to nudge it precisely.
 8. Optionally fill `Track ID` and `Edge tags`.
 9. Click `Save Annotations`.
 10. Reselect or reload the image and confirm the saved box is still listed.
