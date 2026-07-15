@@ -90,15 +90,17 @@ h2 {
 .status-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 16px 0;
+  gap: 10px;
+  margin: 12px 0 16px;
 }
 
 .status-tile {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  padding: 16px;
+  min-height: 64px;
+  padding: 10px 12px;
   border-radius: 8px;
 }
 
@@ -119,7 +121,7 @@ h2 {
 .status-tile-content strong {
   display: block;
   min-width: 0;
-  margin-top: 4px;
+  margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -395,7 +397,13 @@ th {
 }
 
 .class-management-panel {
+  width: 100%;
   max-width: 760px;
+}
+
+.workflow-content:has(#dataset-path) {
+  width: 100%;
+  max-width: 960px;
 }
 
 .annotation-class-selector {
@@ -1680,6 +1688,9 @@ input[type="color"] {
   position: sticky;
   top: 16px;
   min-width: 0;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .workflow-navigation {
@@ -1707,7 +1718,7 @@ input[type="color"] {
   box-shadow: inset 3px 0 #1f6f78;
 }
 
-.workflow-step[aria-disabled="true"] {
+.workflow-step[data-availability="locked"] {
   opacity: 0.58;
 }
 
@@ -1765,10 +1776,23 @@ input[type="color"] {
 
 .workflow-mobile-picker {
   display: none;
+  min-width: 0;
 }
 
 .workflow-content {
   min-width: 0;
+}
+
+.workflow-content:has(> .prediction-panel) {
+  display: grid;
+  gap: 16px;
+}
+
+.workflow-content:has(> .prediction-panel) > .prediction-panel,
+.workflow-content:has(> .prediction-panel) > .experiment-dashboard,
+.workflow-content:has(> .prediction-panel) > .export-panel,
+.workflow-content:has(> .prediction-panel) > .workflow-page-actions {
+  margin-top: 0;
 }
 
 .warning-banner {
@@ -1791,6 +1815,38 @@ input[type="color"] {
   margin-top: 16px;
 }
 
+.navigation-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #e7c9b4;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #6f2d12;
+  background: #fff7f1;
+}
+
+.navigation-notice p {
+  min-width: 0;
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.navigation-notice > div {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.navigation-notice button {
+  min-height: 38px;
+}
+
 @media (max-width: 820px) {
   .workflow-shell {
     grid-template-columns: minmax(0, 1fr);
@@ -1803,6 +1859,7 @@ input[type="color"] {
   .workflow-mobile-picker {
     display: grid;
     gap: 6px;
+    width: 100%;
   }
 
   .workflow-mobile-picker label {
@@ -1847,5 +1904,112 @@ input[type="color"] {
   .workbench-grid,
   .annotation-layout {
     grid-template-columns: 1fr;
+  }
+
+  .annotation-workbench,
+  .annotation-layout,
+  .annotation-panel,
+  .side-panel,
+  .viewer-wrap {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .navigation-notice {
+    display: grid;
+  }
+
+  .navigation-notice > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .navigation-notice button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    width: min(100% - 20px, 1440px);
+    padding: 16px 0 28px;
+  }
+
+  .topbar,
+  .panel {
+    padding: 16px;
+  }
+
+  .topbar {
+    gap: 12px;
+  }
+
+  h1 {
+    font-size: 27px;
+  }
+
+  h2 {
+    font-size: 20px;
+  }
+
+  button {
+    max-width: 100%;
+    min-width: 0;
+    height: auto;
+    padding: 8px 12px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .status-tile {
+    min-height: 58px;
+    padding: 9px 10px;
+  }
+
+  .panel-heading,
+  .dashboard-heading,
+  .box-list-heading,
+  .review-banner-heading,
+  .run-row-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .panel-heading-actions,
+  .box-list-actions,
+  .workflow-page-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .panel-heading-actions button,
+  .box-list-actions button,
+  .workflow-page-actions button {
+    flex: 1 1 140px;
+  }
+
+  .navigation-notice > div {
+    grid-template-columns: 1fr;
+  }
+
+  .geometry-grid,
+  .range-row,
+  .filter-actions,
+  .class-row-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .threshold-recommendation,
+  .review-action-row,
+  .export-row {
+    grid-template-columns: 1fr;
+  }
+
+  .threshold-recommendation > *,
+  .review-action-row button,
+  .export-row > .run-status {
+    justify-self: start;
   }
 }

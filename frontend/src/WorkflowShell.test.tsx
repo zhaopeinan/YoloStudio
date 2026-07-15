@@ -35,7 +35,8 @@ describe("WorkflowShell", () => {
     );
 
     const lockedStep = screen.getByRole("button", { name: /2 类别管理/ });
-    expect(lockedStep).toHaveAttribute("aria-disabled", "true");
+    expect(lockedStep).toHaveAttribute("data-availability", "locked");
+    expect(lockedStep).toBeEnabled();
     expect(lockedStep).toHaveTextContent("暂不可用");
     fireEvent.click(lockedStep);
 
@@ -56,7 +57,7 @@ describe("WorkflowShell", () => {
       </WorkflowShell>,
     );
 
-    expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("请先导入或加载数据集");
     fireEvent.change(screen.getByLabelText("当前步骤"), { target: { value: "classes" } });
     expect(onNavigate).toHaveBeenCalledWith("classes");
   });

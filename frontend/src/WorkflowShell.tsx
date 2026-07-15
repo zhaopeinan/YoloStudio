@@ -45,7 +45,7 @@ export function WorkflowShell({
               key={step.id}
               className={step.id === currentStep ? "workflow-step active" : "workflow-step"}
               aria-current={step.id === currentStep ? "step" : undefined}
-              aria-disabled={step.availability === "locked"}
+              data-availability={step.availability}
               title={step.lockedReason}
               onClick={() => onNavigate(step.id)}
             >
@@ -78,7 +78,11 @@ export function WorkflowShell({
       </div>
 
       <section className="workflow-content" aria-label="当前工作流页面">
-        {navigationNotice ? <div className="warning-banner">{navigationNotice}</div> : null}
+        {navigationNotice ? (
+          <div className="warning-banner" role="status">
+            {navigationNotice}
+          </div>
+        ) : null}
         {children}
         {currentStep !== "annotation" ? (
           <footer className="workflow-page-actions">

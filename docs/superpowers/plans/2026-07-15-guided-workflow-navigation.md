@@ -315,7 +315,7 @@ type WorkflowShellProps = {
           key={step.id}
           className={step.id === currentStep ? "workflow-step active" : "workflow-step"}
           aria-current={step.id === currentStep ? "step" : undefined}
-          aria-disabled={step.availability === "locked"}
+          data-availability={step.availability}
           onClick={() => onNavigate(step.id)}
         >
           <span className="workflow-step-number">{step.number}</span>
@@ -418,7 +418,7 @@ type WorkflowShellProps = {
   box-shadow: inset 3px 0 #1f6f78;
 }
 
-.workflow-step[aria-disabled="true"] {
+.workflow-step[data-availability="locked"] {
   opacity: 0.58;
 }
 
@@ -757,7 +757,7 @@ git commit -m "feat: protect annotation drafts across steps"
 
 - [ ] **Step 1: 增加导航可访问性断言**
 
-在测试中确认当前步骤拥有 `aria-current="step"`，锁定步骤拥有 `aria-disabled="true"`，移动选择器标签为“当前步骤”，导航提示使用 `role="status"` 或 `role="alert"`。
+在测试中确认当前步骤拥有 `aria-current="step"`，锁定步骤拥有 `data-availability="locked"` 且仍可点击，移动选择器标签为“当前步骤”，导航提示使用 `role="status"` 或 `role="alert"`。
 
 - [ ] **Step 2: 完成页面布局样式**
 
