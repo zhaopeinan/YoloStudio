@@ -670,6 +670,22 @@ th {
   min-width: 0;
   overflow: hidden;
   background: #111820;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.annotation-canvas-viewport.is-space-ready,
+.annotation-canvas-viewport.is-space-ready .annotation-overlay,
+.annotation-canvas-viewport.is-space-ready .annotation-box,
+.annotation-canvas-viewport.is-space-ready .resize-handle {
+  cursor: grab;
+}
+
+.annotation-canvas-viewport.is-panning,
+.annotation-canvas-viewport.is-panning .annotation-overlay,
+.annotation-canvas-viewport.is-panning .annotation-box,
+.annotation-canvas-viewport.is-panning .resize-handle {
+  cursor: grabbing;
 }
 
 .annotation-transform-layer {

@@ -5,12 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { DatasetQualityIssueListResponse, DatasetQualitySummary } from "./api";
 
-function pointerEvent(type: string, clientX: number, clientY: number) {
+function pointerEvent(type: string, clientX: number, clientY: number, button = 0) {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperties(event, {
     clientX: { value: clientX },
     clientY: { value: clientY },
     pointerId: { value: 1 },
+    button: { value: button },
   });
   return event;
 }
@@ -1377,6 +1378,89 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "当前倍率 63%" })).toBeInTheDocument();
   });
 
+  it("以光标为中心滚轮缩放并阻止画布区域滚动", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    const viewport = screen.getByLabelText("标注画布视口");
+    Object.defineProperty(viewport, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 20, top: 30, width: 500, height: 300, right: 520, bottom: 330 }),
+    });
+
+    const wheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 270,
+      clientY: 180,
+      deltaY: -100,
+    });
+    fireEvent(viewport, wheel);
+
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(screen.getByRole("button", { name: "当前倍率 73%" })).toBeInTheDocument();
+    expect(screen.getByTestId("annotation-transform-layer").getAttribute("style")).toContain(
+      "scale(0.726",
+    );
+  });
+
+  it("空格加左键平移且不会画框或标记未保存", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(screen.getByRole("button", { name: "显示原始大小" }));
+    const viewport = screen.getByLabelText("标注画布视口");
+    const canvas = screen.getByLabelText("标注画布");
+
+    fireEvent.keyDown(window, { key: " ", code: "Space" });
+    expect(viewport).toHaveClass("is-space-ready");
+    fireEvent(canvas, pointerEvent("pointerdown", 200, 120));
+    fireEvent(viewport, pointerEvent("pointermove", 160, 90));
+
+    expect(viewport).toHaveClass("is-panning");
+    expect(screen.getByTestId("annotation-transform-layer")).toHaveStyle({
+      transform: "translate(-110px, -120px) scale(1)",
+    });
+    expect(screen.getByText("已保存", { selector: ".annotation-save-status" })).toBeInTheDocument();
+
+    fireEvent(viewport, pointerEvent("pointercancel", 160, 90));
+    expect(viewport).not.toHaveClass("is-panning");
+    fireEvent.keyUp(window, { key: " ", code: "Space" });
+    expect(viewport).not.toHaveClass("is-space-ready");
+    expect(screen.queryByRole("button", { name: /画布边界框/ })).not.toBeInTheDocument();
+  });
+
+  it("可编辑控件内的空格不进入平移，窗口失焦会清理平移准备状态", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    const viewport = screen.getByLabelText("标注画布视口");
+    const editableElements = [
+      screen.getByLabelText("文件名搜索"),
+      screen.getByLabelText("当前绘制类别"),
+      screen.getByRole("button", { name: "保存" }),
+      document.createElement("textarea"),
+      document.createElement("div"),
+    ];
+    editableElements[4].setAttribute("contenteditable", "true");
+    viewport.append(editableElements[3], editableElements[4]);
+
+    for (const element of editableElements) {
+      fireEvent.keyDown(element, { key: " ", code: "Space" });
+      expect(viewport).not.toHaveClass("is-space-ready");
+    }
+    fireEvent.keyDown(window, { key: " ", code: "Space" });
+    expect(viewport).toHaveClass("is-space-ready");
+    fireEvent(window, new Event("blur"));
+    expect(viewport).not.toHaveClass("is-space-ready");
+  });
+
   it("保存成功后切换到下一张图像", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -1769,7 +1853,8 @@ describe("App", () => {
     const resizeHandle = await screen.findByTestId("resize-handle-annotation-101-bottom-right");
     const annotationFrame = screen.getByTestId("annotation-frame-annotation-101");
     expect(annotationFrame).toHaveAttribute("stroke-width", "3");
-    expect(resizeHandle).toHaveAttribute("width", "0.014");
+    expect(Number(resizeHandle.getAttribute("width")) * 640 * 0.625).toBeCloseTo(10);
+    expect(Number(resizeHandle.getAttribute("height")) * 480 * 0.625).toBeCloseTo(10);
     expect(resizeHandle).toHaveAttribute("fill", "#ef4444");
     expect(resizeHandle).toHaveAttribute("stroke", "#ffffff");
     expect(resizeHandle).toHaveAttribute("stroke-width", "2");
@@ -1792,6 +1877,79 @@ describe("App", () => {
           height: 0.3,
           track_id: "copy-source",
           edge_tags: ["occluded"],
+        }),
+      ]),
+    );
+  });
+
+  it("缩放后新建边界框仍保存正确的归一化坐标", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(screen.getByRole("button", { name: "显示原始大小" }));
+    const canvas = screen.getByLabelText("标注画布");
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: -70, top: -90, width: 640, height: 480, right: 570, bottom: 390 }),
+    });
+
+    fireEvent(canvas, pointerEvent("pointerdown", 122, 54));
+    fireEvent(canvas, pointerEvent("pointermove", 250, 150));
+    fireEvent(canvas, pointerEvent("pointerup", 250, 150));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
+      10,
+      expect.arrayContaining([
+        expect.objectContaining({
+          x_center: 0.4,
+          y_center: 0.4,
+          width: 0.2,
+          height: 0.2,
+        }),
+      ]),
+    );
+  });
+
+  it("缩放后移动和调整边界框仍使用图像归一化坐标", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
+    await screen.findByText("target", { selector: ".box-editor-title strong" });
+    await user.click(screen.getByRole("button", { name: "显示原始大小" }));
+    await user.click(screen.getByRole("button", { name: "放大图像" }));
+    const canvas = screen.getByLabelText("标注画布");
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: -230, top: -210, width: 960, height: 720, right: 730, bottom: 510 }),
+    });
+
+    const canvasBox = screen.getByTestId("annotation-box-annotation-101");
+    fireEvent(canvasBox, pointerEvent("pointerdown", 346, 186));
+    fireEvent(window, pointerEvent("pointermove", 442, 258));
+    fireEvent(window, pointerEvent("pointerup", 442, 258));
+
+    const resizeHandle = await screen.findByTestId("resize-handle-annotation-101-bottom-right");
+    expect(Number(resizeHandle.getAttribute("width")) * 640 * 1.5).toBeCloseTo(10);
+    expect(Number(resizeHandle.getAttribute("height")) * 480 * 1.5).toBeCloseTo(10);
+    fireEvent(resizeHandle, pointerEvent("pointerdown", 562, 330));
+    fireEvent(window, pointerEvent("pointermove", 658, 402));
+    fireEvent(window, pointerEvent("pointerup", 658, 402));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
+      11,
+      expect.arrayContaining([
+        expect.objectContaining({
+          x_center: 0.75,
+          y_center: 0.7,
+          width: 0.35,
+          height: 0.3,
         }),
       ]),
     );

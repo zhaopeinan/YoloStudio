@@ -104,6 +104,7 @@ import { AnnotationFilterDrawer } from "./AnnotationFilterDrawer";
 import { AnnotationToolbar } from "./AnnotationToolbar";
 import {
   fitViewport,
+  constrainPan,
   manualMaxZoom,
   manualMinZoom,
   nextZoomLevel,
@@ -220,6 +221,14 @@ type BoxResizeState = {
   originalBottom: number;
 };
 
+type CanvasPanState = {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  originalPanX: number;
+  originalPanY: number;
+};
+
 export default function App() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("dataset");
   const currentStepRef = useRef<WorkflowStep>("dataset");
@@ -290,6 +299,10 @@ export default function App() {
     panY: 0,
     mode: "fit",
   });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const isSpacePressedRef = useRef(false);
+  const [canvasPanState, setCanvasPanState] = useState<CanvasPanState | null>(null);
+  const canvasPanStateRef = useRef<CanvasPanState | null>(null);
   const stopBoxInteractionTrackingRef = useRef<(() => void) | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [showAnnotationGeometry, setShowAnnotationGeometry] = useState(false);
@@ -441,11 +454,90 @@ export default function App() {
   }, [currentStep, selectedImageId, mobileAnnotationPane]);
 
   useEffect(() => {
+    const element = annotationViewportRef.current;
+    if (!element) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (
+        event.deltaY === 0 ||
+        annotationImageSize.width <= 0 ||
+        annotationImageSize.height <= 0
+      ) {
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const viewportSize = {
+        width: rect.width || annotationViewportSize.width,
+        height: rect.height || annotationViewportSize.height,
+      };
+      if (viewportSize.width <= 0 || viewportSize.height <= 0) {
+        return;
+      }
+      setCanvasViewport((current) =>
+        zoomAroundPoint(
+          current,
+          current.zoom * Math.exp(-event.deltaY * 0.0015),
+          { x: event.clientX - rect.left, y: event.clientY - rect.top },
+          annotationImageSize,
+          viewportSize,
+        ),
+      );
+    };
+
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => element.removeEventListener("wheel", handleWheel);
+  }, [annotationImageSize, annotationViewportSize, currentStep, mobileAnnotationPane, selectedImageId]);
+
+  useEffect(() => {
     if (canvasViewport.mode !== "fit") {
       return;
     }
     setCanvasViewport(fitViewport(annotationImageSize, annotationViewportSize));
   }, [annotationImageSize, annotationViewportSize, canvasViewport.mode]);
+
+  useEffect(() => {
+    function clearPanMode() {
+      handlePointerCancel();
+      const activePan = canvasPanStateRef.current;
+      if (activePan && annotationViewportRef.current) {
+        releasePointerCaptureSafe(annotationViewportRef.current, activePan.pointerId);
+      }
+      isSpacePressedRef.current = false;
+      setIsSpacePressed(false);
+      canvasPanStateRef.current = null;
+      setCanvasPanState(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.key !== " " && event.code !== "Space") || isEditableEventTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      if (!isSpacePressedRef.current) {
+        handlePointerCancel();
+        isSpacePressedRef.current = true;
+        setIsSpacePressed(true);
+      }
+    }
+
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.key === " " || event.code === "Space") {
+        clearPanMode();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", clearPanMode);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", clearPanMode);
+    };
+  }, []);
 
   const hasActiveRun = useMemo(() => runs.some((run) => isActiveRun(run.status)), [runs]);
   const hasActivePredictionJob = useMemo(
@@ -1349,8 +1441,67 @@ export default function App() {
     setCanvasZoom(nextZoomLevel(canvasViewport.zoom, direction));
   }
 
+  function handleViewportPointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (!isSpacePressedRef.current || event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    handlePointerCancel();
+    const nextPanState = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      originalPanX: canvasViewport.panX,
+      originalPanY: canvasViewport.panY,
+    };
+    canvasPanStateRef.current = nextPanState;
+    setCanvasPanState(nextPanState);
+    setPointerCaptureSafe(event.currentTarget, event.pointerId);
+  }
+
+  function handleViewportPointerMove(event: PointerEvent<HTMLDivElement>) {
+    const activePan = canvasPanStateRef.current;
+    if (!activePan || activePan.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    const deltaX = event.clientX - activePan.startClientX;
+    const deltaY = event.clientY - activePan.startClientY;
+    setCanvasViewport((current) => {
+      const pan = constrainPan(annotationImageSize, annotationViewportSize, current.zoom, {
+        x: activePan.originalPanX + deltaX,
+        y: activePan.originalPanY + deltaY,
+      });
+      return {
+        ...current,
+        panX: pan.x,
+        panY: pan.y,
+        mode: "manual",
+      };
+    });
+  }
+
+  function endCanvasPan(element?: Element, pointerId?: number) {
+    canvasPanStateRef.current = null;
+    setCanvasPanState(null);
+    if (element && pointerId !== undefined) {
+      releasePointerCaptureSafe(element, pointerId);
+    }
+  }
+
+  function handleViewportPointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (canvasPanStateRef.current?.pointerId === event.pointerId) {
+      endCanvasPan(event.currentTarget, event.pointerId);
+    }
+  }
+
+  function handleViewportPointerCancel(event: PointerEvent<HTMLDivElement>) {
+    handlePointerCancel();
+    endCanvasPan(event.currentTarget, event.pointerId);
+  }
+
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
-    if (!selectedClass || !selectedImage) {
+    if (isSpacePressedRef.current || canvasPanStateRef.current || !selectedClass || !selectedImage) {
       return;
     }
 
@@ -1365,6 +1516,9 @@ export default function App() {
   }
 
   function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
+    if (isSpacePressedRef.current || canvasPanStateRef.current) {
+      return;
+    }
     if (boxMoveStateRef.current) {
       moveActiveAnnotation(getRelativePoint(event));
       return;
@@ -1386,6 +1540,10 @@ export default function App() {
   }
 
   function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
+    if (isSpacePressedRef.current || canvasPanStateRef.current) {
+      setDragState(null);
+      return;
+    }
     if (boxMoveStateRef.current) {
       setActiveBoxMoveState(null);
       releasePointerCaptureSafe(event.currentTarget, event.pointerId);
@@ -1438,6 +1596,9 @@ export default function App() {
     event: PointerEvent<SVGElement>,
     annotation: DraftBox,
   ) {
+    if (isSpacePressedRef.current || canvasPanStateRef.current) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const point = getRelativePoint(event);
@@ -1460,6 +1621,9 @@ export default function App() {
     annotation: DraftBox,
     handle: BoxResizeHandle,
   ) {
+    if (isSpacePressedRef.current || canvasPanStateRef.current) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const left = annotation.x_center - annotation.width / 2;
@@ -3343,9 +3507,18 @@ export default function App() {
             </div>
           </header>
           {selectedImage ? (
-            <div ref={annotationViewportRef} className="annotation-canvas-viewport">
+            <div
+              ref={annotationViewportRef}
+              aria-label="标注画布视口"
+              className={`annotation-canvas-viewport${isSpacePressed ? " is-space-ready" : ""}${canvasPanState ? " is-panning" : ""}`}
+              onPointerDown={handleViewportPointerDown}
+              onPointerMove={handleViewportPointerMove}
+              onPointerUp={handleViewportPointerUp}
+              onPointerCancel={handleViewportPointerCancel}
+            >
               <div
                 className="annotation-transform-layer"
+                data-testid="annotation-transform-layer"
                 style={{
                   width: annotationImageSize.width,
                   height: annotationImageSize.height,
@@ -3387,6 +3560,9 @@ export default function App() {
                           selected={annotation.local_id === selectedAnnotationId}
                           onPointerDown={beginMoveAnnotation}
                           onResizePointerDown={beginResizeAnnotation}
+                          zoom={canvasViewport.zoom}
+                          imageWidth={annotationImageSize.width}
+                          imageHeight={annotationImageSize.height}
                         />
                       ))
                     : null}
@@ -3952,23 +4128,32 @@ function roundGeometry(value: number) {
 }
 
 function setPointerCaptureSafe(element: Element | null, pointerId: number) {
-  if (
-    element instanceof SVGElement &&
-    typeof element.setPointerCapture === "function"
-  ) {
+  if (element && typeof element.setPointerCapture === "function") {
     element.setPointerCapture(pointerId);
   }
 }
 
 function releasePointerCaptureSafe(element: Element, pointerId: number) {
   if (
-    element instanceof SVGElement &&
     typeof element.hasPointerCapture === "function" &&
     typeof element.releasePointerCapture === "function" &&
     element.hasPointerCapture(pointerId)
   ) {
     element.releasePointerCapture(pointerId);
   }
+}
+
+function isEditableEventTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(
+    target.closest("input, textarea, select, button, [contenteditable]:not([contenteditable='false'])"),
+  );
+}
+
+function screenPixelsToNormalized(pixels: number, imageDimension: number, zoom: number) {
+  if (imageDimension <= 0 || zoom <= 0) {
+    return 0.014;
+  }
+  return pixels / (imageDimension * zoom);
 }
 
 function mergeTags(existing: string[] | undefined, tags: string[]) {
@@ -3999,6 +4184,9 @@ function BoxRect(props: {
   annotation: DraftBox;
   color: string;
   selected: boolean;
+  zoom: number;
+  imageWidth: number;
+  imageHeight: number;
   onPointerDown: (event: PointerEvent<SVGElement>, annotation: DraftBox) => void;
   onResizePointerDown: (
     event: PointerEvent<SVGElement>,
@@ -4006,7 +4194,16 @@ function BoxRect(props: {
     handle: BoxResizeHandle,
   ) => void;
 }) {
-  const { annotation, color, selected, onPointerDown, onResizePointerDown } = props;
+  const {
+    annotation,
+    color,
+    selected,
+    zoom,
+    imageWidth,
+    imageHeight,
+    onPointerDown,
+    onResizePointerDown,
+  } = props;
   const left = annotation.x_center - annotation.width / 2;
   const top = annotation.y_center - annotation.height / 2;
   const right = annotation.x_center + annotation.width / 2;
@@ -4017,6 +4214,8 @@ function BoxRect(props: {
     { handle: "bottom-left", x: left, y: bottom },
     { handle: "bottom-right", x: right, y: bottom },
   ];
+  const handleWidth = screenPixelsToNormalized(10, imageWidth, zoom);
+  const handleHeight = screenPixelsToNormalized(10, imageHeight, zoom);
 
   return (
     <g
@@ -4055,11 +4254,11 @@ function BoxRect(props: {
             <rect
               key={handle.handle}
               className={`resize-handle ${handle.handle}`}
-              x={handle.x - 0.007}
-              y={handle.y - 0.007}
-              width={0.014}
-              height={0.014}
-              rx={0.002}
+              x={handle.x - handleWidth / 2}
+              y={handle.y - handleHeight / 2}
+              width={handleWidth}
+              height={handleHeight}
+              rx={Math.min(handleWidth, handleHeight) * 0.15}
               fill={color}
               stroke="#ffffff"
               strokeWidth={2}
