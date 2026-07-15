@@ -432,6 +432,323 @@ th {
   grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
 }
 
+.annotation-workspace {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.annotation-toolbar {
+  display: grid;
+  grid-template-columns: minmax(190px, 260px) auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: end;
+  padding: 12px 14px;
+}
+
+.annotation-toolbar-class {
+  display: grid;
+  gap: 5px;
+}
+
+.annotation-toolbar-class label,
+.annotation-save-status {
+  color: #62727e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.annotation-toolbar-navigation,
+.annotation-toolbar-actions,
+.layer-toggles {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.annotation-toolbar-navigation > span {
+  min-width: 58px;
+  color: #40515b;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.layer-toggles {
+  flex-wrap: wrap;
+}
+
+.layer-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #40515b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.annotation-save-status {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.annotation-save-status.error {
+  color: #b42318;
+}
+
+.annotation-toolbar-more {
+  position: relative;
+}
+
+.annotation-command-menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  width: max-content;
+  min-width: 180px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 6px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(23, 32, 38, 0.16);
+}
+
+.annotation-command-menu button {
+  justify-content: flex-start;
+  border: 0;
+  color: #172026;
+  background: transparent;
+  text-align: left;
+}
+
+.annotation-workspace-grid {
+  display: grid;
+  grid-template-columns: clamp(210px, 20vw, 280px) minmax(0, 1fr) clamp(250px, 22vw, 320px);
+  min-height: 640px;
+  height: calc(100vh - 330px);
+  max-height: 820px;
+  gap: 10px;
+}
+
+.annotation-browser-pane,
+.annotation-canvas-pane,
+.annotation-inspector-pane {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.annotation-browser-pane,
+.annotation-inspector-pane {
+  padding: 14px;
+}
+
+.annotation-browser-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.annotation-browser-pane .image-list {
+  min-height: 0;
+  margin-top: 12px;
+}
+
+.annotation-browser-pane .image-pager {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.annotation-browser-pane .image-pager > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.annotation-browser-pane .image-pager button {
+  white-space: nowrap;
+}
+
+.annotation-canvas-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: #111820;
+}
+
+.annotation-pane-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  border-bottom: 1px solid #d9e3ea;
+  padding: 12px 14px;
+  color: #172026;
+  background: #ffffff;
+}
+
+.annotation-pane-heading h2,
+.annotation-pane-heading p {
+  margin: 0;
+}
+
+.annotation-pane-heading h2 {
+  margin-top: 2px;
+  font-size: 18px;
+}
+
+.inspector-heading {
+  margin: -14px -14px 12px;
+}
+
+.inspector-heading > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #14544a;
+  background: #dff6f2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.annotation-canvas-pane .viewer-wrap {
+  display: grid;
+  min-height: 0;
+  overflow: auto;
+  place-items: center;
+  padding: 12px;
+}
+
+.annotation-canvas-pane .image-stage {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.annotation-canvas-pane .image-stage img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 420px);
+  object-fit: contain;
+}
+
+.annotation-canvas-empty {
+  align-self: center;
+  justify-self: center;
+  color: #d9e3ea;
+}
+
+.compact-box-list {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.compact-box-row {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #d9e3ea;
+  padding: 7px 9px;
+  color: #172026;
+  background: #f8fafb;
+  text-align: left;
+}
+
+.compact-box-row > span,
+.box-editor-title > span {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.compact-box-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-box-row small {
+  color: #71808a;
+  font-weight: 800;
+}
+
+.compact-box-row.selected {
+  border-color: #1f6f78;
+  color: #14544a;
+  background: #e8f6f2;
+}
+
+.inspector-editor {
+  padding: 10px;
+}
+
+.inspector-disclosure {
+  justify-content: space-between;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #c9d7de;
+  color: #234047;
+  background: #eef4f6;
+}
+
+.inspector-selection-hint {
+  margin: 12px 0;
+}
+
+.inspector-review {
+  margin-top: 14px;
+}
+
+.annotation-filter-drawer {
+  position: absolute;
+  z-index: 20;
+  top: 72px;
+  left: 0;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100% - 20px));
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+  border: 1px solid #c9d7de;
+  border-radius: 8px;
+  padding: 16px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(23, 32, 38, 0.2);
+}
+
+.annotation-filter-drawer header,
+.annotation-filter-drawer footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.annotation-filter-drawer label {
+  color: #62727e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.annotation-filter-drawer footer {
+  justify-content: flex-end;
+  border-top: 1px solid #e4ebef;
+  padding-top: 12px;
+}
+
 .prep-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
@@ -1746,6 +2063,17 @@ input[type="color"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (min-width: 821px) and (max-width: 1100px) {
+  .workflow-step {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .workflow-step-status {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 .workflow-step-status {

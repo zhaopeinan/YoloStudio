@@ -270,6 +270,7 @@ export default function App() {
   const annotationCanvasRef = useRef<SVGSVGElement | null>(null);
   const stopBoxInteractionTrackingRef = useRef<(() => void) | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [showAnnotationGeometry, setShowAnnotationGeometry] = useState(false);
   const [quality, setQuality] = useState<DatasetQualitySummary | null>(null);
   const [coverage, setCoverage] = useState<DatasetCoverageSummary | null>(null);
   const [qualityIssues, setQualityIssues] = useState<DatasetQualityIssue[]>([]);
@@ -371,6 +372,18 @@ export default function App() {
   const classById = useMemo(() => {
     return new Map(classes.map((classItem) => [classItem.id, classItem]));
   }, [classes]);
+
+  const selectedAnnotation = useMemo(
+    () => annotations.find((annotation) => annotation.local_id === selectedAnnotationId) ?? null,
+    [annotations, selectedAnnotationId],
+  );
+  const selectedAnnotationIndex = selectedAnnotation
+    ? annotations.findIndex((annotation) => annotation.local_id === selectedAnnotation.local_id)
+    : -1;
+
+  useEffect(() => {
+    setShowAnnotationGeometry(false);
+  }, [selectedAnnotationId, selectedImageId]);
 
   const hasActiveRun = useMemo(() => runs.some((run) => isActiveRun(run.status)), [runs]);
   const hasActivePredictionJob = useMemo(
@@ -489,8 +502,9 @@ export default function App() {
     if (selectedImageId) {
       try {
         const response = await getAnnotations(selectedImageId);
-        setAnnotations(response.items.map(toDraftBox));
-        setSelectedAnnotationId(null);
+        const nextAnnotations = response.items.map(toDraftBox);
+        setAnnotations(nextAnnotations);
+        setSelectedAnnotationId(nextAnnotations[0]?.local_id ?? null);
         clearAnnotationsDirty();
       } catch (error) {
         setAnnotationError(error instanceof Error ? error.message : "标注加载失败");
@@ -779,8 +793,9 @@ export default function App() {
   async function loadAnnotations(imageId: number) {
     try {
       const response = await getAnnotations(imageId);
-      setAnnotations(response.items.map(toDraftBox));
-      setSelectedAnnotationId(null);
+      const nextAnnotations = response.items.map(toDraftBox);
+      setAnnotations(nextAnnotations);
+      setSelectedAnnotationId(nextAnnotations[0]?.local_id ?? null);
       clearAnnotationsDirty();
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "标注加载失败");
@@ -1499,16 +1514,15 @@ export default function App() {
     setAnnotationError(null);
     try {
       const response = await getAnnotations(adjacent.id);
-      setAnnotations(
-        response.items.map((annotation, index) => ({
+      const nextAnnotations = response.items.map((annotation, index) => ({
           ...toDraftBox(annotation, index),
           id: undefined,
           image_id: selectedImageId,
           local_id: `copy-${adjacent.id}-${Date.now()}-${index}`,
-        })),
-      );
+        }));
+      setAnnotations(nextAnnotations);
       markAnnotationsDirty();
-      setSelectedAnnotationId(null);
+      setSelectedAnnotationId(nextAnnotations[0]?.local_id ?? null);
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "复制标注失败");
     }
@@ -1516,13 +1530,15 @@ export default function App() {
 
   function addPredictionAsAnnotation(prediction: Prediction) {
     const classInfo = classById.get(prediction.class_id);
+    const localId = predictionDraftId(prediction.id);
     setAnnotations((current) => {
-      if (current.some((annotation) => annotation.local_id === predictionDraftId(prediction.id))) {
+      if (current.some((annotation) => annotation.local_id === localId)) {
         return current;
       }
 
       return [...current, predictionToDraftBox(prediction, classInfo)];
     });
+    setSelectedAnnotationId(localId);
     markAnnotationsDirty();
     setShowGroundTruthLayer(true);
   }
@@ -1532,6 +1548,9 @@ export default function App() {
       return;
     }
 
+    const matchedAnnotation = annotations.find(
+      (annotation) => annotation.id === prediction.matched_annotation_id,
+    );
     markAnnotationsDirty();
     setAnnotations((current) =>
       current.map((annotation) =>
@@ -1546,6 +1565,9 @@ export default function App() {
           : annotation,
       ),
     );
+    if (matchedAnnotation) {
+      setSelectedAnnotationId(matchedAnnotation.local_id);
+    }
   }
 
   async function handleSaveAnnotations(): Promise<boolean> {
@@ -1797,8 +1819,10 @@ export default function App() {
     try {
       const review = await getPredictionImageReview(prediction.job_id, prediction.image_id);
       const existingImage = images.find((image) => image.id === review.image.id);
+      const reviewAnnotations = review.annotations.map(toDraftBox);
       setActiveReview(review);
-      setAnnotations(review.annotations.map(toDraftBox));
+      setAnnotations(reviewAnnotations);
+      setSelectedAnnotationId(reviewAnnotations[0]?.local_id ?? null);
       clearAnnotationsDirty();
       setShowGroundTruthLayer(true);
       setShowPredictionLayer(true);
@@ -3004,7 +3028,8 @@ export default function App() {
           </div>
       </section> : null}
 
-      {currentStep === "annotation" ? <>
+      {currentStep === "annotation" ? (
+      <section className="annotation-workspace" aria-label="标注工作台">
         <AnnotationToolbar
           classes={classes}
           selectedClassId={selectedClassId}
@@ -3051,8 +3076,8 @@ export default function App() {
           onPredictionChange={setShowPredictionLayer}
         />
 
-      <section className="workbench-grid annotation-workbench" aria-label="标注工作台">
-        <aside className="panel side-panel">
+      <div className="annotation-workspace-grid">
+        <aside className="annotation-browser-pane" aria-label="图像浏览器">
           <div className="panel-heading compact-heading">
             <div>
               <p className="eyebrow">数据集图像</p>
@@ -3091,21 +3116,6 @@ export default function App() {
               高级筛选{advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ""}
             </button>
           </div>
-
-          {isImageFilterDrawerOpen ? (
-            <AnnotationFilterDrawer
-              filters={advancedImageFilters}
-              classes={classes}
-              failureOptions={predictionFailureOptions.map((option) => ({
-                value: option.value,
-                label: option.value === "all" ? "全部识别结果" : formatFailureType(option.value),
-              }))}
-              onChange={handleAdvancedImageFilterChange}
-              onReset={handleResetAdvancedImageFilters}
-              onApply={handleApplyImageFilters}
-              onClose={() => setIsImageFilterDrawerOpen(false)}
-            />
-          ) : null}
 
           {imageFilterError ? <div className="error-banner">{imageFilterError}</div> : null}
 
@@ -3158,345 +3168,295 @@ export default function App() {
           </div>
         </aside>
 
-        <section className="panel annotation-panel">
-          <div className="panel-heading compact-heading">
+        <section className="annotation-canvas-pane" aria-label="标注画布区域">
+          <header className="annotation-pane-heading">
             <div>
               <p className="eyebrow">标注与审查</p>
               <h2>标注</h2>
             </div>
             <Box size={20} />
-          </div>
-
+          </header>
           {selectedImage ? (
-            <div className="annotation-layout">
-              <div className="viewer-wrap">
-                <div className="image-stage">
-                  <img src={selectedImage.image_url} alt={selectedImage.relative_path} />
-                  <svg
-                    ref={annotationCanvasRef}
-                    aria-label="标注画布"
-                    className={selectedClass ? "annotation-overlay drawable" : "annotation-overlay"}
-                    viewBox="0 0 1 1"
-                    preserveAspectRatio="none"
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerCancel={() => setDragState(null)}
-                  >
-                    {showGroundTruthLayer
-                      ? annotations.map((annotation) => (
-                          <BoxRect
-                            key={annotation.local_id}
-                            annotation={annotation}
-                            color={resolveClassColor(annotation, classById)}
-                            selected={annotation.local_id === selectedAnnotationId}
-                            onPointerDown={beginMoveAnnotation}
-                            onResizePointerDown={beginResizeAnnotation}
-                          />
-                        ))
-                      : null}
-                    {activeReview && activeReview.image.id === selectedImage.id && showPredictionLayer
-                      ? activeReview.predictions.map((prediction) => (
-                          <PredictionRect
-                            key={prediction.id}
-                            prediction={prediction}
-                            className={classById.get(prediction.class_id)?.name}
-                          />
-                        ))
-                      : null}
-                    {dragState ? <DragRect dragState={dragState} color={selectedClass?.color} /> : null}
-                  </svg>
-                </div>
-              </div>
-
-              <div className="box-list">
-                <div className="box-list-heading">
-                  <strong>边界框</strong>
-                </div>
-
-                {annotationError ? <div className="error-banner">{annotationError}</div> : null}
-
-                {activeReview && activeReview.image.id === selectedImage.id ? (
-                  <div className="review-banner">
-                    <div className="review-banner-heading">
-                      <div>
-                        <strong>预测结果叠加</strong>
-                        <span>
-                          匹配正确 {activeReview.counts.matched ?? 0} | 误报{" "}
-                          {activeReview.counts.false_positive ?? 0} | 漏报{" "}
-                          {activeReview.counts.false_negative ?? 0} | 类别混淆{" "}
-                          {activeReview.counts.class_confusion ?? 0}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="review-legend" aria-label="预测结果图例">
-                      <span className="legend matched">匹配正确</span>
-                      <span className="legend false-positive">误报</span>
-                      <span className="legend false-negative">漏报</span>
-                    </div>
-                    <div className="review-actions" aria-label="预测修正操作">
-                      {activeReview.predictions
-                        .filter((prediction) => prediction.failure_type !== "matched")
-                        .map((prediction) => (
-                          <div className="review-action-row" key={prediction.id}>
-                            <div>
-                              <strong>{formatFailureType(prediction.failure_type)}</strong>
-                              <span>
-                                类别 #{prediction.class_id} | 置信度 {prediction.confidence.toFixed(2)}
-                              </span>
-                            </div>
-                            {prediction.failure_type === "false_positive" ? (
-                              <button
-                                type="button"
-                                className="secondary-button"
-                                onClick={() => addPredictionAsAnnotation(prediction)}
-                                disabled={annotations.some(
-                                  (annotation) =>
-                                    annotation.local_id === predictionDraftId(prediction.id),
-                                )}
-                              >
-                                添加为标注
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="secondary-button"
-                                onClick={() => markFalseNegativeReviewed(prediction)}
-                                disabled={!prediction.matched_annotation_id}
-                              >
-                                标记为已审查
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {annotations.length === 0 ? (
-                  <p className="empty-state">
-                    {annotationReady
-                      ? "在图像上拖动以添加边界框。"
-                      : annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
-                  </p>
-                ) : (
-                  annotations.map((annotation, index) => (
-                    <div
-                      className={
-                        annotation.local_id === selectedAnnotationId
-                          ? "box-editor selected"
-                          : "box-editor"
-                      }
-                      key={annotation.local_id}
-                      onClick={() => setSelectedAnnotationId(annotation.local_id)}
-                    >
-                      <div className="box-editor-title">
-                        <span
-                          style={{ background: resolveClassColor(annotation, classById) }}
+            <div className="viewer-wrap">
+              <div className="image-stage">
+                <img src={selectedImage.image_url} alt={selectedImage.relative_path} />
+                <svg
+                  ref={annotationCanvasRef}
+                  aria-label="标注画布"
+                  className={selectedClass ? "annotation-overlay drawable" : "annotation-overlay"}
+                  viewBox="0 0 1 1"
+                  preserveAspectRatio="none"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={() => setDragState(null)}
+                >
+                  {showGroundTruthLayer
+                    ? annotations.map((annotation) => (
+                        <BoxRect
+                          key={annotation.local_id}
+                          annotation={annotation}
+                          color={resolveClassColor(annotation, classById)}
+                          selected={annotation.local_id === selectedAnnotationId}
+                          onPointerDown={beginMoveAnnotation}
+                          onResizePointerDown={beginResizeAnnotation}
                         />
-                        <strong>
-                          {classById.get(annotation.class_id)?.name ??
-                            annotation.class_name ??
-                            `类别 ${annotation.class_id}`}
-                        </strong>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`删除边界框 ${index + 1}`}
-                          onClick={() => deleteAnnotation(annotation.local_id)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                      <div className="nudge-controls" aria-label={`移动边界框 ${index + 1}`}>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`向左移动边界框 ${index + 1}`}
-                          title="向左移动"
-                          onClick={() => nudgeAnnotation(annotation.local_id, -0.01, 0)}
-                        >
-                          <ArrowLeft size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`向上移动边界框 ${index + 1}`}
-                          title="向上移动"
-                          onClick={() => nudgeAnnotation(annotation.local_id, 0, -0.01)}
-                        >
-                          <ArrowUp size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`向下移动边界框 ${index + 1}`}
-                          title="向下移动"
-                          onClick={() => nudgeAnnotation(annotation.local_id, 0, 0.01)}
-                        >
-                          <ArrowDown size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={`向右移动边界框 ${index + 1}`}
-                          title="向右移动"
-                          onClick={() => nudgeAnnotation(annotation.local_id, 0.01, 0)}
-                        >
-                          <ArrowRight size={15} />
-                        </button>
-                      </div>
-
-                      <label
-                        className="box-class-control"
-                        htmlFor={`box-class-${annotation.local_id}`}
-                      >
-                        类别
-                        <select
-                          id={`box-class-${annotation.local_id}`}
-                          aria-label={`边界框 ${index + 1} 类别`}
-                          value={annotation.class_id}
-                          onChange={(event) =>
-                            updateAnnotationClass(annotation.local_id, Number(event.target.value))
-                          }
-                          disabled={classes.length === 0}
-                        >
-                          {classes.map((classItem) => (
-                            <option key={classItem.id} value={classItem.id}>
-                              {classItem.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <div className="geometry-grid" aria-label={`边界框 ${index + 1} 几何参数`}>
-                        <label htmlFor={`box-x-${annotation.local_id}`}>
-                          X
-                          <input
-                            id={`box-x-${annotation.local_id}`}
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.001}
-                            value={formatGeometryValue(annotation.x_center)}
-                            onChange={(event) =>
-                              updateAnnotationGeometry(
-                                annotation.local_id,
-                                "x_center",
-                                Number(event.target.value),
-                              )
-                            }
-                          />
-                        </label>
-                        <label htmlFor={`box-y-${annotation.local_id}`}>
-                          Y
-                          <input
-                            id={`box-y-${annotation.local_id}`}
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.001}
-                            value={formatGeometryValue(annotation.y_center)}
-                            onChange={(event) =>
-                              updateAnnotationGeometry(
-                                annotation.local_id,
-                                "y_center",
-                                Number(event.target.value),
-                              )
-                            }
-                          />
-                        </label>
-                        <label htmlFor={`box-w-${annotation.local_id}`}>
-                          W
-                          <input
-                            id={`box-w-${annotation.local_id}`}
-                            type="number"
-                            min={0.001}
-                            max={1}
-                            step={0.001}
-                            value={formatGeometryValue(annotation.width)}
-                            onChange={(event) =>
-                              updateAnnotationGeometry(
-                                annotation.local_id,
-                                "width",
-                                Number(event.target.value),
-                              )
-                            }
-                          />
-                        </label>
-                        <label htmlFor={`box-h-${annotation.local_id}`}>
-                          H
-                          <input
-                            id={`box-h-${annotation.local_id}`}
-                            type="number"
-                            min={0.001}
-                            max={1}
-                            step={0.001}
-                            value={formatGeometryValue(annotation.height)}
-                            onChange={(event) =>
-                              updateAnnotationGeometry(
-                                annotation.local_id,
-                                "height",
-                                Number(event.target.value),
-                              )
-                            }
-                          />
-                        </label>
-                      </div>
-
-                      <label htmlFor={`track-${annotation.local_id}`}>目标轨迹 ID</label>
-                      <input
-                        id={`track-${annotation.local_id}`}
-                        value={annotation.track_id ?? ""}
-                        onChange={(event) =>
-                          updateAnnotation(annotation.local_id, { track_id: event.target.value })
-                        }
-                      />
-
-                      <label htmlFor={`tags-${annotation.local_id}`}>边缘案例标签</label>
-                      <input
-                        id={`tags-${annotation.local_id}`}
-                        value={(annotation.edge_tags ?? []).join(", ")}
-                        onChange={(event) =>
-                          updateAnnotation(annotation.local_id, {
-                            edge_tags: parseTags(event.target.value),
-                          })
-                        }
-                        placeholder="occluded, small"
-                      />
-                      <div className="edge-tag-presets" aria-label={`边界框 ${index + 1} 边缘案例标签预设`}>
-                        {edgeTagPresets.map((tag) => {
-                          const isSelected = (annotation.edge_tags ?? []).includes(tag);
-                          return (
-                            <button
-                              type="button"
-                              key={tag}
-                              className={isSelected ? "tag-chip selected" : "tag-chip"}
-                              aria-pressed={isSelected}
-                              onClick={() =>
-                                updateAnnotation(annotation.local_id, {
-                                  edge_tags: toggleTag(annotation.edge_tags, tag),
-                                })
-                              }
-                            >
-                              {formatEdgeTag(tag)}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))
-                )}
+                      ))
+                    : null}
+                  {activeReview && activeReview.image.id === selectedImage.id && showPredictionLayer
+                    ? activeReview.predictions.map((prediction) => (
+                        <PredictionRect
+                          key={prediction.id}
+                          prediction={prediction}
+                          className={classById.get(prediction.class_id)?.name}
+                        />
+                      ))
+                    : null}
+                  {dragState ? <DragRect dragState={dragState} color={selectedClass?.color} /> : null}
+                </svg>
               </div>
             </div>
           ) : (
-            <p className="empty-state">
+            <p className="empty-state annotation-canvas-empty">
               {annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
             </p>
           )}
         </section>
+
+        <aside className="annotation-inspector-pane" aria-label="边界框检查器">
+          <div className="annotation-pane-heading inspector-heading">
+            <div>
+              <p className="eyebrow">当前图像</p>
+              <h2>边界框</h2>
+            </div>
+            <span>{annotations.length}</span>
+          </div>
+
+          {annotationError ? <div className="error-banner">{annotationError}</div> : null}
+
+          <div className="compact-box-list" aria-label="边界框列表">
+            {annotations.length === 0 ? (
+              <p className="empty-state">
+                {annotationReady
+                  ? "在图像上拖动以添加边界框。"
+                  : annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
+              </p>
+            ) : (
+              annotations.map((annotation, index) => {
+                const className =
+                  classById.get(annotation.class_id)?.name ??
+                  annotation.class_name ??
+                  `类别 ${annotation.class_id}`;
+                return (
+                  <button
+                    type="button"
+                    key={annotation.local_id}
+                    className={
+                      annotation.local_id === selectedAnnotationId
+                        ? "compact-box-row selected"
+                        : "compact-box-row"
+                    }
+                    aria-label={`选择边界框 ${index + 1} ${className}`}
+                    aria-pressed={annotation.local_id === selectedAnnotationId}
+                    onClick={() => setSelectedAnnotationId(annotation.local_id)}
+                  >
+                    <span style={{ background: resolveClassColor(annotation, classById) }} />
+                    <strong>{className}</strong>
+                    <small>#{index + 1}</small>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {selectedAnnotation ? (
+            <div className="box-editor selected inspector-editor">
+              <div className="box-editor-title">
+                <span style={{ background: resolveClassColor(selectedAnnotation, classById) }} />
+                <strong>
+                  {classById.get(selectedAnnotation.class_id)?.name ??
+                    selectedAnnotation.class_name ??
+                    `类别 ${selectedAnnotation.class_id}`}
+                </strong>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`删除边界框 ${selectedAnnotationIndex + 1}`}
+                  onClick={() => deleteAnnotation(selectedAnnotation.local_id)}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+
+              <label className="box-class-control" htmlFor={`box-class-${selectedAnnotation.local_id}`}>
+                类别
+                <select
+                  id={`box-class-${selectedAnnotation.local_id}`}
+                  aria-label={`边界框 ${selectedAnnotationIndex + 1} 类别`}
+                  value={selectedAnnotation.class_id}
+                  onChange={(event) =>
+                    updateAnnotationClass(selectedAnnotation.local_id, Number(event.target.value))
+                  }
+                  disabled={classes.length === 0}
+                >
+                  {classes.map((classItem) => (
+                    <option key={classItem.id} value={classItem.id}>{classItem.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="nudge-controls" aria-label={`移动边界框 ${selectedAnnotationIndex + 1}`}>
+                <button type="button" className="icon-button" aria-label={`向左移动边界框 ${selectedAnnotationIndex + 1}`} title="向左移动" onClick={() => nudgeAnnotation(selectedAnnotation.local_id, -0.01, 0)}><ArrowLeft size={15} /></button>
+                <button type="button" className="icon-button" aria-label={`向上移动边界框 ${selectedAnnotationIndex + 1}`} title="向上移动" onClick={() => nudgeAnnotation(selectedAnnotation.local_id, 0, -0.01)}><ArrowUp size={15} /></button>
+                <button type="button" className="icon-button" aria-label={`向下移动边界框 ${selectedAnnotationIndex + 1}`} title="向下移动" onClick={() => nudgeAnnotation(selectedAnnotation.local_id, 0, 0.01)}><ArrowDown size={15} /></button>
+                <button type="button" className="icon-button" aria-label={`向右移动边界框 ${selectedAnnotationIndex + 1}`} title="向右移动" onClick={() => nudgeAnnotation(selectedAnnotation.local_id, 0.01, 0)}><ArrowRight size={15} /></button>
+              </div>
+
+              <button
+                type="button"
+                className="inspector-disclosure"
+                aria-expanded={showAnnotationGeometry}
+                onClick={() => setShowAnnotationGeometry((visible) => !visible)}
+              >
+                {showAnnotationGeometry ? "收起坐标参数" : "展开坐标参数"}
+              </button>
+              {showAnnotationGeometry ? (
+                <div className="geometry-grid" aria-label="归一化坐标">
+                  {(["x_center", "y_center", "width", "height"] as const).map((field) => (
+                    <label key={field} htmlFor={`box-${field}-${selectedAnnotation.local_id}`}>
+                      {field === "x_center" ? "X" : field === "y_center" ? "Y" : field === "width" ? "W" : "H"}
+                      <input
+                        id={`box-${field}-${selectedAnnotation.local_id}`}
+                        type="number"
+                        min={field === "width" || field === "height" ? 0.001 : 0}
+                        max={1}
+                        step={0.001}
+                        value={formatGeometryValue(selectedAnnotation[field])}
+                        onChange={(event) =>
+                          updateAnnotationGeometry(
+                            selectedAnnotation.local_id,
+                            field,
+                            Number(event.target.value),
+                          )
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+
+              <label htmlFor={`track-${selectedAnnotation.local_id}`}>目标轨迹 ID</label>
+              <input
+                id={`track-${selectedAnnotation.local_id}`}
+                value={selectedAnnotation.track_id ?? ""}
+                onChange={(event) =>
+                  updateAnnotation(selectedAnnotation.local_id, { track_id: event.target.value })
+                }
+              />
+
+              <label htmlFor={`tags-${selectedAnnotation.local_id}`}>边缘案例标签</label>
+              <input
+                id={`tags-${selectedAnnotation.local_id}`}
+                value={(selectedAnnotation.edge_tags ?? []).join(", ")}
+                onChange={(event) =>
+                  updateAnnotation(selectedAnnotation.local_id, { edge_tags: parseTags(event.target.value) })
+                }
+                placeholder="occluded, small"
+              />
+              <div className="edge-tag-presets" aria-label={`边界框 ${selectedAnnotationIndex + 1} 边缘案例标签预设`}>
+                {edgeTagPresets.map((tag) => {
+                  const isSelected = (selectedAnnotation.edge_tags ?? []).includes(tag);
+                  return (
+                    <button
+                      type="button"
+                      key={tag}
+                      className={isSelected ? "tag-chip selected" : "tag-chip"}
+                      aria-pressed={isSelected}
+                      onClick={() =>
+                        updateAnnotation(selectedAnnotation.local_id, {
+                          edge_tags: toggleTag(selectedAnnotation.edge_tags, tag),
+                        })
+                      }
+                    >
+                      {formatEdgeTag(tag)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : annotations.length > 0 ? (
+            <p className="empty-state inspector-selection-hint">选择一个边界框以编辑属性。</p>
+          ) : null}
+
+          {activeReview && selectedImage && activeReview.image.id === selectedImage.id ? (
+            <div className="review-banner inspector-review">
+              <div className="review-banner-heading">
+                <div>
+                  <strong>预测结果叠加</strong>
+                  <span>
+                    匹配正确 {activeReview.counts.matched ?? 0} | 误报 {activeReview.counts.false_positive ?? 0} | 漏报 {activeReview.counts.false_negative ?? 0} | 类别混淆 {activeReview.counts.class_confusion ?? 0}
+                  </span>
+                </div>
+              </div>
+              <div className="review-legend" aria-label="预测结果图例">
+                <span className="legend matched">匹配正确</span>
+                <span className="legend false-positive">误报</span>
+                <span className="legend false-negative">漏报</span>
+              </div>
+              <div className="review-actions" aria-label="预测修正操作">
+                {activeReview.predictions
+                  .filter((prediction) => prediction.failure_type !== "matched")
+                  .map((prediction) => (
+                    <div className="review-action-row" key={prediction.id}>
+                      <div>
+                        <strong>{formatFailureType(prediction.failure_type)}</strong>
+                        <span>类别 #{prediction.class_id} | 置信度 {prediction.confidence.toFixed(2)}</span>
+                      </div>
+                      {prediction.failure_type === "false_positive" ? (
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => addPredictionAsAnnotation(prediction)}
+                          disabled={annotations.some(
+                            (annotation) => annotation.local_id === predictionDraftId(prediction.id),
+                          )}
+                        >
+                          添加为标注
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => markFalseNegativeReviewed(prediction)}
+                          disabled={!prediction.matched_annotation_id}
+                        >
+                          标记为已审查
+                        </button>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : null}
+        </aside>
+      </div>
+
+      {isImageFilterDrawerOpen ? (
+        <AnnotationFilterDrawer
+          filters={advancedImageFilters}
+          classes={classes}
+          failureOptions={predictionFailureOptions.map((option) => ({
+            value: option.value,
+            label: option.value === "all" ? "全部识别结果" : formatFailureType(option.value),
+          }))}
+          onChange={handleAdvancedImageFilterChange}
+          onReset={handleResetAdvancedImageFilters}
+          onApply={handleApplyImageFilters}
+          onClose={() => setIsImageFilterDrawerOpen(false)}
+        />
+      ) : null}
       </section>
-      </> : null}
+      ) : null}
       </WorkflowShell>
     </main>
   );
@@ -3876,7 +3836,7 @@ function BoxRect(props: {
       className={selected ? "annotation-box selected" : "annotation-box"}
       onPointerDown={(event) => onPointerDown(event, annotation)}
       role="button"
-      aria-label={`选择边界框 ${annotation.class_name ?? annotation.class_id}`}
+      aria-label={`画布边界框 ${annotation.class_name ?? annotation.class_id}`}
       tabIndex={0}
       data-testid={`annotation-box-${annotation.local_id}`}
     >

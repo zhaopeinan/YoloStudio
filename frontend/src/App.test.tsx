@@ -1287,6 +1287,7 @@ describe("App", () => {
     await user.click(screen.getByRole("menuitem", { name: "复制下一张标注" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开坐标参数" }));
     fireEvent.change(screen.getByLabelText("X"), { target: { value: "0.42" } });
     await user.click(screen.getByRole("button", { name: "伪装" }));
     await user.click(screen.getByRole("button", { name: "困难负样本" }));
@@ -1509,6 +1510,23 @@ describe("App", () => {
         }),
       ]),
     );
+  });
+
+  it("只在检查器中展开当前边界框", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(await screen.findByText("iris/frame002.jpg"));
+
+    expect(screen.getByLabelText("边界框检查器")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /选择边界框/ })).toHaveLength(1);
+    expect(screen.queryByLabelText("归一化坐标")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /选择边界框/ }));
+    await user.click(screen.getByRole("button", { name: "展开坐标参数" }));
+    expect(screen.getByLabelText("归一化坐标")).toBeInTheDocument();
   });
 
   it("moves an existing annotation box from the canvas and nudge controls", async () => {
