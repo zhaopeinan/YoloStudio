@@ -217,6 +217,21 @@ const apiMock = vi.hoisted(() => {
     frozen: true,
     created_at: "2026-06-30T00:01:00",
   }));
+  const listDatasetVersions = vi.fn(async () => ({
+    items: [
+      {
+        id: 1,
+        project_id: 1,
+        dataset_id: 1,
+        name: "smoke-export",
+        class_mapping: { "1": 0 },
+        split_counts: { train: 1, val: 0, test: 0 },
+        artifact_path: "/tmp/workspace/projects/1/versions/1",
+        frozen: true,
+        created_at: "2026-06-30T00:00:00",
+      },
+    ],
+  }));
   const createTrainingRun = vi.fn(async (body: { version_id: number }) => ({
     id: 2,
     project_id: 1,
@@ -721,6 +736,7 @@ const apiMock = vi.hoisted(() => {
     listProjects,
     listImages,
     createDatasetVersion,
+    listDatasetVersions,
     createTrainingRun,
     cancelTrainingRun,
     getAnnotations,
@@ -806,21 +822,7 @@ vi.mock("./api", () => ({
   listQualityIssues: apiMock.listQualityIssues,
   applyQualityTags: apiMock.applyQualityTags,
   refreshImageDimensions: apiMock.refreshImageDimensions,
-  listDatasetVersions: async () => ({
-    items: [
-      {
-        id: 1,
-        project_id: 1,
-        dataset_id: 1,
-        name: "smoke-export",
-        class_mapping: { "1": 0 },
-        split_counts: { train: 1, val: 0, test: 0 },
-        artifact_path: "/tmp/workspace/projects/1/versions/1",
-        frozen: true,
-        created_at: "2026-06-30T00:00:00",
-      },
-    ],
-  }),
+  listDatasetVersions: apiMock.listDatasetVersions,
   createDatasetVersion: apiMock.createDatasetVersion,
   listTrainingRuns: apiMock.listTrainingRuns,
   createTrainingRun: apiMock.createTrainingRun,
@@ -925,6 +927,7 @@ vi.mock("./api", () => ({
 
 describe("App", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", window.location.pathname);
     apiMock.trainingRunsResponseQueue.length = 0;
     apiMock.predictionJobsResponseQueue.length = 0;
     apiMock.importDataset.mockClear();
@@ -951,6 +954,22 @@ describe("App", () => {
       }),
     );
     apiMock.createDatasetVersion.mockClear();
+    apiMock.listDatasetVersions.mockReset();
+    apiMock.listDatasetVersions.mockImplementation(async () => ({
+      items: [
+        {
+          id: 1,
+          project_id: 1,
+          dataset_id: 1,
+          name: "smoke-export",
+          class_mapping: { "1": 0 },
+          split_counts: { train: 1, val: 0, test: 0 },
+          artifact_path: "/tmp/workspace/projects/1/versions/1",
+          frozen: true,
+          created_at: "2026-06-30T00:00:00",
+        },
+      ],
+    }));
     apiMock.createTrainingRun.mockClear();
     apiMock.cancelTrainingRun.mockClear();
     apiMock.getAnnotations.mockClear();
@@ -1029,7 +1048,7 @@ describe("App", () => {
       "camouflage-set",
     );
 
-    await navigateToStep(user, "类别管理");
+    expect(window.location.hash).toBe("#classes");
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     expect(screen.queryByText("图像浏览器")).not.toBeInTheDocument();
 
@@ -1302,7 +1321,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
-    await navigateToStep(user, "类别管理");
+    expect(window.location.hash).toBe("#classes");
 
     await user.type(screen.getByLabelText("类别名称"), "vehicle");
     await user.click(screen.getByRole("button", { name: "创建类别" }));
@@ -1311,12 +1330,60 @@ describe("App", () => {
       name: "vehicle",
       color: "#ef4444",
     });
-    expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
-    await navigateToStep(user, "图像标注");
+    expect(window.location.hash).toBe("#annotation");
     const readiness = screen.getByLabelText("标注就绪状态");
     expect(within(readiness).getByText("就绪 | 类别库")).toBeInTheDocument();
     expect(within(readiness).getByText("就绪 | 已选择类别")).toBeInTheDocument();
     expect(screen.getByText("在图像上拖动以添加边界框。")).toBeInTheDocument();
+  });
+
+  it("导入数据集后进入类别管理，创建首个类别后进入图像标注", async () => {
+    const user = userEvent.setup();
+    apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "导入数据集" }));
+    expect(await screen.findByRole("heading", { name: "类别库" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#classes");
+
+    await user.type(screen.getByLabelText("类别名称"), "target");
+    await user.click(screen.getByRole("button", { name: "创建类别" }));
+    expect(await screen.findByRole("heading", { name: "标注" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#annotation");
+  });
+
+  it("通过 hash 恢复开放步骤，拒绝锁定步骤并回退无效 hash", async () => {
+    const user = userEvent.setup();
+    apiMock.listDatasetVersions.mockImplementationOnce(async () => ({ items: [] }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    expect(window.location.hash).toBe("#classes");
+
+    window.location.hash = "#quality";
+    fireEvent(window, new Event("hashchange"));
+    expect(await screen.findByRole("heading", { name: "质量审查" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#quality");
+
+    window.location.hash = "#training";
+    fireEvent(window, new Event("hashchange"));
+    expect(screen.getByRole("heading", { name: "质量审查" })).toBeInTheDocument();
+    expect(screen.getByText("请先创建冻结数据集版本")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#quality");
+
+    window.location.hash = "#unknown";
+    fireEvent(window, new Event("hashchange"));
+    expect(await screen.findByLabelText("数据集路径")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#dataset");
+  });
+
+  it("刷新到锁定步骤时回退项目与数据", async () => {
+    window.history.replaceState(null, "", "#annotation");
+    render(<App />);
+
+    expect(await screen.findByLabelText("数据集路径")).toBeInTheDocument();
+    expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#dataset");
   });
 
   it("edits a project class and refreshes dependent annotation labels", async () => {
@@ -1579,6 +1646,9 @@ describe("App", () => {
 
     expect(apiMock.importDataset).not.toHaveBeenCalled();
     expect(apiMock.listImages).toHaveBeenCalledWith(1, {}, { limit: 50, offset: 0 });
+    expect(window.location.hash).toBe("#classes");
+    expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
+    await navigateToStep(user, "项目与数据");
     const summaries = await screen.findAllByText((_, element) =>
       Boolean(
         element?.classList.contains("summary-line") &&
@@ -1586,8 +1656,6 @@ describe("App", () => {
       ),
     );
     expect(summaries).toHaveLength(1);
-    await navigateToStep(user, "类别管理");
-    expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     await navigateToStep(user, "图像标注");
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
   });

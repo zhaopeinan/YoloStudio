@@ -99,7 +99,7 @@ import {
   formatRunStatus,
 } from "./localization";
 import { WorkflowShell } from "./WorkflowShell";
-import { buildWorkflowSteps, type WorkflowStep } from "./workflow";
+import { buildWorkflowSteps, parseWorkflowHash, workflowStepOrder, type WorkflowStep } from "./workflow";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
 const defaultProjectName = "YOLO 目标检测项目";
@@ -200,6 +200,8 @@ type BoxResizeState = {
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("dataset");
+  const currentStepRef = useRef<WorkflowStep>("dataset");
+  const workflowStepsRef = useRef<ReturnType<typeof buildWorkflowSteps>>([]);
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -400,15 +402,54 @@ export default function App() {
     [classes.length, exports.length, importedDataset, predictionJobs.length, quality, runs.length, versions.length],
   );
 
+  currentStepRef.current = currentStep;
+  workflowStepsRef.current = workflowSteps;
+
+  function commitWorkflowStep(stepId: WorkflowStep) {
+    setNavigationNotice(null);
+    setCurrentStep(stepId);
+    currentStepRef.current = stepId;
+    window.history.replaceState(null, "", `#${stepId}`);
+  }
+
   function handleWorkflowNavigate(stepId: WorkflowStep) {
     const step = workflowSteps.find((item) => item.id === stepId);
     if (!step || step.availability === "locked") {
       setNavigationNotice(step?.lockedReason ?? "当前步骤暂不可用");
       return;
     }
-    setNavigationNotice(null);
-    setCurrentStep(stepId);
+    commitWorkflowStep(stepId);
   }
+
+  useEffect(() => {
+    function restoreWorkflowStepFromHash(initial = false) {
+      const rawStep = window.location.hash.replace(/^#/, "");
+      const requestedStep = parseWorkflowHash(window.location.hash);
+      const isValidHash = workflowStepOrder.includes(rawStep as WorkflowStep);
+      const step = workflowStepsRef.current.find((item) => item.id === requestedStep);
+
+      if (!isValidHash) {
+        commitWorkflowStep("dataset");
+        return;
+      }
+
+      if (!step || step.availability === "locked") {
+        setNavigationNotice(step?.lockedReason ?? "当前步骤暂不可用");
+        const fallbackStep = initial ? "dataset" : currentStepRef.current;
+        setCurrentStep(fallbackStep);
+        currentStepRef.current = fallbackStep;
+        window.history.replaceState(null, "", `#${fallbackStep}`);
+        return;
+      }
+
+      commitWorkflowStep(requestedStep);
+    }
+
+    restoreWorkflowStepFromHash(true);
+    const handleHashChange = () => restoreWorkflowStepFromHash(false);
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   useEffect(() => {
     if (!selectedImageId) {
@@ -499,6 +540,7 @@ export default function App() {
       const imported = await importDataset(datasetPath, projectName.trim(), datasetName.trim());
       await loadDatasetWorkspace(imported);
       await refreshProjects();
+      commitWorkflowStep("classes");
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "数据集导入失败");
     } finally {
@@ -595,6 +637,7 @@ export default function App() {
         image_count: saved.dataset.image_count,
         groups: [],
       });
+      commitWorkflowStep("classes");
     } catch (error) {
       setSavedDatasetError(error instanceof Error ? error.message : "数据集加载失败");
     } finally {
@@ -993,6 +1036,7 @@ export default function App() {
 
     setIsCreatingClass(true);
     setClassError(null);
+    const isFirstClass = classes.length === 0;
 
     try {
       const created = await createClass(importedDataset.project_id, {
@@ -1004,6 +1048,9 @@ export default function App() {
       setSelectedClassId(created.id);
       setClassName("");
       void refreshTrainingPrep();
+      if (isFirstClass) {
+        commitWorkflowStep("annotation");
+      }
     } catch (error) {
       setClassError(error instanceof Error ? error.message : "类别创建失败");
     } finally {
