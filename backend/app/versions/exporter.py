@@ -13,6 +13,7 @@ from app.quality.router import build_quality_summary
 
 
 SPLITS = ("train", "val", "test")
+MIN_ANNOTATED_IMAGES = 2
 
 
 class VersionExportError(ValueError):
@@ -125,8 +126,13 @@ def create_dataset_version(
         .group_by(Image.id)
         .order_by(Image.id)
     ).all()
-    if not annotated_images:
-        raise VersionExportError("Cannot create dataset version: selected classes have no annotations")
+    eligible_image_count = len(annotated_images)
+    if eligible_image_count < MIN_ANNOTATED_IMAGES:
+        raise VersionExportError(
+            "Cannot create dataset version: at least "
+            f"{MIN_ANNOTATED_IMAGES} annotated images are required for training and "
+            f"validation; current selection has {eligible_image_count}."
+        )
     splits = _split_images(annotated_images)
 
     version = DatasetVersion(

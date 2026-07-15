@@ -42,9 +42,11 @@ def _create_missing_metadata_zip(path: Path) -> None:
 def _create_unreadable_dimension_zip(path: Path) -> None:
     with ZipFile(path, "w") as archive:
         archive.writestr("yolo_dataset/iris/images/raw/frame_iris_00001.jpg", b"not-a-real-jpeg")
+        archive.writestr("yolo_dataset/iris/images/raw/frame_iris_00002.jpg", b"also-not-a-jpeg")
         archive.writestr(
             "yolo_dataset/iris/meta.jsonl",
-            '{"file":"frame_iris_00001.jpg","drone":"iris","z":12.0,"t":2.0}\n',
+            '{"file":"frame_iris_00001.jpg","drone":"iris","z":12.0,"t":2.0}\n'
+            '{"file":"frame_iris_00002.jpg","drone":"iris","z":12.0,"t":3.0}\n',
         )
 
 
@@ -342,6 +344,53 @@ def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
         assert list_response.json()["items"][0]["id"] == version["id"]
 
 
+def test_create_dataset_version_requires_train_and_validation_images(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = _import_dataset(client, zip_path)
+        class_payload = _create_class(client, dataset["project_id"], "drone")
+        image = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/images"
+        ).json()["items"][0]
+        annotation_response = client.put(
+            f"/api/images/{image['id']}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.25,
+                        "height": 0.25,
+                    }
+                ]
+            },
+        )
+        assert annotation_response.status_code == 200
+
+        response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "too-small"},
+        )
+
+        assert response.status_code == 400
+        assert "at least 2 annotated images are required" in response.text
+        assert "current selection has 1" in response.text
+        assert client.get(
+            f"/api/datasets/{dataset['dataset_id']}/versions"
+        ).json()["items"] == []
+        versions_root = (
+            tmp_path
+            / "workspace"
+            / "projects"
+            / str(dataset["project_id"])
+            / "versions"
+        )
+        assert not versions_root.exists()
+
+
 def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)
@@ -376,7 +425,7 @@ def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path)
             },
         )
         assert first_response.status_code == 200
-        second_response = client.put(
+        second_decoy_response = client.put(
             f"/api/images/{second_image_id}/annotations",
             json={
                 "annotations": [
@@ -390,6 +439,40 @@ def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path)
                 ]
             },
         )
+        assert second_decoy_response.status_code == 200
+
+        too_small_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "drone-only-too-small", "class_ids": [drone_class["id"]]},
+        )
+
+        assert too_small_response.status_code == 400
+        assert "current selection has 1" in too_small_response.text
+        assert client.get(
+            f"/api/datasets/{dataset['dataset_id']}/versions"
+        ).json()["items"] == []
+
+        second_response = client.put(
+            f"/api/images/{second_image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": drone_class["id"],
+                        "x_center": 0.65,
+                        "y_center": 0.65,
+                        "width": 0.2,
+                        "height": 0.2,
+                    },
+                    {
+                        "class_id": decoy_class["id"],
+                        "x_center": 0.35,
+                        "y_center": 0.35,
+                        "width": 0.25,
+                        "height": 0.25,
+                    },
+                ]
+            },
+        )
         assert second_response.status_code == 200
 
         version_response = client.post(
@@ -400,7 +483,7 @@ def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path)
         assert version_response.status_code == 200
         version = version_response.json()
         assert version["class_mapping"] == {str(drone_class["id"]): 0}
-        assert version["split_counts"] == {"train": 1, "val": 0, "test": 0}
+        assert version["split_counts"] == {"train": 1, "val": 1, "test": 0}
 
         artifact_root = Path(version["artifact_path"])
         data_yaml = (artifact_root / "data.yaml").read_text()
@@ -409,9 +492,15 @@ def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path)
 
         manifest = json.loads((artifact_root / "manifest.json").read_text())
         assert manifest["selected_class_ids"] == [drone_class["id"]]
-        assert len(manifest["images"]) == 1
-        assert manifest["images"][0]["image_id"] == first_image_id
-        assert manifest["images"][0]["annotations"] == [
+        assert len(manifest["images"]) == 2
+        assert {item["image_id"] for item in manifest["images"]} == {
+            first_image_id,
+            second_image_id,
+        }
+        annotations_by_image = {
+            item["image_id"]: item["annotations"] for item in manifest["images"]
+        }
+        assert annotations_by_image[first_image_id] == [
             {
                 "annotation_id": first_response.json()["items"][0]["id"],
                 "class_id": drone_class["id"],
@@ -420,10 +509,19 @@ def test_create_dataset_version_can_freeze_selected_class_subset(tmp_path: Path)
                 "edge_tags": [],
             }
         ]
+        assert annotations_by_image[second_image_id] == [
+            {
+                "annotation_id": second_response.json()["items"][0]["id"],
+                "class_id": drone_class["id"],
+                "yolo_class": 0,
+                "track_id": None,
+                "edge_tags": [],
+            }
+        ]
 
         label_files = sorted((artifact_root / "labels").glob("*/*.txt"))
-        assert len(label_files) == 1
-        assert label_files[0].read_text().startswith("0 ")
+        assert len(label_files) == 2
+        assert all(label.read_text().startswith("0 ") for label in label_files)
 
         missing_response = client.post(
             f"/api/datasets/{dataset['dataset_id']}/versions",
@@ -499,34 +597,36 @@ def test_dataset_quality_reports_missing_image_dimensions_without_blocking_expor
     with isolated_client(tmp_path) as client:
         dataset = _import_dataset(client, zip_path)
         class_payload = _create_class(client, dataset["project_id"], "drone")
-        image = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"][0]
+        images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
 
-        assert image["width"] is None
-        assert image["height"] is None
+        assert len(images) == 2
+        assert all(image["width"] is None for image in images)
+        assert all(image["height"] is None for image in images)
 
-        response = client.put(
-            f"/api/images/{image['id']}/annotations",
-            json={
-                "annotations": [
-                    {
-                        "class_id": class_payload["id"],
-                        "x_center": 0.5,
-                        "y_center": 0.5,
-                        "width": 0.25,
-                        "height": 0.25,
-                    }
-                ]
-            },
-        )
-        assert response.status_code == 200
+        for image in images:
+            response = client.put(
+                f"/api/images/{image['id']}/annotations",
+                json={
+                    "annotations": [
+                        {
+                            "class_id": class_payload["id"],
+                            "x_center": 0.5,
+                            "y_center": 0.5,
+                            "width": 0.25,
+                            "height": 0.25,
+                        }
+                    ]
+                },
+            )
+            assert response.status_code == 200
 
         quality_response = client.get(f"/api/datasets/{dataset['dataset_id']}/quality")
 
         assert quality_response.status_code == 200
         quality = quality_response.json()
         assert quality["ready_for_training"] is True
-        assert quality["missing_image_dimensions_count"] == 1
-        assert "1 image has unreadable image dimensions." in quality["issues"]
+        assert quality["missing_image_dimensions_count"] == 2
+        assert "2 images have unreadable image dimensions." in quality["issues"]
 
         issues_response = client.get(
             f"/api/datasets/{dataset['dataset_id']}/quality/issues"
@@ -535,13 +635,20 @@ def test_dataset_quality_reports_missing_image_dimensions_without_blocking_expor
 
         assert issues_response.status_code == 200
         issues = issues_response.json()
-        assert issues["total"] == 1
-        issue = issues["items"][0]
-        assert issue["issue_type"] == "missing_image_dimensions"
-        assert issue["severity"] == "warning"
-        assert issue["image_id"] == image["id"]
-        assert issue["image_path"].endswith("frame_iris_00001.jpg")
-        assert issue["message"] == "Image width or height could not be read."
+        assert issues["total"] == 2
+        assert {issue["image_id"] for issue in issues["items"]} == {
+            image["id"] for image in images
+        }
+        assert all(issue["issue_type"] == "missing_image_dimensions" for issue in issues["items"])
+        assert all(issue["severity"] == "warning" for issue in issues["items"])
+        assert {Path(issue["image_path"]).name for issue in issues["items"]} == {
+            "frame_iris_00001.jpg",
+            "frame_iris_00002.jpg",
+        }
+        assert all(
+            issue["message"] == "Image width or height could not be read."
+            for issue in issues["items"]
+        )
 
         version_response = client.post(
             f"/api/datasets/{dataset['dataset_id']}/versions",
@@ -549,3 +656,4 @@ def test_dataset_quality_reports_missing_image_dimensions_without_blocking_expor
         )
 
         assert version_response.status_code == 200
+        assert version_response.json()["split_counts"] == {"train": 1, "val": 1, "test": 0}
