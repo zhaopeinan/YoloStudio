@@ -928,6 +928,18 @@ vi.mock("./api", () => ({
 
 describe("App", () => {
   beforeEach(() => {
+    class ResizeObserverMock {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("annotation-canvas-viewport") ? 500 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("annotation-canvas-viewport") ? 300 : 0;
+    });
     window.history.replaceState(null, "", window.location.pathname);
     apiMock.trainingRunsResponseQueue.length = 0;
     apiMock.predictionJobsResponseQueue.length = 0;
@@ -1014,6 +1026,8 @@ describe("App", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("renders local app status and dataset scan controls", async () => {
@@ -1334,6 +1348,33 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /高级筛选/ }));
     expect(screen.getByLabelText("图像高级筛选")).toBeInTheDocument();
     expect(screen.getByLabelText("平台")).toBeInTheDocument();
+  });
+
+  it("切换图像后恢复适应窗口倍率", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+
+    expect(await screen.findByRole("button", { name: "当前倍率 63%" })).toBeInTheDocument();
+    const image = screen.getByRole("img", { name: "iris/frame001.jpg" });
+    const canvas = screen.getByLabelText("标注画布");
+    expect(image.parentElement).toBe(canvas.parentElement);
+    expect(image.parentElement).toHaveClass("annotation-transform-layer");
+
+    await user.click(screen.getByRole("button", { name: "放大图像" }));
+    expect(screen.getByRole("button", { name: "当前倍率 75%" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "缩小图像" }));
+    expect(screen.getByRole("button", { name: "当前倍率 50%" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "适应窗口" }));
+    expect(screen.getByRole("button", { name: "当前倍率 63%" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "显示原始大小" }));
+    expect(screen.getByRole("button", { name: "当前倍率 100%" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "下一张图像" }));
+    expect(await screen.findByRole("img", { name: "iris/frame002.jpg" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "当前倍率 63%" })).toBeInTheDocument();
   });
 
   it("保存成功后切换到下一张图像", async () => {

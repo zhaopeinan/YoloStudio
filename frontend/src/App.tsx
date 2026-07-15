@@ -99,8 +99,17 @@ import {
   formatRunStatus,
 } from "./localization";
 import { WorkflowShell } from "./WorkflowShell";
+import { AnnotationCanvasToolbar } from "./AnnotationCanvasToolbar";
 import { AnnotationFilterDrawer } from "./AnnotationFilterDrawer";
 import { AnnotationToolbar } from "./AnnotationToolbar";
+import {
+  fitViewport,
+  manualMaxZoom,
+  manualMinZoom,
+  nextZoomLevel,
+  zoomAroundPoint,
+  type CanvasViewport,
+} from "./annotation-viewport";
 import {
   countAdvancedImageFilters,
   findNextAnnotationImageId,
@@ -272,6 +281,15 @@ export default function App() {
   const [boxResizeState, setBoxResizeState] = useState<BoxResizeState | null>(null);
   const boxResizeStateRef = useRef<BoxResizeState | null>(null);
   const annotationCanvasRef = useRef<SVGSVGElement | null>(null);
+  const annotationViewportRef = useRef<HTMLDivElement | null>(null);
+  const [annotationViewportSize, setAnnotationViewportSize] = useState({ width: 0, height: 0 });
+  const [annotationImageSize, setAnnotationImageSize] = useState({ width: 0, height: 0 });
+  const [canvasViewport, setCanvasViewport] = useState<CanvasViewport>({
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    mode: "fit",
+  });
   const stopBoxInteractionTrackingRef = useRef<(() => void) | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [showAnnotationGeometry, setShowAnnotationGeometry] = useState(false);
@@ -388,6 +406,46 @@ export default function App() {
   useEffect(() => {
     setShowAnnotationGeometry(false);
   }, [selectedAnnotationId, selectedImageId]);
+
+  useEffect(() => {
+    const width = Number(selectedImage?.width);
+    const height = Number(selectedImage?.height);
+    setAnnotationImageSize({
+      width: Number.isFinite(width) && width > 0 ? width : 0,
+      height: Number.isFinite(height) && height > 0 ? height : 0,
+    });
+    setCanvasViewport({ zoom: 1, panX: 0, panY: 0, mode: "fit" });
+    handlePointerCancel();
+  }, [selectedImageId]);
+
+  useEffect(() => {
+    const element = annotationViewportRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateSize = () => {
+      setAnnotationViewportSize({
+        width: element.clientWidth,
+        height: element.clientHeight,
+      });
+    };
+    updateSize();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [currentStep, selectedImageId, mobileAnnotationPane]);
+
+  useEffect(() => {
+    if (canvasViewport.mode !== "fit") {
+      return;
+    }
+    setCanvasViewport(fitViewport(annotationImageSize, annotationViewportSize));
+  }, [annotationImageSize, annotationViewportSize, canvasViewport.mode]);
 
   const hasActiveRun = useMemo(() => runs.some((run) => isActiveRun(run.status)), [runs]);
   const hasActivePredictionJob = useMemo(
@@ -1258,6 +1316,37 @@ export default function App() {
     }
     boxResizeStateRef.current = nextState;
     setBoxResizeState(nextState);
+  }
+
+  function setCanvasZoom(nextZoom: number) {
+    if (
+      annotationImageSize.width <= 0 ||
+      annotationImageSize.height <= 0 ||
+      annotationViewportSize.width <= 0 ||
+      annotationViewportSize.height <= 0
+    ) {
+      return;
+    }
+    setCanvasViewport((current) =>
+      zoomAroundPoint(
+        current,
+        nextZoom,
+        {
+          x: annotationViewportSize.width / 2,
+          y: annotationViewportSize.height / 2,
+        },
+        annotationImageSize,
+        annotationViewportSize,
+      ),
+    );
+  }
+
+  function handleCanvasFit() {
+    setCanvasViewport(fitViewport(annotationImageSize, annotationViewportSize));
+  }
+
+  function handleCanvasZoom(direction: "in" | "out") {
+    setCanvasZoom(nextZoomLevel(canvasViewport.zoom, direction));
   }
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
@@ -3236,16 +3325,48 @@ export default function App() {
 
         <section className={`annotation-canvas-pane ${mobileAnnotationPane === "canvas" ? "active" : ""}`} aria-label="标注画布区域">
           <header className="annotation-pane-heading">
-            <div>
-              <p className="eyebrow">标注与审查</p>
-              <h2>标注</h2>
+            <div className="annotation-pane-heading-main">
+              <div>
+                <p className="eyebrow">标注与审查</p>
+                <h2>标注</h2>
+              </div>
+              <AnnotationCanvasToolbar
+                zoom={canvasViewport.zoom}
+                canZoomOut={canvasViewport.zoom > manualMinZoom + 0.001}
+                canZoomIn={canvasViewport.zoom < manualMaxZoom - 0.001}
+                disabled={!selectedImage || annotationImageSize.width <= 0 || annotationImageSize.height <= 0}
+                onZoomOut={() => handleCanvasZoom("out")}
+                onZoomIn={() => handleCanvasZoom("in")}
+                onActualSize={() => setCanvasZoom(1)}
+                onFit={handleCanvasFit}
+              />
             </div>
-            <Box size={20} />
           </header>
           {selectedImage ? (
-            <div className="viewer-wrap">
-              <div className="image-stage">
-                <img src={selectedImage.image_url} alt={selectedImage.relative_path} />
+            <div ref={annotationViewportRef} className="annotation-canvas-viewport">
+              <div
+                className="annotation-transform-layer"
+                style={{
+                  width: annotationImageSize.width,
+                  height: annotationImageSize.height,
+                  transform: `translate(${canvasViewport.panX}px, ${canvasViewport.panY}px) scale(${canvasViewport.zoom})`,
+                  transformOrigin: "0 0",
+                }}
+              >
+                <img
+                  src={selectedImage.image_url}
+                  alt={selectedImage.relative_path}
+                  width={annotationImageSize.width || undefined}
+                  height={annotationImageSize.height || undefined}
+                  onLoad={(event) => {
+                    if (!selectedImage.width || !selectedImage.height) {
+                      setAnnotationImageSize({
+                        width: event.currentTarget.naturalWidth,
+                        height: event.currentTarget.naturalHeight,
+                      });
+                    }
+                  }}
+                />
                 <svg
                   ref={annotationCanvasRef}
                   aria-label="标注画布"
@@ -3255,7 +3376,7 @@ export default function App() {
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
-                  onPointerCancel={() => setDragState(null)}
+                  onPointerCancel={handlePointerCancel}
                 >
                   {showGroundTruthLayer
                     ? annotations.map((annotation) => (
