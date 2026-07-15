@@ -734,6 +734,7 @@ const apiMock = vi.hoisted(() => {
     listPredictionJobs,
     importDataset,
     listProjects,
+    datasetImages,
     listImages,
     createDatasetVersion,
     listDatasetVersions,
@@ -1333,6 +1334,134 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /高级筛选/ }));
     expect(screen.getByLabelText("图像高级筛选")).toBeInTheDocument();
     expect(screen.getByLabelText("平台")).toBeInTheDocument();
+  });
+
+  it("保存成功后切换到下一张图像", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    expect(await screen.findByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存并下一张" }));
+
+    expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(10, []);
+    expect(await screen.findByRole("img", { name: "iris/frame002.jpg" })).toBeInTheDocument();
+    expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+  });
+
+  it("保存失败时保留当前图像和草稿", async () => {
+    const user = userEvent.setup();
+    apiMock.replaceAnnotations.mockRejectedValueOnce(new Error("磁盘写入失败"));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    expect(await screen.findByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存并下一张" }));
+
+    expect((await screen.findAllByText("磁盘写入失败")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "iris/frame002.jpg" })).not.toBeInTheDocument();
+  });
+
+  it("保存最后一张图像后提示当前列表已经完成", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
+    expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存并下一张" }));
+
+    expect(await screen.findByText("已完成当前图像列表")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "iris/frame002.jpg" })).toBeInTheDocument();
+  });
+
+  it("刷新图像列表时优先选择第一张未标注图像", async () => {
+    apiMock.listImages.mockResolvedValueOnce({
+      items: [
+        { ...apiMock.datasetImages[0], annotation_count: 2 },
+        { ...apiMock.datasetImages[2], annotation_count: 0 },
+      ],
+      limit: 50,
+      offset: 0,
+      total: 2,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+
+    expect(await screen.findByRole("img", { name: "iris/frame051.jpg" })).toBeInTheDocument();
+  });
+
+  it("切换图像前通过应用内确认保护未保存草稿", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
+    const trackId = await screen.findByLabelText("目标轨迹 ID");
+    await user.type(trackId, "-edited");
+
+    await user.click(screen.getByRole("button", { name: "上一张图像" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("切换图像后，这些修改将被放弃");
+    expect(screen.getByRole("img", { name: "iris/frame002.jpg" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "留在当前图像" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("copy-source-edited")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /iris\/frame001\.jpg/ }));
+    await user.click(screen.getByRole("button", { name: "放弃修改并切换" }));
+    expect(await screen.findByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
+    expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(10);
+  });
+
+  it("下一张按钮也不会跳过未保存草稿确认", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(screen.getByRole("button", { name: "更多标注操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "复制下一张标注" }));
+    expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "下一张图像" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("切换图像后，这些修改将被放弃");
+    expect(screen.getByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
+  });
+
+  it("移动端标签切换画布、图像和属性 pane 时保留编辑状态", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    const tabs = screen.getByRole("tablist", { name: "移动端标注视图" });
+    expect(within(tabs).getByRole("tab", { name: "画布" })).toHaveAttribute("aria-selected", "true");
+
+    await user.click(within(tabs).getByRole("tab", { name: "图像" }));
+    expect(screen.getByLabelText("图像浏览器")).toHaveClass("active");
+    await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
+
+    await user.click(within(tabs).getByRole("tab", { name: "属性" }));
+    const trackId = await screen.findByLabelText("目标轨迹 ID");
+    await user.type(trackId, "-mobile");
+    await user.click(within(tabs).getByRole("tab", { name: "画布" }));
+    await user.click(within(tabs).getByRole("tab", { name: "属性" }));
+
+    expect(screen.getByDisplayValue("copy-source-mobile")).toBeInTheDocument();
+    expect(screen.getByLabelText("边界框检查器")).toHaveClass("active");
   });
 
   it("guides empty class libraries and selects a created class", async () => {

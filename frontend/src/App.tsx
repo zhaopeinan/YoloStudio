@@ -104,6 +104,7 @@ import { AnnotationToolbar } from "./AnnotationToolbar";
 import {
   countAdvancedImageFilters,
   findNextAnnotationImageId,
+  selectInitialAnnotationImageId,
   type AdvancedImageFilters,
 } from "./annotation-workbench";
 import { buildWorkflowSteps, parseWorkflowHash, workflowStepOrder, type WorkflowStep } from "./workflow";
@@ -244,6 +245,9 @@ export default function App() {
   const [images, setImages] = useState<DatasetImage[]>([]);
   const [imagePage, setImagePage] = useState({ limit: imagePageSize, offset: 0, total: 0 });
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
+  const [pendingAnnotationImageId, setPendingAnnotationImageId] = useState<number | null>(null);
+  const [annotationNotice, setAnnotationNotice] = useState<string | null>(null);
+  const [mobileAnnotationPane, setMobileAnnotationPane] = useState<"canvas" | "images" | "properties">("canvas");
   const [imageFilters, setImageFilters] = useState<ImageFiltersState>({
     platform: "",
     label_status: "all" as "all" | "annotated" | "unannotated",
@@ -493,6 +497,40 @@ export default function App() {
     window.history.replaceState(null, "", "#annotation");
   }
 
+  function commitAnnotationImage(imageId: number) {
+    setPendingAnnotationImageId(null);
+    setAnnotationNotice(null);
+    setActiveReview(null);
+    setSelectedImageId(imageId);
+  }
+
+  function requestAnnotationImage(imageId: number) {
+    if (imageId === selectedImageId) {
+      return true;
+    }
+    if (annotationsDirtyRef.current) {
+      setPendingAnnotationImageId(imageId);
+      return false;
+    }
+    commitAnnotationImage(imageId);
+    return true;
+  }
+
+  function handleStayOnCurrentImage() {
+    setPendingAnnotationImageId(null);
+  }
+
+  function handleDiscardAnnotationsAndSwitch() {
+    if (pendingAnnotationImageId === null) {
+      return;
+    }
+    const targetImageId = pendingAnnotationImageId;
+    setAnnotations([]);
+    setSelectedAnnotationId(null);
+    clearAnnotationsDirty();
+    commitAnnotationImage(targetImageId);
+  }
+
   async function handleDiscardAnnotationsAndLeave() {
     if (!pendingWorkflowStep) {
       return;
@@ -691,7 +729,9 @@ export default function App() {
       offset: imageResponse.offset,
       total: imageResponse.total,
     });
-    setSelectedImageId(imageResponse.items[0]?.id ?? null);
+    setSelectedImageId(selectInitialAnnotationImageId(imageResponse.items, null));
+    setPendingAnnotationImageId(null);
+    setAnnotationNotice(null);
     setAnnotations([]);
     clearAnnotationsDirty();
     setActiveReview(null);
@@ -823,12 +863,7 @@ export default function App() {
         offset: response.offset,
         total: response.total,
       });
-      setSelectedImageId((current) => {
-        if (response.items.some((image) => image.id === current)) {
-          return current;
-        }
-        return response.items[0]?.id ?? null;
-      });
+      setSelectedImageId((current) => selectInitialAnnotationImageId(response.items, current));
     } catch (error) {
       setImageFilterError(error instanceof Error ? error.message : "图像筛选失败");
     }
@@ -926,7 +961,7 @@ export default function App() {
             offset: response.offset,
             total: response.total,
           });
-          setSelectedImageId(response.items[0]?.id ?? null);
+          setSelectedImageId((current) => selectInitialAnnotationImageId(response.items, current));
         })
         .catch((error: Error) => setImageFilterError(error.message));
     }
@@ -1618,8 +1653,9 @@ export default function App() {
     }
     const nextImageId = findNextAnnotationImageId(images, currentImageId);
     if (nextImageId !== null) {
-      setActiveReview(null);
-      setSelectedImageId(nextImageId);
+      commitAnnotationImage(nextImageId);
+    } else {
+      setAnnotationNotice("已完成当前图像列表");
     }
   }
 
@@ -3051,16 +3087,14 @@ export default function App() {
             const index = images.findIndex((image) => image.id === selectedImageId);
             const previous = images[index - 1];
             if (previous) {
-              setActiveReview(null);
-              setSelectedImageId(previous.id);
+              requestAnnotationImage(previous.id);
             }
           }}
           onNext={() => {
             const index = images.findIndex((image) => image.id === selectedImageId);
             const next = images[index + 1];
             if (next) {
-              setActiveReview(null);
-              setSelectedImageId(next.id);
+              requestAnnotationImage(next.id);
             }
           }}
           onSave={() => { void handleSaveAnnotations(); }}
@@ -3076,8 +3110,43 @@ export default function App() {
           onPredictionChange={setShowPredictionLayer}
         />
 
+      {pendingAnnotationImageId !== null ? (
+        <div role="alert" className="navigation-notice annotation-switch-notice">
+          <p>当前图像的标注尚未保存。切换图像后，这些修改将被放弃。</p>
+          <div>
+            <button type="button" className="secondary-button" onClick={handleStayOnCurrentImage}>
+              留在当前图像
+            </button>
+            <button type="button" onClick={handleDiscardAnnotationsAndSwitch}>
+              放弃修改并切换
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {annotationNotice ? <div className="annotation-notice" role="status">{annotationNotice}</div> : null}
+
+      <div className="annotation-mobile-tabs" role="tablist" aria-label="移动端标注视图">
+        {([
+          ["canvas", "画布"],
+          ["images", "图像"],
+          ["properties", "属性"],
+        ] as const).map(([pane, label]) => (
+          <button
+            type="button"
+            role="tab"
+            key={pane}
+            aria-selected={mobileAnnotationPane === pane}
+            className={mobileAnnotationPane === pane ? "active" : ""}
+            onClick={() => setMobileAnnotationPane(pane)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="annotation-workspace-grid">
-        <aside className="annotation-browser-pane" aria-label="图像浏览器">
+        <aside className={`annotation-browser-pane ${mobileAnnotationPane === "images" ? "active" : ""}`} aria-label="图像浏览器">
           <div className="panel-heading compact-heading">
             <div>
               <p className="eyebrow">数据集图像</p>
@@ -3152,10 +3221,7 @@ export default function App() {
                   key={image.id}
                   type="button"
                   className={image.id === selectedImageId ? "image-row selected" : "image-row"}
-                  onClick={() => {
-                    setActiveReview(null);
-                    setSelectedImageId(image.id);
-                  }}
+                  onClick={() => requestAnnotationImage(image.id)}
                 >
                   <strong>{image.relative_path}</strong>
                   <span>
@@ -3168,7 +3234,7 @@ export default function App() {
           </div>
         </aside>
 
-        <section className="annotation-canvas-pane" aria-label="标注画布区域">
+        <section className={`annotation-canvas-pane ${mobileAnnotationPane === "canvas" ? "active" : ""}`} aria-label="标注画布区域">
           <header className="annotation-pane-heading">
             <div>
               <p className="eyebrow">标注与审查</p>
@@ -3223,7 +3289,7 @@ export default function App() {
           )}
         </section>
 
-        <aside className="annotation-inspector-pane" aria-label="边界框检查器">
+        <aside className={`annotation-inspector-pane ${mobileAnnotationPane === "properties" ? "active" : ""}`} aria-label="边界框检查器">
           <div className="annotation-pane-heading inspector-heading">
             <div>
               <p className="eyebrow">当前图像</p>
