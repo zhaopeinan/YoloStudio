@@ -4,6 +4,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 from test_dataset_import_api import create_import_zip, isolated_client
 
 
@@ -26,24 +28,23 @@ def _create_version(client, zip_path: Path) -> dict:
     assert class_response.status_code == 200
     class_payload = class_response.json()
 
-    image_id = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"][0][
-        "id"
-    ]
-    annotation_response = client.put(
-        f"/api/images/{image_id}/annotations",
-        json={
-            "annotations": [
-                {
-                    "class_id": class_payload["id"],
-                    "x_center": 0.5,
-                    "y_center": 0.5,
-                    "width": 0.4,
-                    "height": 0.4,
-                }
-            ]
-        },
-    )
-    assert annotation_response.status_code == 200
+    images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
+    for image in images:
+        annotation_response = client.put(
+            f"/api/images/{image['id']}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.4,
+                        "height": 0.4,
+                    }
+                ]
+            },
+        )
+        assert annotation_response.status_code == 200
 
     version_response = client.post(
         f"/api/datasets/{dataset['dataset_id']}/versions",
@@ -51,8 +52,111 @@ def _create_version(client, zip_path: Path) -> dict:
     )
     assert version_response.status_code == 200
     version = version_response.json()
+    assert version["split_counts"] == {"train": 1, "val": 1, "test": 0}
     version["project_id"] = dataset["project_id"]
     return version
+
+
+def test_training_rejects_version_without_validation_split_before_ultralytics(
+    tmp_path: Path,
+    monkeypatch,
+):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+    yolo_constructor_calls: list[str] = []
+
+    class FakeYOLO:
+        def __init__(self, model: str):
+            yolo_constructor_calls.append(model)
+
+        def train(self, **_kwargs):
+            raise AssertionError("training must not start for an invalid dataset version")
+
+    monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+
+        from sqlalchemy.orm import Session
+
+        from app.core.settings import Settings
+        from app.db.models import DatasetVersion
+        from app.db.session import create_engine_for_settings
+
+        bind = create_engine_for_settings(Settings(workspace_root=tmp_path / "workspace"))
+        with Session(bind) as db:
+            stored_version = db.get(DatasetVersion, version["id"])
+            manifest = dict(stored_version.split_manifest)
+            manifest["images"] = [
+                item for item in manifest["images"] if item.get("split") != "val"
+            ]
+            manifest["split_counts"] = {"train": 1, "val": 0, "test": 0}
+            stored_version.split_manifest = manifest
+            db.commit()
+        bind.dispose()
+
+        val_image = next((Path(version["artifact_path"]) / "images" / "val").iterdir())
+        val_image.unlink()
+
+        response = client.post(
+            "/api/training/runs",
+            json={
+                "version_id": version["id"],
+                "model": "yolov8n.pt",
+                "epochs": 1,
+                "image_size": 320,
+                "batch_size": 1,
+                "device": "cpu",
+            },
+        )
+
+        assert response.status_code == 200
+        run = client.get(f"/api/training/runs/{response.json()['id']}").json()
+        assert run["status"] == "failed"
+        assert run["error_message"] == (
+            "Dataset version requires at least one training image and one validation image. "
+            "Annotate at least 2 images and create a new version."
+        )
+        assert yolo_constructor_calls == []
+
+        logs = client.get(f"/api/training/runs/{run['id']}/logs").json()["text"]
+        assert "ultralytics training started" not in logs
+
+
+def test_validate_training_dataset_rejects_missing_exported_validation_artifact(
+    tmp_path: Path,
+):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+
+        from sqlalchemy.orm import Session
+
+        from app.core.settings import Settings
+        from app.db.models import DatasetVersion
+        from app.db.session import create_engine_for_settings
+        from app.training.runner import (
+            INVALID_TRAINING_SPLIT_MESSAGE,
+            validate_training_dataset,
+        )
+
+        bind = create_engine_for_settings(Settings(workspace_root=tmp_path / "workspace"))
+        with Session(bind) as db:
+            stored_version = db.get(DatasetVersion, version["id"])
+            val_entry = next(
+                item
+                for item in stored_version.split_manifest["images"]
+                if item.get("split") == "val"
+            )
+            version_root = Path(stored_version.artifact_path)
+            (version_root / val_entry["export_label"]).unlink()
+
+            with pytest.raises(RuntimeError) as exc_info:
+                validate_training_dataset(stored_version, version_root)
+            assert str(exc_info.value) == INVALID_TRAINING_SPLIT_MESSAGE
+        bind.dispose()
 
 
 def test_start_training_run_persists_status_artifacts_and_logs(tmp_path: Path, monkeypatch):

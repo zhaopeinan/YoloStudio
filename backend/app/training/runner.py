@@ -17,6 +17,11 @@ from app.db.session import SessionLocal
 ACTIVE_STATUSES = {"queued", "preparing", "running"}
 DEFAULT_THRESHOLD_SCAN_VALUES = (0.15, 0.25, 0.35, 0.5, 0.65)
 GRIDMASK_IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+REQUIRED_TRAINING_SPLITS = ("train", "val")
+INVALID_TRAINING_SPLIT_MESSAGE = (
+    "Dataset version requires at least one training image and one validation image. "
+    "Annotate at least 2 images and create a new version."
+)
 
 
 def _now() -> datetime:
@@ -139,6 +144,19 @@ def resolve_device(requested_device: str | None) -> str:
     if requested_device:
         return requested_device
     return detect_devices().selected
+
+
+def validate_training_dataset(version: DatasetVersion, version_root: Path) -> None:
+    manifest_images = version.split_manifest.get("images", [])
+    for split in REQUIRED_TRAINING_SPLITS:
+        split_entries = [item for item in manifest_images if item.get("split") == split]
+        if not split_entries:
+            raise RuntimeError(INVALID_TRAINING_SPLIT_MESSAGE)
+        for item in split_entries:
+            image_path = version_root / str(item.get("export_image", ""))
+            label_path = version_root / str(item.get("export_label", ""))
+            if not image_path.is_file() or not label_path.is_file():
+                raise RuntimeError(INVALID_TRAINING_SPLIT_MESSAGE)
 
 
 def create_queued_run(db, settings: Settings, version: DatasetVersion, request) -> TrainingRun:
@@ -302,6 +320,18 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
         version_root = Path(version.artifact_path) if version else None
 
     append_run_log(run_id, "training preparing", bind=bind)
+    if data_yaml is None or not data_yaml.exists():
+        fail_training_run(run_id, "Dataset version data.yaml was not found", bind=bind)
+        return
+    if version_root is None or not version_root.is_dir():
+        fail_training_run(run_id, "Dataset version artifact path was not found", bind=bind)
+        return
+    try:
+        validate_training_dataset(version, version_root)
+    except RuntimeError as exc:
+        fail_training_run(run_id, str(exc), bind=bind)
+        return
+
     try:
         from ultralytics import YOLO
     except Exception as exc:
@@ -310,13 +340,6 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
             f"Ultralytics is not available: {exc.__class__.__name__}",
             bind=bind,
         )
-        return
-
-    if data_yaml is None or not data_yaml.exists():
-        fail_training_run(run_id, "Dataset version data.yaml was not found", bind=bind)
-        return
-    if version_root is None:
-        fail_training_run(run_id, "Dataset version artifact path was not found", bind=bind)
         return
 
     mark_training_run_running(run_id, bind=bind)
