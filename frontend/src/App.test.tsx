@@ -1014,10 +1014,10 @@ describe("App", () => {
     expect(screen.getByText("标注")).toBeInTheDocument();
     expect(screen.getByText("质量审查")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "创建数据集版本" })).toBeInTheDocument();
-    expect(screen.getByText("Training Setup")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start Training Run" })).toBeInTheDocument();
-    expect(screen.getByText("Run History")).toBeInTheDocument();
-    expect(screen.getByText("Prediction Analysis")).toBeInTheDocument();
+    expect(screen.getByText("训练设置")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始训练" })).toBeInTheDocument();
+    expect(screen.getByText("训练记录")).toBeInTheDocument();
+    expect(screen.getByText("预测分析")).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("项目名称"));
     await user.type(screen.getByLabelText("项目名称"), "Drone QA Project");
@@ -1119,18 +1119,18 @@ describe("App", () => {
     await user.click(screen.getByRole("checkbox", { name: "target" }));
     await user.click(screen.getByRole("button", { name: "创建数据集版本" }));
     expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
-    expect(await screen.findByText("Run #1")).toBeInTheDocument();
+    expect(await screen.findByText("训练任务 #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
     expect(apiMock.getTrainingRunArtifacts).toHaveBeenCalledWith(1);
-    const runRow = screen.getByText("Run #1").closest(".run-row") as HTMLElement;
-    expect(within(runRow).getByText("Run Artifacts")).toBeInTheDocument();
+    const runRow = screen.getByText("训练任务 #1").closest(".run-row") as HTMLElement;
+    expect(within(runRow).getByText("训练产物")).toBeInTheDocument();
     expect(within(runRow).getByText("ultralytics/weights/best.pt")).toBeInTheDocument();
     expect(within(runRow).getByText("4.0 KB")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("MixUp"), { target: { value: "0.2" } });
     fireEvent.change(screen.getByLabelText("Copy-Paste"), { target: { value: "0.35" } });
     await user.click(screen.getByRole("checkbox", { name: "GridMask" }));
-    await user.click(screen.getByRole("checkbox", { name: "Auto threshold scan" }));
-    await user.click(screen.getByRole("button", { name: "Start Training Run" }));
+    await user.click(screen.getByRole("checkbox", { name: "自动阈值扫描" }));
+    await user.click(screen.getByRole("button", { name: "开始训练" }));
     expect(apiMock.createTrainingRun).toHaveBeenCalledWith(
       expect.objectContaining({
         augmentation_preset: "balanced",
@@ -1143,9 +1143,9 @@ describe("App", () => {
         }),
       }),
     );
-    expect(await screen.findByText("Experiment Dashboard")).toBeInTheDocument();
+    expect(await screen.findByText("实验看板")).toBeInTheDocument();
     expect(apiMock.getProjectTrainingSummary).toHaveBeenCalledWith(1);
-    const comparisonPanel = (await screen.findByText("Run Comparison")).closest(
+    const comparisonPanel = (await screen.findByText("任务对比")).closest(
       ".run-comparison-panel",
     ) as HTMLElement;
     expect(within(comparisonPanel).getByText("#2")).toBeInTheDocument();
@@ -1158,22 +1158,21 @@ describe("App", () => {
     expect(within(comparisonPanel).getByText("runs/1")).toBeInTheDocument();
     expect((await screen.findAllByText("mAP50")).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText("box_loss")).toBeInTheDocument();
-    expect(await screen.findByText("Class Outcomes")).toBeInTheDocument();
-    expect(await screen.findByText("Threshold Scan")).toBeInTheDocument();
-    expect(await screen.findByText("Best threshold")).toBeInTheDocument();
+    expect(await screen.findByText("类别检测结果")).toBeInTheDocument();
+    expect(await screen.findByText("阈值扫描")).toBeInTheDocument();
+    expect(await screen.findByText("最佳阈值")).toBeInTheDocument();
     expect((await screen.findAllByText("0.25")).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText("F1")).toBeInTheDocument();
     expect(await screen.findByText("F1 67% | P 67% | R 67%")).toBeInTheDocument();
     expect((await screen.findAllByText("67%")).length).toBeGreaterThanOrEqual(3);
-    expect(await screen.findByText("false_positive")).toBeInTheDocument();
-    expect(await screen.findByText("class_confusion")).toBeInTheDocument();
-    expect((await screen.findAllByText("Confused")).length).toBeGreaterThanOrEqual(1);
-    expect((await screen.findAllByText("Matched")).length).toBeGreaterThanOrEqual(2);
-    await user.selectOptions(screen.getByLabelText("Failure type"), "class_confusion");
-    await user.selectOptions(screen.getByLabelText("Prediction class"), "1");
-    fireEvent.change(screen.getByLabelText("Min conf"), { target: { value: "0.5" } });
-    fireEvent.change(screen.getByLabelText("Prediction platform"), { target: { value: "iris" } });
-    await user.click(screen.getByRole("button", { name: "Apply Sample Filters" }));
+    expect((await screen.findAllByText("误报")).length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText("类别混淆")).length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText("匹配正确")).length).toBeGreaterThanOrEqual(2);
+    await user.selectOptions(screen.getByLabelText("结果类型"), "class_confusion");
+    await user.selectOptions(screen.getByLabelText("预测类别"), "1");
+    fireEvent.change(screen.getByLabelText("最低置信度"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByLabelText("预测平台"), { target: { value: "iris" } });
+    await user.click(screen.getByRole("button", { name: "应用样本筛选" }));
     expect(apiMock.listPredictions).toHaveBeenLastCalledWith(1, {
       failure_type: "class_confusion",
       class_id: 1,
@@ -1185,13 +1184,13 @@ describe("App", () => {
       timestamp_min: undefined,
       timestamp_max: undefined,
     });
-    await user.click(screen.getByRole("checkbox", { name: "Use image filters" }));
+    await user.click(screen.getByRole("checkbox", { name: "使用图像筛选条件" }));
     expect(
       await screen.findByText(
         "图像筛选：已标注 | 标签 遮挡 | 漏报",
       ),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Run Prediction Analysis" }));
+    await user.click(screen.getByRole("button", { name: "开始预测分析" }));
     expect(apiMock.createPredictionJob).toHaveBeenCalledWith(1, {
       image_scope: "all",
       confidence_threshold: 0.25,
@@ -1205,10 +1204,10 @@ describe("App", () => {
         altitude_max: undefined,
       },
     });
-    expect(await screen.findByText("Prediction #2")).toBeInTheDocument();
-    const thresholdInput = screen.getByLabelText("Scan thresholds");
+    expect(await screen.findByText("预测任务 #2")).toBeInTheDocument();
+    const thresholdInput = screen.getByLabelText("扫描阈值");
     fireEvent.change(thresholdInput, { target: { value: "0.1, 0.25, 0.55" } });
-    await user.click(screen.getByRole("button", { name: "Run Threshold Scan" }));
+    await user.click(screen.getByRole("button", { name: "执行阈值扫描" }));
     expect(apiMock.createPredictionThresholdScan).toHaveBeenCalledWith(1, {
       image_scope: "all",
       thresholds: [0.1, 0.25, 0.55],
@@ -1222,17 +1221,17 @@ describe("App", () => {
         altitude_max: undefined,
       },
     });
-    expect(await screen.findByText("Prediction #12")).toBeInTheDocument();
-    expect(await screen.findByText("Model Export")).toBeInTheDocument();
-    expect(await screen.findByText(".pt Weights")).toBeInTheDocument();
+    expect(await screen.findByText("预测任务 #12")).toBeInTheDocument();
+    expect(await screen.findByText("模型导出")).toBeInTheDocument();
+    expect(await screen.findByText(".pt 权重")).toBeInTheDocument();
     expect(await screen.findByText("Ultralytics is not installed")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Export PT" }));
+    await user.click(screen.getByRole("button", { name: "导出 PT" }));
 
     expect(apiMock.createRunExport).toHaveBeenCalledWith(1, "pt");
-    expect(await screen.findByText("PT export #1")).toBeInTheDocument();
+    expect(await screen.findByText("PT 导出任务 #1")).toBeInTheDocument();
 
-    await user.click(screen.getAllByRole("button", { name: "Open Image" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "打开图像" })[0]);
 
     expect(await screen.findByText("预测结果叠加")).toBeInTheDocument();
     expect(screen.getByLabelText("标注审查图层")).toBeInTheDocument();
@@ -1497,8 +1496,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
     await flushPromises();
 
-    expect(screen.getByText("Run #2")).toBeInTheDocument();
-    expect(screen.getAllByText("Auto refresh on").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("训练任务 #2")).toBeInTheDocument();
+    expect(screen.getAllByText("自动刷新中").length).toBeGreaterThanOrEqual(2);
 
     await act(async () => {
       vi.advanceTimersByTime(2500);
@@ -1506,11 +1505,11 @@ describe("App", () => {
     });
     await flushPromises();
 
-    expect(screen.getByText("Run #1")).toBeInTheDocument();
+    expect(screen.getByText("训练任务 #1")).toBeInTheDocument();
     expect(screen.getByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
     expect(apiMock.getPredictionJobLogs).toHaveBeenCalledWith(2);
-    expect(screen.getAllByText("Idle")).toHaveLength(2);
+    expect(screen.getAllByText("空闲")).toHaveLength(2);
   });
 
   it("loads a historical run config and reruns it on the latest version", async () => {
@@ -1518,24 +1517,24 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
-    expect(await screen.findByText("Run #1")).toBeInTheDocument();
+    expect(await screen.findByText("训练任务 #1")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Load Config" }));
+    await user.click(screen.getByRole("button", { name: "加载配置" }));
 
-    expect(screen.getByLabelText("Model preset or local weights")).toHaveValue("custom-drone.pt");
-    expect(screen.getByLabelText("Epochs")).toHaveValue(12);
-    expect(screen.getByLabelText("Image size")).toHaveValue(512);
-    expect(screen.getByLabelText("Batch")).toHaveValue(4);
-    expect(screen.getByLabelText("Device")).toHaveValue("mps");
-    expect(screen.getByLabelText("Strategy name")).toHaveValue("edge-case");
+    expect(screen.getByLabelText("模型预设或本地权重")).toHaveValue("custom-drone.pt");
+    expect(screen.getByLabelText("训练轮数")).toHaveValue(12);
+    expect(screen.getByLabelText("图像尺寸")).toHaveValue(512);
+    expect(screen.getByLabelText("批大小")).toHaveValue(4);
+    expect(screen.getByLabelText("计算设备")).toHaveValue("mps");
+    expect(screen.getByLabelText("策略名称")).toHaveValue("edge-case");
     expect(screen.getByLabelText("Mosaic")).toHaveValue(0.8);
     expect(screen.getByLabelText("MixUp")).toHaveValue(0.15);
     expect(screen.getByRole("checkbox", { name: "GridMask" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "TTA" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Auto threshold scan" })).toBeChecked();
-    expect(await screen.findByText("Loaded config from Run #1")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "自动阈值扫描" })).toBeChecked();
+    expect(await screen.findByText("已加载训练任务 #1 的配置")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Rerun" }));
+    await user.click(screen.getByRole("button", { name: "重新训练" }));
 
     expect(apiMock.createTrainingRun).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -1556,7 +1555,7 @@ describe("App", () => {
         }),
       }),
     );
-    expect(await screen.findByText("Started rerun from Run #1")).toBeInTheDocument();
+    expect(await screen.findByText("已基于训练任务 #1 开始重新训练")).toBeInTheDocument();
   });
 
   it("loads a saved dataset without re-importing source files", async () => {
@@ -1774,13 +1773,13 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
     await flushPromises();
 
-    expect(screen.getByText("Run #2")).toBeInTheDocument();
+    expect(screen.getByText("训练任务 #2")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消训练" }));
     await flushPromises();
 
     expect(apiMock.cancelTrainingRun).toHaveBeenCalledWith(2);
-    expect(screen.getByText("cancelled")).toBeInTheDocument();
+    expect(screen.getByText("已取消")).toBeInTheDocument();
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
   });
 });

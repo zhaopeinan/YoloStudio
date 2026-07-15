@@ -96,6 +96,7 @@ import {
   formatEdgeTag,
   formatFailureType,
   formatQualityIssueType,
+  formatRunStatus,
 } from "./localization";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
@@ -117,11 +118,11 @@ const qualityIssueTypeOptions: Array<{ value: DatasetQualityIssueType; label: st
   { value: "unknown_class_reference", label: "未知类别引用" },
 ];
 const predictionFailureOptions: Array<{ value: PredictionFailureType; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "matched", label: "Matched" },
-  { value: "false_positive", label: "False positive" },
-  { value: "false_negative", label: "False negative" },
-  { value: "class_confusion", label: "Class confusion" },
+  { value: "all", label: "全部" },
+  { value: "matched", label: "匹配正确" },
+  { value: "false_positive", label: "误报" },
+  { value: "false_negative", label: "漏报" },
+  { value: "class_confusion", label: "类别混淆" },
 ];
 const edgeTagPresets = [
   "occluded",
@@ -378,7 +379,7 @@ export default function App() {
     () =>
       activePredictionImageFilters
         ? formatImageFilterSummary(activePredictionImageFilters, classById)
-        : "All images in selected scope",
+        : "所选范围内的全部图像",
     [activePredictionImageFilters, classById],
   );
 
@@ -807,7 +808,7 @@ export default function App() {
     setAugmentation(augmentationConfig(config, defaultAugmentation));
     setTrainingTta(booleanConfig(config, "tta", false));
     setThresholdScan(booleanConfig(config, "threshold_scan", false));
-    setTrainingNotice(`Loaded config from Run #${run.id}`);
+    setTrainingNotice(`已加载训练任务 #${run.id} 的配置`);
     setTrainingError(null);
   }
 
@@ -828,7 +829,7 @@ export default function App() {
         setProjectExperimentSummary(null);
       }
     } catch (error) {
-      setTrainingError(error instanceof Error ? error.message : "Run refresh failed");
+      setTrainingError(error instanceof Error ? error.message : "训练任务刷新失败");
     }
   }
 
@@ -844,7 +845,7 @@ export default function App() {
         Object.fromEntries(summaries.map((summary) => [summary.run_id, summary])),
       );
     } catch (error) {
-      setTrainingError(error instanceof Error ? error.message : "Run artifacts failed to load");
+      setTrainingError(error instanceof Error ? error.message : "训练产物加载失败");
     }
   }
 
@@ -858,7 +859,7 @@ export default function App() {
       setProjectExperimentSummary(await getProjectTrainingSummary(projectId));
       setSummaryError(null);
     } catch (error) {
-      setSummaryError(error instanceof Error ? error.message : "Project summary failed to load");
+      setSummaryError(error instanceof Error ? error.message : "项目实验汇总加载失败");
     }
   }
 
@@ -886,7 +887,7 @@ export default function App() {
         await refreshRunSummary(runId);
       }
     } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "Prediction refresh failed");
+      setPredictionError(error instanceof Error ? error.message : "预测任务刷新失败");
     }
   }
 
@@ -906,7 +907,7 @@ export default function App() {
       setExports(exportsResponse.items);
       setExportError(null);
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : "Export refresh failed");
+      setExportError(error instanceof Error ? error.message : "导出记录刷新失败");
     }
   }
 
@@ -920,7 +921,7 @@ export default function App() {
       setRunSummary(await getTrainingRunSummary(runId));
       setSummaryError(null);
     } catch (error) {
-      setSummaryError(error instanceof Error ? error.message : "Run summary failed to load");
+      setSummaryError(error instanceof Error ? error.message : "训练任务汇总加载失败");
     }
   }
 
@@ -1446,7 +1447,7 @@ export default function App() {
       await refreshRunSummary(run.id);
       await loadRunLogs(run.id);
     } catch (error) {
-      setTrainingError(error instanceof Error ? error.message : "Training run failed to start");
+      setTrainingError(error instanceof Error ? error.message : "训练任务启动失败");
     } finally {
       setIsStartingRun(false);
     }
@@ -1465,12 +1466,12 @@ export default function App() {
     try {
       const run = await createTrainingRun(requestFromRunConfig(version.id, sourceRun));
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
-      setTrainingNotice(`Started rerun from Run #${sourceRun.id}`);
+      setTrainingNotice(`已基于训练任务 #${sourceRun.id} 开始重新训练`);
       await refreshTrainingRuns(importedDataset.project_id);
       await refreshRunSummary(run.id);
       await loadRunLogs(run.id);
     } catch (error) {
-      setTrainingError(error instanceof Error ? error.message : "Training rerun failed to start");
+      setTrainingError(error instanceof Error ? error.message : "重新训练启动失败");
     } finally {
       setIsStartingRun(false);
     }
@@ -1481,7 +1482,7 @@ export default function App() {
       const response = await getTrainingRunLogs(runId);
       setRunLogs((current) => ({ ...current, [runId]: response.text }));
     } catch (error) {
-      setTrainingError(error instanceof Error ? error.message : "Run logs failed to load");
+      setTrainingError(error instanceof Error ? error.message : "训练日志加载失败");
     }
   }
 
@@ -1497,7 +1498,7 @@ export default function App() {
         await refreshTrainingRuns(importedDataset.project_id);
       }
     } catch (error) {
-      setTrainingError(error instanceof Error ? error.message : "Training run cancel failed");
+      setTrainingError(error instanceof Error ? error.message : "取消训练失败");
     } finally {
       setCancellingRunId(null);
     }
@@ -1523,7 +1524,7 @@ export default function App() {
       await refreshRunSummary(run.id);
       await loadPredictionLogs(job.id);
     } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "Prediction job failed");
+      setPredictionError(error instanceof Error ? error.message : "预测任务启动失败");
     } finally {
       setIsCreatingPrediction(false);
     }
@@ -1539,7 +1540,7 @@ export default function App() {
     try {
       thresholds = parseThresholdList(predictionThresholds);
     } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "Threshold scan input failed");
+      setPredictionError(error instanceof Error ? error.message : "阈值扫描输入无效");
       return;
     }
 
@@ -1560,7 +1561,7 @@ export default function App() {
       }
       await refreshRunSummary(run.id);
     } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "Threshold scan failed");
+      setPredictionError(error instanceof Error ? error.message : "阈值扫描失败");
     } finally {
       setIsCreatingThresholdScan(false);
     }
@@ -1571,7 +1572,7 @@ export default function App() {
       const response = await getPredictionJobLogs(jobId);
       setPredictionLogs((current) => ({ ...current, [jobId]: response.text }));
     } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "Prediction logs failed to load");
+      setPredictionError(error instanceof Error ? error.message : "预测日志加载失败");
     }
   }
 
@@ -1589,7 +1590,7 @@ export default function App() {
       setExports((current) => [artifact, ...current.filter((item) => item.id !== artifact.id)]);
       await refreshExports(run.id);
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : "Export failed");
+      setExportError(error instanceof Error ? error.message : "模型导出失败");
     } finally {
       setIsCreatingExport(null);
     }
@@ -1623,7 +1624,7 @@ export default function App() {
       }
       setSelectedImageId(review.image.id);
     } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "Prediction review failed");
+      setPredictionError(error instanceof Error ? error.message : "预测结果审查加载失败");
     }
   }
 
@@ -2043,18 +2044,18 @@ export default function App() {
         </section>
       </section>
 
-      <section className="training-grid" aria-label="Training setup and runs">
+      <section className="training-grid" aria-label="训练设置与训练记录">
         <section className="panel training-panel">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">Model Training</p>
-              <h2>Training Setup</h2>
+              <p className="eyebrow">模型训练</p>
+              <h2>训练设置</h2>
             </div>
             <Play size={20} />
           </div>
 
           <div className="training-form">
-            <label htmlFor="training-model">Model preset or local weights</label>
+            <label htmlFor="training-model">模型预设或本地权重</label>
             <input
               id="training-model"
               value={trainingModel}
@@ -2064,7 +2065,7 @@ export default function App() {
 
             <div className="training-number-grid">
               <label htmlFor="training-epochs">
-                Epochs
+                训练轮数
                 <input
                   id="training-epochs"
                   type="number"
@@ -2076,7 +2077,7 @@ export default function App() {
                 />
               </label>
               <label htmlFor="training-imgsz">
-                Image size
+                图像尺寸
                 <input
                   id="training-imgsz"
                   type="number"
@@ -2088,7 +2089,7 @@ export default function App() {
                 />
               </label>
               <label htmlFor="training-batch">
-                Batch
+                批大小
                 <input
                   id="training-batch"
                   type="number"
@@ -2103,7 +2104,7 @@ export default function App() {
 
             <div className="training-number-grid">
               <label htmlFor="training-device">
-                Device
+                计算设备
                 <input
                   id="training-device"
                   value={trainingDevice}
@@ -2114,9 +2115,9 @@ export default function App() {
               </label>
             </div>
 
-            <div className="augmentation-panel" aria-label="Augmentation strategy">
+            <div className="augmentation-panel" aria-label="数据增强策略">
               <label htmlFor="augmentation-preset">
-                Strategy name
+                策略名称
                 <input
                   id="augmentation-preset"
                   value={augmentationPreset}
@@ -2148,14 +2149,14 @@ export default function App() {
                 />
                 <AugmentationNumber
                   id="aug-erasing"
-                  label="Erasing"
+                  label="随机擦除"
                   value={augmentation.erasing}
                   disabled={versions.length === 0}
                   onChange={(value) => setAugmentationValue("erasing", value)}
                 />
                 <AugmentationNumber
                   id="aug-scale"
-                  label="Scale"
+                  label="缩放"
                   max={2}
                   value={augmentation.scale}
                   disabled={versions.length === 0}
@@ -2163,7 +2164,7 @@ export default function App() {
                 />
                 <AugmentationNumber
                   id="aug-fliplr"
-                  label="Flip LR"
+                  label="水平翻转"
                   value={augmentation.fliplr}
                   disabled={versions.length === 0}
                   onChange={(value) => setAugmentationValue("fliplr", value)}
@@ -2202,7 +2203,7 @@ export default function App() {
                   onChange={(event) => setThresholdScan(event.target.checked)}
                   disabled={versions.length === 0}
                 />
-                Auto threshold scan
+                自动阈值扫描
               </label>
             </div>
 
@@ -2212,7 +2213,7 @@ export default function App() {
               onClick={handleStartTrainingRun}
             >
               <Play size={16} />
-              {isStartingRun ? "Starting" : "Start Training Run"}
+              {isStartingRun ? "正在启动" : "开始训练"}
             </button>
           </div>
 
@@ -2223,28 +2224,28 @@ export default function App() {
         <section className="panel training-panel">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">Experiments</p>
-              <h2>Run History</h2>
+              <p className="eyebrow">实验</p>
+              <h2>训练记录</h2>
               <span className="monitor-state">
-                {hasActiveRun ? "Auto refresh on" : "Idle"}
+                {hasActiveRun ? "自动刷新中" : "空闲"}
               </span>
             </div>
             <Activity size={20} />
           </div>
 
-          <div className="run-list" aria-label="Training runs">
+          <div className="run-list" aria-label="训练任务">
             {runs.length === 0 ? (
-              <p className="empty-state">Create a dataset version, then start a training run.</p>
+              <p className="empty-state">请先创建数据集版本，再开始训练。</p>
             ) : (
               runs.map((run) => (
                 <div className="run-row" key={run.id}>
                   <div className="run-row-heading">
-                    <strong>Run #{run.id}</strong>
-                    <span className={`run-status ${run.status}`}>{run.status}</span>
+                    <strong>训练任务 #{run.id}</strong>
+                    <span className={`run-status ${run.status}`}>{formatRunStatus(run.status)}</span>
                   </div>
                   <span>{run.artifact_path}</span>
                   <span>
-                    {String(run.config.model ?? "model")} | {String(run.config.epochs ?? "?")} epochs |{" "}
+                    {String(run.config.model ?? "model")} | {String(run.config.epochs ?? "?")} 轮 |{" "}
                     {run.device}
                   </span>
                   {Object.keys(run.latest_metrics).length > 0 ? (
@@ -2263,14 +2264,14 @@ export default function App() {
                     className="secondary-button"
                     onClick={() => loadRunLogs(run.id)}
                   >
-                    Load Logs
+                    加载日志
                   </button>
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={() => applyRunConfigToForm(run)}
                   >
-                    Load Config
+                    加载配置
                   </button>
                   <button
                     type="button"
@@ -2278,7 +2279,7 @@ export default function App() {
                     disabled={versions.length === 0 || hasActiveRun || isStartingRun}
                     onClick={() => handleRerunTrainingRun(run)}
                   >
-                    Rerun
+                    重新训练
                   </button>
                   {isActiveRun(run.status) ? (
                     <button
@@ -2287,7 +2288,7 @@ export default function App() {
                       disabled={cancellingRunId === run.id}
                       onClick={() => handleCancelTrainingRun(run.id)}
                     >
-                      {cancellingRunId === run.id ? "Cancelling" : "Cancel Run"}
+                      {cancellingRunId === run.id ? "正在取消" : "取消训练"}
                     </button>
                   ) : null}
                   {runLogs[run.id] ? <pre className="log-preview">{runLogs[run.id]}</pre> : null}
@@ -2304,27 +2305,27 @@ export default function App() {
         </section>
       </section>
 
-      <section className="panel prediction-panel" aria-label="Prediction analysis">
+      <section className="panel prediction-panel" aria-label="预测分析">
         <div className="panel-heading compact-heading">
           <div>
-            <p className="eyebrow">Model Review</p>
-            <h2>Prediction Analysis</h2>
+            <p className="eyebrow">模型评估</p>
+            <h2>预测分析</h2>
             <span className="monitor-state">
-              {hasActivePredictionJob ? "Auto refresh on" : "Idle"}
+              {hasActivePredictionJob ? "自动刷新中" : "空闲"}
             </span>
           </div>
           <Radar size={20} />
         </div>
 
         <div className="prediction-controls">
-          <label htmlFor="prediction-scope">Image scope</label>
+          <label htmlFor="prediction-scope">图像范围</label>
           <input
             id="prediction-scope"
             value={predictionScope}
             onChange={(event) => setPredictionScope(event.target.value)}
             disabled={runs.length === 0}
           />
-          <label htmlFor="prediction-confidence">Confidence threshold</label>
+          <label htmlFor="prediction-confidence">置信度阈值</label>
           <input
             id="prediction-confidence"
             type="number"
@@ -2343,7 +2344,7 @@ export default function App() {
               onChange={(event) => setUseImageFiltersForPrediction(event.target.checked)}
               disabled={runs.length === 0}
             />
-            Use image filters
+            使用图像筛选条件
           </label>
           <span className="prediction-filter-summary">{predictionImageFilterSummary}</span>
           <button
@@ -2352,10 +2353,10 @@ export default function App() {
             onClick={handleCreatePredictionJob}
           >
             <Radar size={16} />
-            {isCreatingPrediction ? "Running" : "Run Prediction Analysis"}
+            {isCreatingPrediction ? "正在分析" : "开始预测分析"}
           </button>
           <label className="threshold-scan-field" htmlFor="prediction-thresholds">
-            Scan thresholds
+            扫描阈值
             <input
               id="prediction-thresholds"
               value={predictionThresholds}
@@ -2370,13 +2371,13 @@ export default function App() {
             onClick={handleCreateThresholdScan}
           >
             <Radar size={16} />
-            {isCreatingThresholdScan ? "Scanning" : "Run Threshold Scan"}
+            {isCreatingThresholdScan ? "正在扫描" : "执行阈值扫描"}
           </button>
         </div>
 
-        <div className="prediction-filter-panel" aria-label="Prediction sample filters">
+        <div className="prediction-filter-panel" aria-label="预测样本筛选">
           <label htmlFor="prediction-filter-failure">
-            Failure type
+            结果类型
             <select
               id="prediction-filter-failure"
               value={predictionFilters.failure_type}
@@ -2396,7 +2397,7 @@ export default function App() {
             </select>
           </label>
           <label htmlFor="prediction-filter-class">
-            Prediction class
+            预测类别
             <select
               id="prediction-filter-class"
               value={predictionFilters.class_id}
@@ -2405,7 +2406,7 @@ export default function App() {
               }
               disabled={predictionJobs.length === 0}
             >
-              <option value="">All classes</option>
+              <option value="">全部类别</option>
               {classes.map((classItem) => (
                 <option key={classItem.id} value={classItem.id}>
                   {classItem.name}
@@ -2414,7 +2415,7 @@ export default function App() {
             </select>
           </label>
           <label htmlFor="prediction-filter-conf-min">
-            Min conf
+            最低置信度
             <input
               id="prediction-filter-conf-min"
               type="number"
@@ -2432,7 +2433,7 @@ export default function App() {
             />
           </label>
           <label htmlFor="prediction-filter-conf-max">
-            Max conf
+            最高置信度
             <input
               id="prediction-filter-conf-max"
               type="number"
@@ -2450,7 +2451,7 @@ export default function App() {
             />
           </label>
           <label htmlFor="prediction-filter-platform">
-            Prediction platform
+            预测平台
             <input
               id="prediction-filter-platform"
               value={predictionFilters.platform}
@@ -2461,7 +2462,7 @@ export default function App() {
             />
           </label>
           <label htmlFor="prediction-filter-alt-min">
-            Min altitude
+            最低高度
             <input
               id="prediction-filter-alt-min"
               type="number"
@@ -2476,7 +2477,7 @@ export default function App() {
             />
           </label>
           <label htmlFor="prediction-filter-alt-max">
-            Max altitude
+            最高高度
             <input
               id="prediction-filter-alt-max"
               type="number"
@@ -2491,7 +2492,7 @@ export default function App() {
             />
           </label>
           <label htmlFor="prediction-filter-time-min">
-            Min time
+            最早时间
             <input
               id="prediction-filter-time-min"
               type="number"
@@ -2506,7 +2507,7 @@ export default function App() {
             />
           </label>
           <label htmlFor="prediction-filter-time-max">
-            Max time
+            最晚时间
             <input
               id="prediction-filter-time-max"
               type="number"
@@ -2526,7 +2527,7 @@ export default function App() {
               disabled={predictionJobs.length === 0}
               onClick={handleApplyPredictionFilters}
             >
-              Apply Sample Filters
+              应用样本筛选
             </button>
             <button
               type="button"
@@ -2534,7 +2535,7 @@ export default function App() {
               disabled={predictionJobs.length === 0}
               onClick={handleResetPredictionFilters}
             >
-              Reset
+              重置
             </button>
           </div>
         </div>
@@ -2543,26 +2544,26 @@ export default function App() {
 
         {predictionJobs[0] ? (
           <div className="prediction-summary">
-            <Metric label="Images" value={predictionJobs[0].image_count.toLocaleString()} />
-            <Metric label="Matched" value={predictionJobs[0].matched_count.toLocaleString()} />
-            <Metric label="False +" value={predictionJobs[0].false_positive_count.toLocaleString()} />
-            <Metric label="False -" value={predictionJobs[0].false_negative_count.toLocaleString()} />
-            <Metric label="Confused" value={predictionJobs[0].class_confusion_count.toLocaleString()} />
+            <Metric label="图像" value={predictionJobs[0].image_count.toLocaleString()} />
+            <Metric label="匹配正确" value={predictionJobs[0].matched_count.toLocaleString()} />
+            <Metric label="误报" value={predictionJobs[0].false_positive_count.toLocaleString()} />
+            <Metric label="漏报" value={predictionJobs[0].false_negative_count.toLocaleString()} />
+            <Metric label="类别混淆" value={predictionJobs[0].class_confusion_count.toLocaleString()} />
           </div>
         ) : (
-          <p className="empty-state">Start a prediction job from a completed or failed run to review outputs.</p>
+          <p className="empty-state">请从已完成或失败的训练任务开始预测分析，以审查模型输出。</p>
         )}
 
         <div className="prediction-layout">
-          <div className="prediction-list" aria-label="Prediction samples">
+          <div className="prediction-list" aria-label="预测样本">
             {predictions.length === 0 ? (
-              <p className="empty-state">Prediction and failure samples will appear here.</p>
+              <p className="empty-state">预测结果与问题样本将显示在这里。</p>
             ) : (
               predictions.slice(0, 20).map((prediction) => (
                 <div className="prediction-row" key={prediction.id}>
                   <div>
-                    <strong>{prediction.failure_type}</strong>
-                    <span>Image #{prediction.image_id} | Class #{prediction.class_id}</span>
+                    <strong>{formatFailureType(prediction.failure_type)}</strong>
+                    <span>图像 #{prediction.image_id} | 类别 #{prediction.class_id}</span>
                   </div>
                   <span>{prediction.confidence.toFixed(2)}</span>
                   <button
@@ -2570,22 +2571,22 @@ export default function App() {
                     className="secondary-button"
                     onClick={() => openPredictionImage(prediction)}
                   >
-                    Open Image
+                    打开图像
                   </button>
                 </div>
               ))
             )}
           </div>
 
-          <div className="prediction-jobs" aria-label="Prediction jobs">
+          <div className="prediction-jobs" aria-label="预测任务">
             {predictionJobs.length === 0 ? null : (
               predictionJobs.map((job) => (
                 <div className="run-row" key={job.id}>
                   <div className="run-row-heading">
-                    <strong>Prediction #{job.id}</strong>
-                    <span className={`run-status ${job.status}`}>{job.status}</span>
+                    <strong>预测任务 #{job.id}</strong>
+                    <span className={`run-status ${job.status}`}>{formatRunStatus(job.status)}</span>
                   </div>
-                  <span>{job.image_filters ? formatImageFilterSummary(job.image_filters, classById) : "All images in selected scope"}</span>
+                  <span>{job.image_filters ? formatImageFilterSummary(job.image_filters, classById) : "所选范围内的全部图像"}</span>
                   <span>{job.artifact_path}</span>
                   {job.error_message ? <p className="run-error">{job.error_message}</p> : null}
                   <button
@@ -2593,7 +2594,7 @@ export default function App() {
                     className="secondary-button"
                     onClick={() => loadPredictionLogs(job.id)}
                   >
-                    Load Prediction Logs
+                    加载预测日志
                   </button>
                   {predictionLogs[job.id] ? (
                     <pre className="log-preview">{predictionLogs[job.id]}</pre>
@@ -2605,11 +2606,11 @@ export default function App() {
         </div>
       </section>
 
-      <section className="panel export-panel" aria-label="Model export">
+      <section className="panel export-panel" aria-label="模型导出">
         <div className="panel-heading compact-heading">
           <div>
-            <p className="eyebrow">Deployment Artifacts</p>
-            <h2>Model Export</h2>
+            <p className="eyebrow">部署产物</p>
+            <h2>模型导出</h2>
           </div>
           <Share2 size={20} />
         </div>
@@ -2618,7 +2619,7 @@ export default function App() {
 
         <div className="export-grid">
           <ExportOption
-            title=".pt Weights"
+            title=".pt 权重"
             format="pt"
             enabled={Boolean(latestRun && latestRun.status === "completed" && exportCapabilities?.pt_available)}
             reason={exportCapabilities?.reasons.pt}
@@ -2650,24 +2651,24 @@ export default function App() {
         </div>
 
         {exportCapabilities?.weights_path ? (
-          <p className="export-source">Source weights: {exportCapabilities.weights_path}</p>
+          <p className="export-source">源权重：{exportCapabilities.weights_path}</p>
         ) : (
           <p className="empty-state">
-            Complete a training run with `ultralytics/weights/best.pt` to enable export.
+            请完成生成 `ultralytics/weights/best.pt` 的训练任务，以启用模型导出。
           </p>
         )}
 
-        <div className="export-list" aria-label="Export artifacts">
+        <div className="export-list" aria-label="导出产物">
           {exports.length === 0 ? (
-            <p className="empty-state">Exported model artifacts will appear here.</p>
+            <p className="empty-state">导出的模型产物将显示在这里。</p>
           ) : (
             exports.map((artifact) => (
               <div className="export-row" key={artifact.id}>
                 <div>
-                  <strong>{artifact.format.toUpperCase()} export #{artifact.id}</strong>
-                  <span>{artifact.artifact_path || "No artifact path yet"}</span>
+                  <strong>{artifact.format.toUpperCase()} 导出任务 #{artifact.id}</strong>
+                  <span>{artifact.artifact_path || "暂无产物路径"}</span>
                 </div>
-                <span className={`run-status ${artifact.status}`}>{artifact.status}</span>
+                <span className={`run-status ${artifact.status}`}>{formatRunStatus(artifact.status)}</span>
                 {artifact.error_message ? (
                   <p className="run-error">{artifact.error_message}</p>
                 ) : null}
@@ -3527,18 +3528,18 @@ function parseThresholdList(value: string) {
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length === 0) {
-    throw new Error("Enter at least one confidence threshold.");
+    throw new Error("请至少输入一个置信度阈值。");
   }
   if (parts.length > 20) {
-    throw new Error("Threshold scan supports up to 20 values.");
+    throw new Error("阈值扫描最多支持 20 个数值。");
   }
 
   const thresholds = parts.map((part) => Number(part));
   if (thresholds.some((threshold) => Number.isNaN(threshold))) {
-    throw new Error("Threshold scan values must be numbers.");
+    throw new Error("阈值扫描值必须为数字。");
   }
   if (thresholds.some((threshold) => threshold < 0 || threshold > 1)) {
-    throw new Error("Threshold scan values must be between 0 and 1.");
+    throw new Error("阈值扫描值必须在 0 到 1 之间。");
   }
 
   return Array.from(new Set(thresholds.map((threshold) => Number(threshold.toFixed(4))))).sort(
@@ -3890,7 +3891,7 @@ function ExportOption(props: {
     <div className="export-option">
       <div>
         <strong>{title}</strong>
-        <span>{enabled ? "Ready" : reason ?? "Waiting for a completed run"}</span>
+        <span>{enabled ? "可用" : reason ?? "等待已完成的训练任务"}</span>
       </div>
       <button
         type="button"
@@ -3898,7 +3899,9 @@ function ExportOption(props: {
         disabled={!enabled || isCreating}
         onClick={() => onCreate(format)}
       >
-        {isCreating ? "Exporting" : `Export ${format.toUpperCase()}`}
+        {isCreating
+          ? "正在导出"
+          : `导出 ${format === "tensorrt" ? "TensorRT" : format.toUpperCase()}`}
       </button>
     </div>
   );
@@ -3909,15 +3912,15 @@ function RunArtifactList(props: { summary?: TrainingRunArtifactSummary }) {
   const visibleItems = summary?.items.slice(0, 8) ?? [];
 
   return (
-    <div className="run-artifacts" aria-label="Run artifacts">
+    <div className="run-artifacts" aria-label="训练产物">
       <div className="run-artifacts-heading">
-        <strong>Run Artifacts</strong>
-        <span>{summary ? `${summary.total_count} files` : "Loading"}</span>
+        <strong>训练产物</strong>
+        <span>{summary ? `${summary.total_count} 个文件` : "加载中"}</span>
       </div>
       {!summary ? (
-        <p className="empty-state">Artifacts pending.</p>
+        <p className="empty-state">训练产物尚未生成。</p>
       ) : visibleItems.length === 0 ? (
-        <p className="empty-state">No files have been written yet.</p>
+        <p className="empty-state">尚未写入任何文件。</p>
       ) : (
         <>
           <div className="artifact-list">
@@ -3932,7 +3935,7 @@ function RunArtifactList(props: { summary?: TrainingRunArtifactSummary }) {
             ))}
           </div>
           {summary.total_count > visibleItems.length ? (
-            <span className="artifact-more">+{summary.total_count - visibleItems.length} more</span>
+            <span className="artifact-more">另有 {summary.total_count - visibleItems.length} 个</span>
           ) : null}
         </>
       )}
@@ -3980,20 +3983,20 @@ function ExperimentDashboard(props: {
   const hasComparison = Boolean(projectSummary?.runs.length);
 
   return (
-    <div className="experiment-dashboard" aria-label="Experiment dashboard">
+    <div className="experiment-dashboard" aria-label="实验看板">
       <div className="dashboard-heading">
         <div>
-          <strong>Experiment Dashboard</strong>
+          <strong>实验看板</strong>
           <span>
             {summary?.latest_prediction_job_id
-              ? `Latest prediction #${summary.latest_prediction_job_id}`
-              : "Waiting for run evidence"}
+              ? `最新预测任务 #${summary.latest_prediction_job_id}`
+              : "等待训练任务数据"}
           </span>
         </div>
       </div>
 
       {!hasData ? (
-        <p className="empty-state">Metrics, class outcomes, and threshold scans will appear here.</p>
+        <p className="empty-state">训练指标、类别检测结果和阈值扫描将显示在这里。</p>
       ) : (
         <>
           <RunComparisonTable rows={projectSummary?.runs ?? []} />
@@ -4023,33 +4026,33 @@ function ExperimentDashboard(props: {
 function RunComparisonTable(props: { rows: ProjectExperimentSummary["runs"] }) {
   return (
     <div className="analysis-panel run-comparison-panel">
-      <strong>Run Comparison</strong>
+      <strong>任务对比</strong>
       {props.rows.length === 0 ? (
-        <p className="empty-state">Completed runs will appear here for comparison.</p>
+        <p className="empty-state">已完成的训练任务将显示在这里以供对比。</p>
       ) : (
         <div className="compact-table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Run</th>
-                <th>Status</th>
-                <th>Model</th>
-                <th>Epochs</th>
+                <th>任务</th>
+                <th>状态</th>
+                <th>模型</th>
+                <th>训练轮数</th>
                 <th>mAP50</th>
-                <th>Box loss</th>
-                <th>Matched</th>
-                <th>False +</th>
-                <th>False -</th>
-                <th>Best F1</th>
-                <th>Best Conf</th>
-                <th>Artifact</th>
+                <th>边界框损失</th>
+                <th>匹配正确</th>
+                <th>误报</th>
+                <th>漏报</th>
+                <th>最佳 F1</th>
+                <th>最佳置信度</th>
+                <th>产物</th>
               </tr>
             </thead>
             <tbody>
               {props.rows.map((row) => (
                 <tr key={row.run_id}>
                   <td>#{row.run_id}</td>
-                  <td>{row.status}</td>
+                  <td>{formatRunStatus(row.status)}</td>
                   <td title={row.model}>{row.model}</td>
                   <td>{row.epochs ?? "n/a"}</td>
                   <td>{row.map50 === null ? "n/a" : row.map50.toFixed(3)}</td>
@@ -4103,19 +4106,19 @@ function MetricCurve(props: { series: MetricSeries }) {
 function ClassOutcomeTable(props: { rows: ClassOutcome[] }) {
   return (
     <div className="analysis-panel">
-      <strong>Class Outcomes</strong>
+      <strong>类别检测结果</strong>
       {props.rows.length === 0 ? (
-        <p className="empty-state">Run prediction analysis to populate class outcomes.</p>
+        <p className="empty-state">请执行预测分析以生成类别检测结果。</p>
       ) : (
         <div className="compact-table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Class</th>
-                <th>Match</th>
-                <th>False +</th>
-                <th>False -</th>
-                <th>Confused</th>
+                <th>类别</th>
+                <th>匹配正确</th>
+                <th>误报</th>
+                <th>漏报</th>
+                <th>类别混淆</th>
               </tr>
             </thead>
             <tbody>
@@ -4139,9 +4142,9 @@ function ClassOutcomeTable(props: { rows: ClassOutcome[] }) {
 function ConfusionMatrix(props: { cells: ConfusionCell[] }) {
   return (
     <div className="analysis-panel">
-      <strong>Confusion Matrix</strong>
+      <strong>混淆矩阵</strong>
       {props.cells.length === 0 ? (
-        <p className="empty-state">Matched predictions will populate the matrix.</p>
+        <p className="empty-state">预测分析结果将用于生成混淆矩阵。</p>
       ) : (
         <div className="matrix-list">
           {props.cells.map((cell) => (
@@ -4167,14 +4170,14 @@ function ThresholdScanTable(props: {
 }) {
   return (
     <div className="analysis-panel threshold-panel">
-      <strong>Threshold Scan</strong>
+      <strong>阈值扫描</strong>
       {props.rows.length === 0 ? (
-        <p className="empty-state">Run prediction jobs at different confidence thresholds.</p>
+        <p className="empty-state">请使用不同置信度阈值执行预测任务。</p>
       ) : (
         <>
           {props.recommendation ? (
             <div className="threshold-recommendation">
-              <span>Best threshold</span>
+              <span>最佳阈值</span>
               <strong>{props.recommendation.confidence_threshold.toFixed(2)}</strong>
               <small>
                 F1 {formatPercent(props.recommendation.f1)} | P{" "}
@@ -4187,14 +4190,14 @@ function ThresholdScanTable(props: {
             <table>
               <thead>
                 <tr>
-                  <th>Conf</th>
-                  <th>Precision</th>
-                  <th>Recall</th>
+                  <th>置信度</th>
+                  <th>精确率</th>
+                  <th>召回率</th>
                   <th>F1</th>
-                  <th>Matched</th>
-                  <th>False +</th>
-                  <th>False -</th>
-                  <th>Confused</th>
+                  <th>匹配正确</th>
+                  <th>误报</th>
+                  <th>漏报</th>
+                  <th>类别混淆</th>
                 </tr>
               </thead>
               <tbody>
