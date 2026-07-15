@@ -147,15 +147,29 @@ def resolve_device(requested_device: str | None) -> str:
 
 
 def validate_training_dataset(version: DatasetVersion, version_root: Path) -> None:
+    resolved_version_root = version_root.resolve()
     manifest_images = version.split_manifest.get("images", [])
     for split in REQUIRED_TRAINING_SPLITS:
         split_entries = [item for item in manifest_images if item.get("split") == split]
         if not split_entries:
             raise RuntimeError(INVALID_TRAINING_SPLIT_MESSAGE)
+
+        expected_image_root = (resolved_version_root / "images" / split).resolve()
+        expected_label_root = (resolved_version_root / "labels" / split).resolve()
         for item in split_entries:
-            image_path = version_root / str(item.get("export_image", ""))
-            label_path = version_root / str(item.get("export_label", ""))
-            if not image_path.is_file() or not label_path.is_file():
+            image_relative_path = Path(str(item.get("export_image", "")))
+            label_relative_path = Path(str(item.get("export_label", "")))
+            if image_relative_path.is_absolute() or label_relative_path.is_absolute():
+                raise RuntimeError(INVALID_TRAINING_SPLIT_MESSAGE)
+
+            image_path = (resolved_version_root / image_relative_path).resolve()
+            label_path = (resolved_version_root / label_relative_path).resolve()
+            if (
+                not image_path.is_relative_to(expected_image_root)
+                or not label_path.is_relative_to(expected_label_root)
+                or not image_path.is_file()
+                or not label_path.is_file()
+            ):
                 raise RuntimeError(INVALID_TRAINING_SPLIT_MESSAGE)
 
 

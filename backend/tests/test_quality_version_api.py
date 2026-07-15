@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
+
+import pytest
 
 from test_dataset_import_api import PNG_1X1, create_import_zip, isolated_client
 
@@ -48,6 +51,25 @@ def _create_unreadable_dimension_zip(path: Path) -> None:
             '{"file":"frame_iris_00001.jpg","drone":"iris","z":12.0,"t":2.0}\n'
             '{"file":"frame_iris_00002.jpg","drone":"iris","z":12.0,"t":3.0}\n',
         )
+
+
+@pytest.mark.parametrize(
+    ("image_count", "expected_counts"),
+    [
+        (0, {"train": 0, "val": 0, "test": 0}),
+        (1, {"train": 1, "val": 0, "test": 0}),
+        (2, {"train": 1, "val": 1, "test": 0}),
+        (10, {"train": 8, "val": 1, "test": 1}),
+    ],
+)
+def test_split_images_assigns_expected_counts(image_count: int, expected_counts: dict):
+    from app.versions.exporter import _split_images
+
+    images = [SimpleNamespace(id=index) for index in range(image_count, 0, -1)]
+
+    splits = _split_images(images)
+
+    assert {split: len(items) for split, items in splits.items()} == expected_counts
 
 
 def test_dataset_quality_reports_training_readiness(tmp_path: Path):
@@ -378,6 +400,35 @@ def test_create_dataset_version_requires_train_and_validation_images(tmp_path: P
         assert response.status_code == 400
         assert "at least 2 annotated images are required" in response.text
         assert "current selection has 1" in response.text
+        assert client.get(
+            f"/api/datasets/{dataset['dataset_id']}/versions"
+        ).json()["items"] == []
+        versions_root = (
+            tmp_path
+            / "workspace"
+            / "projects"
+            / str(dataset["project_id"])
+            / "versions"
+        )
+        assert not versions_root.exists()
+
+
+def test_create_dataset_version_reports_zero_selected_annotated_images(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = _import_dataset(client, zip_path)
+        _create_class(client, dataset["project_id"], "drone")
+
+        response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "no-annotations"},
+        )
+
+        assert response.status_code == 400
+        assert "at least 2 annotated images are required" in response.text
+        assert "current selection has 0" in response.text
         assert client.get(
             f"/api/datasets/{dataset['dataset_id']}/versions"
         ).json()["items"] == []

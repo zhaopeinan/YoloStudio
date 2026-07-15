@@ -159,6 +159,46 @@ def test_validate_training_dataset_rejects_missing_exported_validation_artifact(
         bind.dispose()
 
 
+def test_validate_training_dataset_rejects_validation_entries_aliased_to_train(
+    tmp_path: Path,
+):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        version = _create_version(client, zip_path)
+
+        from sqlalchemy.orm import Session
+
+        from app.core.settings import Settings
+        from app.db.models import DatasetVersion
+        from app.db.session import create_engine_for_settings
+        from app.training.runner import (
+            INVALID_TRAINING_SPLIT_MESSAGE,
+            validate_training_dataset,
+        )
+
+        bind = create_engine_for_settings(Settings(workspace_root=tmp_path / "workspace"))
+        with Session(bind) as db:
+            stored_version = db.get(DatasetVersion, version["id"])
+            manifest = dict(stored_version.split_manifest)
+            manifest["images"] = [dict(item) for item in manifest["images"]]
+            train_entry = next(
+                item for item in manifest["images"] if item.get("split") == "train"
+            )
+            val_entry = next(
+                item for item in manifest["images"] if item.get("split") == "val"
+            )
+            val_entry["export_image"] = train_entry["export_image"]
+            val_entry["export_label"] = train_entry["export_label"]
+            stored_version.split_manifest = manifest
+
+            with pytest.raises(RuntimeError) as exc_info:
+                validate_training_dataset(stored_version, Path(stored_version.artifact_path))
+            assert str(exc_info.value) == INVALID_TRAINING_SPLIT_MESSAGE
+        bind.dispose()
+
+
 def test_start_training_run_persists_status_artifacts_and_logs(tmp_path: Path, monkeypatch):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)

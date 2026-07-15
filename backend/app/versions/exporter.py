@@ -95,8 +95,6 @@ def create_dataset_version(
         blockers.append("dataset has no images")
     if quality.class_count == 0:
         blockers.append("project has no active classes")
-    if quality.annotation_count == 0:
-        blockers.append("dataset has no saved annotations")
     if quality.invalid_box_count > 0:
         blockers.append("dataset has invalid boxes")
     if quality.duplicate_box_count > 0:
