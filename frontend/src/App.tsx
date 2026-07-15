@@ -100,7 +100,7 @@ import {
 } from "./localization";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
-const defaultProjectName = "YOLO Trainer Project";
+const defaultProjectName = "YOLO 目标检测项目";
 const defaultDatasetName = "image_dataset";
 const defaultClassColor = "#ef4444";
 const imagePageSize = 50;
@@ -1672,11 +1672,13 @@ export default function App() {
           icon={<HardDrive size={20} />}
           label="工作空间"
           value={health?.workspace_root ?? "等待后端响应"}
+          revealFullValue={Boolean(health?.workspace_root)}
         />
         <StatusTile
           icon={<Database size={20} />}
           label="数据库"
           value={health?.database_path ?? "SQLite 将在启动时初始化"}
+          revealFullValue={Boolean(health?.database_path)}
         />
         <StatusTile
           icon={<Activity size={20} />}
@@ -1817,7 +1819,7 @@ export default function App() {
                 <AlertTriangle size={18} />
                 <div>
                   {scan.warnings.map((warning) => (
-                    <p key={warning}>{warning}</p>
+                    <p key={warning}>{formatScanWarning(warning)}</p>
                   ))}
                 </div>
               </div>
@@ -1888,7 +1890,7 @@ export default function App() {
               {quality.issues.length > 0 ? (
                 <div className="issue-list">
                   {quality.issues.map((issue) => (
-                    <p key={issue}>{issue}</p>
+                    <p key={issue}>{formatQualitySummaryIssue(issue)}</p>
                   ))}
                 </div>
               ) : (
@@ -1944,10 +1946,10 @@ export default function App() {
                     >
                       <div>
                         <strong>{formatQualityIssueType(issue.issue_type)}</strong>
-                        <span>{issue.message}</span>
+                        <span>{formatQualityIssueMessage(issue)}</span>
                         <small>
                           {issue.image_path}
-                          {issue.class_name ? ` | ${issue.class_name}` : ""}
+                          {issue.class_name ? ` | ${formatClassDisplayName(issue.class_name)}` : ""}
                         </small>
                       </div>
                       <button
@@ -2245,7 +2247,7 @@ export default function App() {
                   </div>
                   <span>{run.artifact_path}</span>
                   <span>
-                    {String(run.config.model ?? "model")} | {String(run.config.epochs ?? "?")} 轮 |{" "}
+                    {String(run.config.model ?? "未指定模型")} | {String(run.config.epochs ?? "?")} 轮 |{" "}
                     {run.device}
                   </span>
                   {Object.keys(run.latest_metrics).length > 0 ? (
@@ -2622,7 +2624,7 @@ export default function App() {
             title=".pt 权重"
             format="pt"
             enabled={Boolean(latestRun && latestRun.status === "completed" && exportCapabilities?.pt_available)}
-            reason={exportCapabilities?.reasons.pt}
+            reason={formatExportReason(exportCapabilities?.reasons.pt)}
             isCreating={isCreatingExport === "pt"}
             onCreate={handleCreateExport}
           />
@@ -2632,7 +2634,7 @@ export default function App() {
             enabled={Boolean(
               latestRun && latestRun.status === "completed" && exportCapabilities?.onnx_available,
             )}
-            reason={exportCapabilities?.reasons.onnx}
+            reason={formatExportReason(exportCapabilities?.reasons.onnx)}
             isCreating={isCreatingExport === "onnx"}
             onCreate={handleCreateExport}
           />
@@ -2644,7 +2646,7 @@ export default function App() {
                 latestRun.status === "completed" &&
                 exportCapabilities?.tensorrt_available,
             )}
-            reason={exportCapabilities?.reasons.tensorrt}
+            reason={formatExportReason(exportCapabilities?.reasons.tensorrt)}
             isCreating={isCreatingExport === "tensorrt"}
             onCreate={handleCreateExport}
           />
@@ -3776,9 +3778,8 @@ function BoxRect(props: {
               strokeWidth={0.004}
               vectorEffect="non-scaling-stroke"
               role="button"
-              aria-label={`调整边界框 ${annotation.class_name ?? annotation.class_id} ${handle.handle.replace(
-                "-",
-                " ",
+              aria-label={`调整边界框 ${annotation.class_name ?? annotation.class_id} ${formatResizeHandle(
+                handle.handle,
               )}`}
               tabIndex={0}
               data-testid={`resize-handle-${annotation.local_id}-${handle.handle}`}
@@ -3866,13 +3867,18 @@ function PredictionRect(props: { prediction: Prediction; className?: string }) {
   );
 }
 
-function StatusTile(props: { icon: ReactNode; label: string; value: string }) {
+function StatusTile(props: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  revealFullValue?: boolean;
+}) {
   return (
     <div className="status-tile">
       {props.icon}
-      <div>
+      <div className="status-tile-content">
         <span>{props.label}</span>
-        <strong>{props.value}</strong>
+        <strong title={props.revealFullValue ? props.value : undefined}>{props.value}</strong>
       </div>
     </div>
   );
@@ -4054,14 +4060,14 @@ function RunComparisonTable(props: { rows: ProjectExperimentSummary["runs"] }) {
                   <td>#{row.run_id}</td>
                   <td>{formatRunStatus(row.status)}</td>
                   <td title={row.model}>{row.model}</td>
-                  <td>{row.epochs ?? "n/a"}</td>
-                  <td>{row.map50 === null ? "n/a" : row.map50.toFixed(3)}</td>
-                  <td>{row.box_loss === null ? "n/a" : row.box_loss.toFixed(3)}</td>
+                  <td>{row.epochs ?? "暂无"}</td>
+                  <td>{row.map50 === null ? "暂无" : row.map50.toFixed(3)}</td>
+                  <td>{row.box_loss === null ? "暂无" : row.box_loss.toFixed(3)}</td>
                   <td>{row.matched}</td>
                   <td>{row.false_positive}</td>
                   <td>{row.false_negative}</td>
-                  <td>{row.best_f1 === null ? "n/a" : formatPercent(row.best_f1)}</td>
-                  <td>{row.best_threshold === null ? "n/a" : row.best_threshold.toFixed(2)}</td>
+                  <td>{row.best_f1 === null ? "暂无" : formatPercent(row.best_f1)}</td>
+                  <td>{row.best_threshold === null ? "暂无" : row.best_threshold.toFixed(2)}</td>
                   <td title={row.artifact_path}>{formatArtifactTail(row.artifact_path)}</td>
                 </tr>
               ))}
@@ -4089,7 +4095,7 @@ function MetricCurve(props: { series: MetricSeries }) {
     <div className="curve-card">
       <div className="curve-title">
         <strong title={series.name}>{shortMetricName(series.name)}</strong>
-        <span>{series.latest === null ? "n/a" : series.latest.toFixed(3)}</span>
+        <span>{series.latest === null ? "暂无" : series.latest.toFixed(3)}</span>
       </div>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         <line x1="0" y1="88" x2="100" y2="88" />
@@ -4247,6 +4253,123 @@ function formatBytes(size: number) {
     unitIndex += 1;
   }
   return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatResizeHandle(handle: BoxResizeHandle) {
+  const labels: Record<BoxResizeHandle, string> = {
+    "top-left": "左上角",
+    "top-right": "右上角",
+    "bottom-left": "左下角",
+    "bottom-right": "右下角",
+  };
+  return labels[handle];
+}
+
+function formatScanWarning(message: string) {
+  if (message === "No YOLO label .txt files were found") {
+    return "未找到 YOLO 标签 .txt 文件";
+  }
+  if (message === "No data.yaml or dataset.yaml file was found") {
+    return "未找到 data.yaml 或 dataset.yaml 文件";
+  }
+  const parseError = message.match(/^(.+) contains (\d+) unparsable rows$/);
+  return parseError
+    ? `${parseError[1]} 包含 ${parseError[2]} 行无法解析的数据`
+    : message;
+}
+
+function formatQualitySummaryIssue(message: string) {
+  const exactLabels: Record<string, string> = {
+    "Dataset has no images.": "数据集中没有图像。",
+    "Project has no active classes.": "项目中没有启用的类别。",
+    "Dataset has no saved annotations.": "数据集中没有已保存的标注。",
+  };
+  if (exactLabels[message]) {
+    return exactLabels[message];
+  }
+
+  const patterns: Array<[RegExp, (count: string) => string]> = [
+    [/^(\d+) images? (?:has|have) no annotations\.$/, (count) => `${count} 张图像没有标注。`],
+    [/^(\d+) boxes? (?:has|have) invalid geometry\.$/, (count) => `${count} 个边界框的几何参数无效。`],
+    [/^(\d+) boxes? (?:is|are) smaller than 10x10 pixels\.$/, (count) => `${count} 个边界框小于 10x10 像素。`],
+    [/^(\d+) boxes? duplicates? another box on the same image and class\.$/, (count) => `${count} 个边界框与同一图像、同一类别中的其他边界框重复。`],
+    [/^(\d+) images? (?:is|are) missing platform, altitude, timestamp, or source metadata\.$/, (count) => `${count} 张图像缺少平台、高度、时间戳或来源元数据。`],
+    [/^(\d+) images? (?:has|have) unreadable image dimensions\.$/, (count) => `${count} 张图像的尺寸无法读取。`],
+    [/^(\d+) label references? unknown class indexes\.$/, (count) => `${count} 行标签引用了未知类别索引。`],
+  ];
+  for (const [pattern, formatter] of patterns) {
+    const match = message.match(pattern);
+    if (match) {
+      return formatter(match[1]);
+    }
+  }
+  return message;
+}
+
+function formatQualityIssueMessage(issue: DatasetQualityIssue) {
+  if (issue.issue_type === "unannotated_image") {
+    return "图像没有已保存的标注。";
+  }
+  if (issue.issue_type === "invalid_box") {
+    return "边界框超出归一化图像坐标范围。";
+  }
+  if (issue.issue_type === "tiny_box") {
+    return "边界框小于 10x10 像素。";
+  }
+  if (issue.issue_type === "duplicate_box") {
+    const annotationId = issue.message.match(/annotation (\d+)/)?.[1];
+    return annotationId
+      ? `边界框与同一图像、同一类别中的标注 #${annotationId} 重复。`
+      : "边界框与同一图像、同一类别中的其他标注重复。";
+  }
+  if (issue.issue_type === "missing_metadata") {
+    const fields = issue.message.match(/^Image is missing (.+)\.$/)?.[1];
+    return fields
+      ? `图像缺少${formatMetadataFields(fields)}。`
+      : "图像缺少必要元数据。";
+  }
+  if (issue.issue_type === "missing_image_dimensions") {
+    return "无法读取图像宽度或高度。";
+  }
+  if (issue.issue_type === "unknown_class_reference") {
+    const match = issue.message.match(/^(\d+) label rows? references? unknown class index (.+)\.$/);
+    return match
+      ? `${match[1]} 行标签引用了未知类别索引 ${match[2]}。`
+      : "标签引用了未知类别索引。";
+  }
+  return issue.message;
+}
+
+function formatMetadataFields(fields: string) {
+  const labels: Record<string, string> = {
+    platform: "平台",
+    altitude: "高度",
+    timestamp: "时间戳",
+    "source metadata row": "来源元数据行",
+  };
+  return fields
+    .split(/, | or /)
+    .map((field) => labels[field] ?? field)
+    .join("、");
+}
+
+function formatClassDisplayName(className: string) {
+  return className.replace(/^YOLO class (.+)$/, "YOLO 类别 $1");
+}
+
+function formatExportReason(reason?: string) {
+  if (!reason) {
+    return undefined;
+  }
+  const missingWeights = reason.match(/^Model weights were not found: (.+)$/);
+  if (missingWeights) {
+    return `未找到模型权重：${missingWeights[1]}`;
+  }
+  const labels: Record<string, string> = {
+    "Ultralytics is not installed": "未安装 Ultralytics",
+    "TensorRT Python package is not installed": "未安装 TensorRT Python 包",
+  };
+  return labels[reason] ?? reason;
 }
 
 function formatDimensionRefresh(summary: DatasetDimensionRefreshSummary) {

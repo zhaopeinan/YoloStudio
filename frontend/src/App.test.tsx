@@ -1002,8 +1002,12 @@ describe("App", () => {
 
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
     expect(await screen.findByText("cpu")).toBeInTheDocument();
+    expect(screen.getByTitle("/tmp/workspace")).toHaveTextContent("/tmp/workspace");
+    expect(screen.getByTitle("/tmp/workspace/app.db")).toHaveTextContent(
+      "/tmp/workspace/app.db",
+    );
     expect(screen.getByLabelText("数据集路径")).toBeInTheDocument();
-    expect(screen.getByLabelText("项目名称")).toBeInTheDocument();
+    expect(screen.getByLabelText("项目名称")).toHaveValue("YOLO 目标检测项目");
     expect(screen.getByLabelText("数据集名称")).toBeInTheDocument();
     expect(await screen.findByLabelText("已保存数据集")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "加载数据集" })).toBeInTheDocument();
@@ -1224,7 +1228,7 @@ describe("App", () => {
     expect(await screen.findByText("预测任务 #12")).toBeInTheDocument();
     expect(await screen.findByText("模型导出")).toBeInTheDocument();
     expect(await screen.findByText(".pt 权重")).toBeInTheDocument();
-    expect(await screen.findByText("Ultralytics is not installed")).toBeInTheDocument();
+    expect(await screen.findByText("未安装 Ultralytics")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "导出 PT" }));
 
@@ -1620,7 +1624,7 @@ describe("App", () => {
       within(screen.getByLabelText("质量问题样本")).getByText("重复边界框"),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText("Box duplicates annotation 1 on the same image and class."),
+      await screen.findByText("边界框与同一图像、同一类别中的标注 #1 重复。"),
     ).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("质量问题类型"), "duplicate_box");
@@ -1678,7 +1682,7 @@ describe("App", () => {
       within(screen.getByLabelText("质量问题样本")).getByText("缺少元数据"),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText("Image is missing source metadata row, altitude, timestamp."),
+      await screen.findByText("图像缺少来源元数据行、高度、时间戳。"),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
@@ -1727,7 +1731,7 @@ describe("App", () => {
       within(screen.getByLabelText("质量问题样本")).getByText("缺少图像尺寸"),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText("Image width or height could not be read."),
+      await screen.findByText("无法读取图像宽度或高度。"),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
