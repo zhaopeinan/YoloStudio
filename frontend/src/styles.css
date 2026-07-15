@@ -1694,7 +1694,7 @@ input[type="color"] {
 }
 
 .workflow-navigation-horizontal {
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(180px, 1fr));
   overflow-x: auto;
   padding: 4px 2px 8px;
   overscroll-behavior-x: contain;
@@ -1705,7 +1705,7 @@ input[type="color"] {
   grid-template-columns: 28px minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
-  min-width: 150px;
+  min-width: 180px;
   min-height: 52px;
   border-bottom: 3px solid transparent;
   padding: 10px;
