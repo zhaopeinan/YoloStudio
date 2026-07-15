@@ -99,6 +99,13 @@ import {
   formatRunStatus,
 } from "./localization";
 import { WorkflowShell } from "./WorkflowShell";
+import { AnnotationFilterDrawer } from "./AnnotationFilterDrawer";
+import { AnnotationToolbar } from "./AnnotationToolbar";
+import {
+  countAdvancedImageFilters,
+  findNextAnnotationImageId,
+  type AdvancedImageFilters,
+} from "./annotation-workbench";
 import { buildWorkflowSteps, parseWorkflowHash, workflowStepOrder, type WorkflowStep } from "./workflow";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
@@ -172,6 +179,11 @@ type DraftBox = Annotation & {
   local_id: string;
 };
 
+type ImageFiltersState = Omit<AdvancedImageFilters, "failure_type"> & {
+  failure_type: PredictionFailureType;
+  label_status: "all" | "annotated" | "unannotated";
+};
+
 type DragState = {
   startX: number;
   startY: number;
@@ -232,7 +244,7 @@ export default function App() {
   const [images, setImages] = useState<DatasetImage[]>([]);
   const [imagePage, setImagePage] = useState({ limit: imagePageSize, offset: 0, total: 0 });
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
-  const [imageFilters, setImageFilters] = useState({
+  const [imageFilters, setImageFilters] = useState<ImageFiltersState>({
     platform: "",
     label_status: "all" as "all" | "annotated" | "unannotated",
     class_id: "",
@@ -241,6 +253,8 @@ export default function App() {
     altitude_min: "",
     altitude_max: "",
   });
+  const [imageFilenameSearch, setImageFilenameSearch] = useState("");
+  const [isImageFilterDrawerOpen, setIsImageFilterDrawerOpen] = useState(false);
   const [imageFilterError, setImageFilterError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<DraftBox[]>([]);
   const [annotationsDirty, setAnnotationsDirty] = useState(false);
@@ -334,16 +348,25 @@ export default function App() {
     [classes, selectedClassId],
   );
 
-  const annotationReadinessSteps = useMemo(
-    () => [
-      { label: "数据集已加载", complete: Boolean(importedDataset) },
-      { label: "类别库", complete: classes.length > 0 },
-      { label: "已选择图像", complete: Boolean(selectedImage) },
-      { label: "已选择类别", complete: Boolean(selectedClass) },
-    ],
-    [classes.length, importedDataset, selectedClass, selectedImage],
+  const annotationReady = Boolean(importedDataset && classes.length > 0 && selectedImage && selectedClass);
+  const advancedImageFilters = useMemo<AdvancedImageFilters>(
+    () => ({
+      platform: imageFilters.platform,
+      class_id: imageFilters.class_id,
+      edge_tag: imageFilters.edge_tag,
+      failure_type: imageFilters.failure_type,
+      altitude_min: imageFilters.altitude_min,
+      altitude_max: imageFilters.altitude_max,
+    }),
+    [imageFilters],
   );
-  const annotationReady = annotationReadinessSteps.every((step) => step.complete);
+  const advancedFilterCount = countAdvancedImageFilters(advancedImageFilters);
+  const visibleImages = useMemo(() => {
+    const query = imageFilenameSearch.trim().toLowerCase();
+    return query
+      ? images.filter((image) => image.relative_path.toLowerCase().includes(query))
+      : images;
+  }, [imageFilenameSearch, images]);
 
   const classById = useMemo(() => {
     return new Map(classes.map((classItem) => [classItem.id, classItem]));
@@ -767,6 +790,7 @@ export default function App() {
   async function refreshImages(
     datasetId = importedDataset?.dataset_id,
     offset = imagePage.offset,
+    filters: ImageFiltersState = imageFilters,
   ) {
     if (!datasetId) {
       return;
@@ -774,7 +798,7 @@ export default function App() {
 
     setImageFilterError(null);
     try {
-      const response = await listImages(datasetId, toImageFilterRequest(imageFilters), {
+      const response = await listImages(datasetId, toImageFilterRequest(filters), {
         limit: imagePageSize,
         offset,
       });
@@ -843,6 +867,17 @@ export default function App() {
 
   function handleApplyImageFilters() {
     void refreshImages(importedDataset?.dataset_id, 0);
+    setIsImageFilterDrawerOpen(false);
+  }
+
+  function handleImageLabelStatusChange(labelStatus: ImageFiltersState["label_status"]) {
+    const nextFilters = { ...imageFilters, label_status: labelStatus };
+    setImageFilters(nextFilters);
+    void refreshImages(importedDataset?.dataset_id, 0, nextFilters);
+  }
+
+  function handleAdvancedImageFilterChange(key: keyof AdvancedImageFilters, value: string) {
+    setImageFilters((current) => ({ ...current, [key]: value }) as ImageFiltersState);
   }
 
   function handlePreviousImagePage() {
@@ -855,10 +890,10 @@ export default function App() {
     void refreshImages(importedDataset?.dataset_id, nextOffset);
   }
 
-  function handleResetImageFilters() {
+  function handleResetAdvancedImageFilters() {
     const nextFilters = {
+      ...imageFilters,
       platform: "",
-      label_status: "all" as const,
       class_id: "",
       edge_tag: "",
       failure_type: "all" as const,
@@ -868,7 +903,7 @@ export default function App() {
     setImageFilters(nextFilters);
     if (importedDataset) {
       setImageFilterError(null);
-      listImages(importedDataset.dataset_id, {}, { limit: imagePageSize, offset: 0 })
+      listImages(importedDataset.dataset_id, toImageFilterRequest(nextFilters), { limit: imagePageSize, offset: 0 })
         .then((response) => {
           setImages(response.items);
           setImagePage({
@@ -1513,9 +1548,9 @@ export default function App() {
     );
   }
 
-  async function handleSaveAnnotations() {
+  async function handleSaveAnnotations(): Promise<boolean> {
     if (!selectedImageId) {
-      return;
+      return false;
     }
 
     setIsSavingAnnotations(true);
@@ -1542,10 +1577,27 @@ export default function App() {
         ),
       );
       void refreshTrainingPrep();
+      return true;
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "保存标注失败");
+      return false;
     } finally {
       setIsSavingAnnotations(false);
+    }
+  }
+
+  async function handleSaveAndNextImage() {
+    if (!selectedImageId) {
+      return;
+    }
+    const currentImageId = selectedImageId;
+    if (!(await handleSaveAnnotations())) {
+      return;
+    }
+    const nextImageId = findNextAnnotationImageId(images, currentImageId);
+    if (nextImageId !== null) {
+      setActiveReview(null);
+      setSelectedImageId(nextImageId);
     }
   }
 
@@ -2953,23 +3005,51 @@ export default function App() {
       </section> : null}
 
       {currentStep === "annotation" ? <>
-        <section className="panel annotation-class-selector" aria-label="当前标注类别">
-          <label htmlFor="annotation-active-class">当前绘制类别</label>
-          <select
-            id="annotation-active-class"
-            value={selectedClassId ?? ""}
-            onChange={(event) => setSelectedClassId(Number(event.target.value))}
-            disabled={classes.length === 0}
-          >
-            {classes.length === 0 ? <option value="">暂无可用类别</option> : null}
-            {classes.map((classItem) => (
-              <option key={classItem.id} value={classItem.id}>
-                {classItem.name}
-              </option>
-            ))}
-          </select>
-          <span>{selectedClass ? `新边界框将标注为 ${selectedClass.name}` : "请先选择一个类别"}</span>
-        </section>
+        <AnnotationToolbar
+          classes={classes}
+          selectedClassId={selectedClassId}
+          selectedImageIndex={images.findIndex((image) => image.id === selectedImageId)}
+          imageCount={images.length}
+          annotationsDirty={annotationsDirty}
+          isSaving={isSavingAnnotations}
+          error={annotationError}
+          canGoPrevious={images.findIndex((image) => image.id === selectedImageId) > 0}
+          canGoNext={
+            images.findIndex((image) => image.id === selectedImageId) >= 0 &&
+            images.findIndex((image) => image.id === selectedImageId) < images.length - 1
+          }
+          showReviewLayers={Boolean(activeReview && activeReview.image.id === selectedImageId)}
+          showGroundTruth={showGroundTruthLayer}
+          showPrediction={showPredictionLayer}
+          onClassChange={setSelectedClassId}
+          onPrevious={() => {
+            const index = images.findIndex((image) => image.id === selectedImageId);
+            const previous = images[index - 1];
+            if (previous) {
+              setActiveReview(null);
+              setSelectedImageId(previous.id);
+            }
+          }}
+          onNext={() => {
+            const index = images.findIndex((image) => image.id === selectedImageId);
+            const next = images[index + 1];
+            if (next) {
+              setActiveReview(null);
+              setSelectedImageId(next.id);
+            }
+          }}
+          onSave={() => { void handleSaveAnnotations(); }}
+          onSaveAndNext={() => { void handleSaveAndNextImage(); }}
+          canCopyPrevious={images.findIndex((image) => image.id === selectedImageId) > 0}
+          canCopyNext={
+            images.findIndex((image) => image.id === selectedImageId) >= 0 &&
+            images.findIndex((image) => image.id === selectedImageId) < images.length - 1
+          }
+          onCopyPrevious={() => { void copyAdjacentAnnotations("previous"); }}
+          onCopyNext={() => { void copyAdjacentAnnotations("next"); }}
+          onGroundTruthChange={setShowGroundTruthLayer}
+          onPredictionChange={setShowPredictionLayer}
+        />
 
       <section className="workbench-grid annotation-workbench" aria-label="标注工作台">
         <aside className="panel side-panel">
@@ -2982,122 +3062,50 @@ export default function App() {
           </div>
 
           <div className="image-filter-panel" aria-label="图像筛选器">
-            <label htmlFor="filter-platform">平台</label>
+            <label htmlFor="filter-filename">文件名搜索</label>
             <input
-              id="filter-platform"
-              value={imageFilters.platform}
+              id="filter-filename"
+              type="search"
+              value={imageFilenameSearch}
               disabled={!importedDataset}
-              onChange={(event) =>
-                setImageFilters((current) => ({ ...current, platform: event.target.value }))
-              }
-              placeholder="iris"
+              onChange={(event) => setImageFilenameSearch(event.target.value)}
+              placeholder="输入文件名"
             />
             <label htmlFor="filter-label-status">标注状态</label>
             <select
               id="filter-label-status"
               value={imageFilters.label_status}
               disabled={!importedDataset}
-              onChange={(event) =>
-                setImageFilters((current) => ({
-                  ...current,
-                  label_status: event.target.value as "all" | "annotated" | "unannotated",
-                }))
-              }
+              onChange={(event) => handleImageLabelStatusChange(event.target.value as ImageFiltersState["label_status"])}
             >
               <option value="all">全部</option>
               <option value="annotated">已标注</option>
               <option value="unannotated">未标注</option>
             </select>
-            <label htmlFor="filter-class">类别</label>
-            <select
-              id="filter-class"
-              value={imageFilters.class_id}
+            <button
+              type="button"
+              className="secondary-button"
               disabled={!importedDataset}
-              onChange={(event) =>
-                setImageFilters((current) => ({ ...current, class_id: event.target.value }))
-              }
+              onClick={() => setIsImageFilterDrawerOpen(true)}
             >
-              <option value="">全部类别</option>
-              {classes.map((classItem) => (
-                <option key={classItem.id} value={classItem.id}>
-                  {classItem.name}
-                </option>
-              ))}
-            </select>
-            <label htmlFor="filter-failure-type">识别结果</label>
-            <select
-              id="filter-failure-type"
-              value={imageFilters.failure_type}
-              disabled={!importedDataset}
-              onChange={(event) =>
-                setImageFilters((current) => ({
-                  ...current,
-                  failure_type: event.target.value as typeof imageFilters.failure_type,
-                }))
-              }
-            >
-              {predictionFailureOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.value === "all" ? "全部识别结果" : formatFailureType(option.value)}
-                </option>
-              ))}
-            </select>
-            <label htmlFor="filter-edge-tag">边缘案例标签</label>
-            <input
-              id="filter-edge-tag"
-              value={imageFilters.edge_tag}
-              disabled={!importedDataset}
-              onChange={(event) =>
-                setImageFilters((current) => ({ ...current, edge_tag: event.target.value }))
-              }
-              placeholder="occluded"
-            />
-            <div className="range-row">
-              <label htmlFor="filter-altitude-min">
-                最低高度
-                <input
-                  id="filter-altitude-min"
-                  type="number"
-                  value={imageFilters.altitude_min}
-                  disabled={!importedDataset}
-                  onChange={(event) =>
-                    setImageFilters((current) => ({
-                      ...current,
-                      altitude_min: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label htmlFor="filter-altitude-max">
-                最高高度
-                <input
-                  id="filter-altitude-max"
-                  type="number"
-                  value={imageFilters.altitude_max}
-                  disabled={!importedDataset}
-                  onChange={(event) =>
-                    setImageFilters((current) => ({
-                      ...current,
-                      altitude_max: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </div>
-            <div className="filter-actions">
-              <button type="button" disabled={!importedDataset} onClick={handleApplyImageFilters}>
-                应用筛选
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={!importedDataset}
-                onClick={handleResetImageFilters}
-              >
-                重置
-              </button>
-            </div>
+              高级筛选{advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ""}
+            </button>
           </div>
+
+          {isImageFilterDrawerOpen ? (
+            <AnnotationFilterDrawer
+              filters={advancedImageFilters}
+              classes={classes}
+              failureOptions={predictionFailureOptions.map((option) => ({
+                value: option.value,
+                label: option.value === "all" ? "全部识别结果" : formatFailureType(option.value),
+              }))}
+              onChange={handleAdvancedImageFilterChange}
+              onReset={handleResetAdvancedImageFilters}
+              onApply={handleApplyImageFilters}
+              onClose={() => setIsImageFilterDrawerOpen(false)}
+            />
+          ) : null}
 
           {imageFilterError ? <div className="error-banner">{imageFilterError}</div> : null}
 
@@ -3126,10 +3134,10 @@ export default function App() {
           </div>
 
           <div className="image-list" aria-label="已导入图像">
-            {images.length === 0 ? (
+            {visibleImages.length === 0 ? (
               <p className="empty-state">导入的图像将显示在这里。</p>
             ) : (
-              images.map((image) => (
+              visibleImages.map((image) => (
                 <button
                   key={image.id}
                   type="button"
@@ -3157,17 +3165,6 @@ export default function App() {
               <h2>标注</h2>
             </div>
             <Box size={20} />
-          </div>
-
-          <div className="annotation-readiness" aria-label="标注就绪状态">
-            {annotationReadinessSteps.map((step) => (
-              <span
-                key={step.label}
-                className={step.complete ? "readiness-step complete" : "readiness-step"}
-              >
-                {step.complete ? "就绪" : "待完成"} | {step.label}
-              </span>
-            ))}
           </div>
 
           {selectedImage ? (
@@ -3215,35 +3212,6 @@ export default function App() {
               <div className="box-list">
                 <div className="box-list-heading">
                   <strong>边界框</strong>
-                  <div className="box-list-actions">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => copyAdjacentAnnotations("previous")}
-                      disabled={images.findIndex((image) => image.id === selectedImage.id) <= 0}
-                    >
-                      复制上一张
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => copyAdjacentAnnotations("next")}
-                      disabled={
-                        images.findIndex((image) => image.id === selectedImage.id) >=
-                        images.length - 1
-                      }
-                    >
-                      复制下一张
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveAnnotations}
-                      disabled={isSavingAnnotations || !selectedImage}
-                    >
-                      <Save size={16} />
-                      {isSavingAnnotations ? "保存中" : "保存标注"}
-                    </button>
-                  </div>
                 </div>
 
                 {annotationError ? <div className="error-banner">{annotationError}</div> : null}
@@ -3259,24 +3227,6 @@ export default function App() {
                           {activeReview.counts.false_negative ?? 0} | 类别混淆{" "}
                           {activeReview.counts.class_confusion ?? 0}
                         </span>
-                      </div>
-                      <div className="layer-toggles" aria-label="标注审查图层">
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={showGroundTruthLayer}
-                            onChange={(event) => setShowGroundTruthLayer(event.target.checked)}
-                          />
-                          真实标注（GT）
-                        </label>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={showPredictionLayer}
-                            onChange={(event) => setShowPredictionLayer(event.target.checked)}
-                          />
-                          模型预测（Pred）
-                        </label>
                       </div>
                     </div>
                     <div className="review-legend" aria-label="预测结果图例">

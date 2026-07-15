@@ -1056,6 +1056,7 @@ describe("App", () => {
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
     expect(screen.getByLabelText("图像筛选器")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("标注状态"), "annotated");
+    await user.click(screen.getByRole("button", { name: /高级筛选/ }));
     await user.selectOptions(screen.getByLabelText("识别结果"), "false_negative");
     fireEvent.change(screen.getByLabelText("边缘案例标签"), { target: { value: "occluded" } });
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
@@ -1112,7 +1113,7 @@ describe("App", () => {
         offset: 0,
       },
     );
-    expect(await screen.findByRole("button", { name: "保存标注" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "保存" })).toBeInTheDocument();
 
     await navigateToStep(user, "质量与版本");
     expect(screen.getByLabelText("版本类别子集")).toBeInTheDocument();
@@ -1282,13 +1283,14 @@ describe("App", () => {
       await screen.findByDisplayValue("occluded, false_negative, reviewed_prediction"),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "复制下一张" }));
+    await user.click(screen.getByRole("button", { name: "更多标注操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "复制下一张标注" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("X"), { target: { value: "0.42" } });
     await user.click(screen.getByRole("button", { name: "伪装" }));
     await user.click(screen.getByRole("button", { name: "困难负样本" }));
-    await user.click(screen.getByRole("button", { name: "保存标注" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       10,
       expect.arrayContaining([
@@ -1315,6 +1317,23 @@ describe("App", () => {
     expect(screen.queryByLabelText("标注就绪状态")).not.toBeInTheDocument();
   });
 
+  it("以核心工具栏和高级筛选抽屉组织标注操作", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+
+    expect(screen.getByLabelText("标注工具栏")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存并下一张" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("标注就绪状态")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("图像高级筛选")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /高级筛选/ }));
+    expect(screen.getByLabelText("图像高级筛选")).toBeInTheDocument();
+    expect(screen.getByLabelText("平台")).toBeInTheDocument();
+  });
+
   it("guides empty class libraries and selects a created class", async () => {
     const user = userEvent.setup();
     apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
@@ -1331,9 +1350,7 @@ describe("App", () => {
       color: "#ef4444",
     });
     expect(window.location.hash).toBe("#annotation");
-    const readiness = screen.getByLabelText("标注就绪状态");
-    expect(within(readiness).getByText("就绪 | 类别库")).toBeInTheDocument();
-    expect(within(readiness).getByText("就绪 | 已选择类别")).toBeInTheDocument();
+    expect(screen.queryByLabelText("标注就绪状态")).not.toBeInTheDocument();
     expect(screen.getByText("在图像上拖动以添加边界框。")).toBeInTheDocument();
   });
 
@@ -1476,7 +1493,7 @@ describe("App", () => {
       screen.getByText("vehicle", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "保存标注" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       11,
@@ -1520,7 +1537,7 @@ describe("App", () => {
     });
     await user.click(screen.getByRole("button", { name: "向左移动边界框 1" }));
 
-    await user.click(screen.getByRole("button", { name: "保存标注" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       11,
@@ -1568,7 +1585,7 @@ describe("App", () => {
       fireEvent(window, pointerEvent("pointerup", 875, 750));
     });
 
-    await user.click(screen.getByRole("button", { name: "保存标注" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       11,
