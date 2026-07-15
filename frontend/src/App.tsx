@@ -243,6 +243,9 @@ export default function App() {
   });
   const [imageFilterError, setImageFilterError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<DraftBox[]>([]);
+  const [annotationsDirty, setAnnotationsDirty] = useState(false);
+  const annotationsDirtyRef = useRef(false);
+  const [pendingWorkflowStep, setPendingWorkflowStep] = useState<WorkflowStep | null>(null);
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   const [isSavingAnnotations, setIsSavingAnnotations] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -404,21 +407,76 @@ export default function App() {
 
   currentStepRef.current = currentStep;
   workflowStepsRef.current = workflowSteps;
+  annotationsDirtyRef.current = annotationsDirty;
+
+  function markAnnotationsDirty() {
+    annotationsDirtyRef.current = true;
+    setAnnotationsDirty(true);
+  }
+
+  function clearAnnotationsDirty() {
+    annotationsDirtyRef.current = false;
+    setAnnotationsDirty(false);
+  }
 
   function commitWorkflowStep(stepId: WorkflowStep) {
     setNavigationNotice(null);
+    setPendingWorkflowStep(null);
     setCurrentStep(stepId);
     currentStepRef.current = stepId;
     window.history.replaceState(null, "", `#${stepId}`);
   }
 
-  function handleWorkflowNavigate(stepId: WorkflowStep) {
-    const step = workflowSteps.find((item) => item.id === stepId);
+  function requestWorkflowStep(stepId: WorkflowStep) {
+    const step = workflowStepsRef.current.find((item) => item.id === stepId);
     if (!step || step.availability === "locked") {
       setNavigationNotice(step?.lockedReason ?? "当前步骤暂不可用");
-      return;
+      window.history.replaceState(null, "", `#${currentStepRef.current}`);
+      return false;
+    }
+    if (
+      currentStepRef.current === "annotation" &&
+      stepId !== "annotation" &&
+      annotationsDirtyRef.current
+    ) {
+      setNavigationNotice(null);
+      setPendingWorkflowStep(stepId);
+      window.history.replaceState(null, "", "#annotation");
+      return false;
     }
     commitWorkflowStep(stepId);
+    return true;
+  }
+
+  function handleWorkflowNavigate(stepId: WorkflowStep) {
+    requestWorkflowStep(stepId);
+  }
+
+  function handleStayOnAnnotation() {
+    setPendingWorkflowStep(null);
+    window.history.replaceState(null, "", "#annotation");
+  }
+
+  async function handleDiscardAnnotationsAndLeave() {
+    if (!pendingWorkflowStep) {
+      return;
+    }
+
+    const targetStep = pendingWorkflowStep;
+    if (selectedImageId) {
+      try {
+        const response = await getAnnotations(selectedImageId);
+        setAnnotations(response.items.map(toDraftBox));
+        setSelectedAnnotationId(null);
+        clearAnnotationsDirty();
+      } catch (error) {
+        setAnnotationError(error instanceof Error ? error.message : "标注加载失败");
+        return;
+      }
+    } else {
+      clearAnnotationsDirty();
+    }
+    commitWorkflowStep(targetStep);
   }
 
   useEffect(() => {
@@ -429,7 +487,7 @@ export default function App() {
       const step = workflowStepsRef.current.find((item) => item.id === requestedStep);
 
       if (!isValidHash) {
-        commitWorkflowStep("dataset");
+        requestWorkflowStep("dataset");
         return;
       }
 
@@ -442,7 +500,7 @@ export default function App() {
         return;
       }
 
-      commitWorkflowStep(requestedStep);
+      requestWorkflowStep(requestedStep);
     }
 
     restoreWorkflowStepFromHash(true);
@@ -454,6 +512,7 @@ export default function App() {
   useEffect(() => {
     if (!selectedImageId) {
       setAnnotations([]);
+      clearAnnotationsDirty();
       setSelectedAnnotationId(null);
       setDragState(null);
       setActiveBoxMoveState(null);
@@ -597,6 +656,7 @@ export default function App() {
     });
     setSelectedImageId(imageResponse.items[0]?.id ?? null);
     setAnnotations([]);
+    clearAnnotationsDirty();
     setActiveReview(null);
     setQuality(qualityResponse);
     setCoverage(coverageResponse);
@@ -698,6 +758,7 @@ export default function App() {
       const response = await getAnnotations(imageId);
       setAnnotations(response.items.map(toDraftBox));
       setSelectedAnnotationId(null);
+      clearAnnotationsDirty();
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "标注加载失败");
     }
@@ -1189,6 +1250,7 @@ export default function App() {
         edge_tags: [],
       },
     ]);
+    markAnnotationsDirty();
     setSelectedAnnotationId(localId);
   }
 
@@ -1331,6 +1393,7 @@ export default function App() {
   }
 
   function updateAnnotation(localId: string, patch: Partial<DraftBox>) {
+    markAnnotationsDirty();
     setAnnotations((current) =>
       current.map((annotation) =>
         annotation.local_id === localId ? { ...annotation, ...patch } : annotation,
@@ -1364,6 +1427,7 @@ export default function App() {
   }
 
   function deleteAnnotation(localId: string) {
+    markAnnotationsDirty();
     setAnnotations((current) => current.filter((annotation) => annotation.local_id !== localId));
     if (selectedAnnotationId === localId) {
       setSelectedAnnotationId(null);
@@ -1371,6 +1435,7 @@ export default function App() {
   }
 
   function nudgeAnnotation(localId: string, deltaX: number, deltaY: number) {
+    markAnnotationsDirty();
     setSelectedAnnotationId(localId);
     setAnnotations((current) =>
       current.map((annotation) =>
@@ -1407,6 +1472,7 @@ export default function App() {
           local_id: `copy-${adjacent.id}-${Date.now()}-${index}`,
         })),
       );
+      markAnnotationsDirty();
       setSelectedAnnotationId(null);
     } catch (error) {
       setAnnotationError(error instanceof Error ? error.message : "复制标注失败");
@@ -1422,6 +1488,7 @@ export default function App() {
 
       return [...current, predictionToDraftBox(prediction, classInfo)];
     });
+    markAnnotationsDirty();
     setShowGroundTruthLayer(true);
   }
 
@@ -1430,6 +1497,7 @@ export default function App() {
       return;
     }
 
+    markAnnotationsDirty();
     setAnnotations((current) =>
       current.map((annotation) =>
         annotation.id === prediction.matched_annotation_id
@@ -1460,6 +1528,7 @@ export default function App() {
       const response = await replaceAnnotations(selectedImageId, annotations.map(toAnnotationWrite));
       const nextAnnotations = response.items.map(toDraftBox);
       setAnnotations(nextAnnotations);
+      clearAnnotationsDirty();
       setSelectedAnnotationId(
         selectedIndex >= 0
           ? nextAnnotations[selectedIndex]?.local_id ?? null
@@ -1678,6 +1747,7 @@ export default function App() {
       const existingImage = images.find((image) => image.id === review.image.id);
       setActiveReview(review);
       setAnnotations(review.annotations.map(toDraftBox));
+      clearAnnotationsDirty();
       setShowGroundTruthLayer(true);
       setShowPredictionLayer(true);
       if (!existingImage) {
@@ -1697,6 +1767,7 @@ export default function App() {
         ]);
       }
       setSelectedImageId(review.image.id);
+      commitWorkflowStep("annotation");
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "预测结果审查加载失败");
     }
@@ -1726,6 +1797,7 @@ export default function App() {
       ];
     });
     setSelectedImageId(issue.image_id);
+    commitWorkflowStep("annotation");
   }
 
   return (
@@ -1769,6 +1841,19 @@ export default function App() {
         navigationNotice={navigationNotice}
         onNavigate={handleWorkflowNavigate}
       >
+      {pendingWorkflowStep ? (
+        <div role="alert" className="navigation-notice">
+          <p>当前图像的标注尚未保存。离开后，这些修改将被放弃。</p>
+          <div>
+            <button type="button" className="secondary-button" onClick={handleStayOnAnnotation}>
+              留在标注页
+            </button>
+            <button type="button" onClick={() => void handleDiscardAnnotationsAndLeave()}>
+              放弃修改并离开
+            </button>
+          </div>
+        </div>
+      ) : null}
       {currentStep === "dataset" ? <section className="panel">
         <div className="panel-heading">
           <div>

@@ -1136,7 +1136,7 @@ describe("App", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
-    await navigateToStep(user, "图像标注");
+    expect(window.location.hash).toBe("#annotation");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
     await navigateToStep(user, "质量与版本");
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
@@ -1262,7 +1262,7 @@ describe("App", () => {
 
     await user.click(screen.getAllByRole("button", { name: "打开图像" })[0]);
 
-    await navigateToStep(user, "图像标注");
+    expect(window.location.hash).toBe("#annotation");
     expect(await screen.findByText("预测结果叠加")).toBeInTheDocument();
     expect(screen.getByLabelText("标注审查图层")).toBeInTheDocument();
     const predictionLegend = screen.getByLabelText("预测结果图例");
@@ -1360,7 +1360,7 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(window.location.hash).toBe("#classes");
 
-    window.location.hash = "#quality";
+    window.history.replaceState(null, "", "#quality");
     fireEvent(window, new Event("hashchange"));
     expect(await screen.findByRole("heading", { name: "质量审查" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#quality");
@@ -1375,6 +1375,37 @@ describe("App", () => {
     fireEvent(window, new Event("hashchange"));
     expect(await screen.findByLabelText("数据集路径")).toBeInTheDocument();
     expect(window.location.hash).toBe("#dataset");
+  });
+
+  it("离开标注页前确认未保存修改，并保护 hash 导航", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+    await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
+    expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("目标轨迹 ID"), "-edited");
+    await navigateToStep(user, "质量与版本");
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("当前图像的标注尚未保存");
+    expect(screen.getByRole("heading", { name: "标注" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#annotation");
+
+    await user.click(screen.getByRole("button", { name: "留在标注页" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    window.history.replaceState(null, "", "#quality");
+    fireEvent(window, new Event("hashchange"));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#annotation");
+
+    await user.click(screen.getByRole("button", { name: "放弃修改并离开" }));
+    expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    expect(await screen.findByRole("heading", { name: "质量审查" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#quality");
   });
 
   it("刷新到锁定步骤时回退项目与数据", async () => {
@@ -1717,7 +1748,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
-    await navigateToStep(user, "图像标注");
+    expect(window.location.hash).toBe("#annotation");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
   });
 
@@ -1768,7 +1799,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
-    await navigateToStep(user, "图像标注");
+    expect(window.location.hash).toBe("#annotation");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
   });
 
@@ -1819,7 +1850,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
-    await navigateToStep(user, "图像标注");
+    expect(window.location.hash).toBe("#annotation");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
   });
 
