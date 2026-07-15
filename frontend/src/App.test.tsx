@@ -1013,15 +1013,9 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "加载数据集" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "扫描数据集" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入数据集" })).toBeInTheDocument();
-    expect(screen.getByText("类别库")).toBeInTheDocument();
-    expect(screen.getByText("图像浏览器")).toBeInTheDocument();
-    expect(screen.getByText("标注")).toBeInTheDocument();
-    expect(screen.getByText("质量审查")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建数据集版本" })).toBeInTheDocument();
-    expect(screen.getByText("训练设置")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始训练" })).toBeInTheDocument();
-    expect(screen.getByText("训练记录")).toBeInTheDocument();
-    expect(screen.getByText("预测分析")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "工作流步骤" })).toBeInTheDocument();
+    expect(screen.queryByText("类别库")).not.toBeInTheDocument();
+    expect(screen.queryByText("图像浏览器")).not.toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("项目名称"));
     await user.type(screen.getByLabelText("项目名称"), "Drone QA Project");
@@ -1035,10 +1029,13 @@ describe("App", () => {
       "camouflage-set",
     );
 
+    await navigateToStep(user, "类别管理");
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
+    expect(screen.queryByText("图像浏览器")).not.toBeInTheDocument();
+
+    await navigateToStep(user, "图像标注");
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
     expect(screen.getByLabelText("图像筛选器")).toBeInTheDocument();
-    expect(screen.getByLabelText("版本类别子集")).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText("标注状态"), "annotated");
     await user.selectOptions(screen.getByLabelText("识别结果"), "false_negative");
     fireEvent.change(screen.getByLabelText("边缘案例标签"), { target: { value: "occluded" } });
@@ -1097,6 +1094,9 @@ describe("App", () => {
       },
     );
     expect(await screen.findByRole("button", { name: "保存标注" })).toBeInTheDocument();
+
+    await navigateToStep(user, "质量与版本");
+    expect(screen.getByLabelText("版本类别子集")).toBeInTheDocument();
     expect(await screen.findByText("可以导出")).toBeInTheDocument();
     expect(
       within(screen.getByLabelText("质量指标")).getByText("重复边界框"),
@@ -1117,12 +1117,16 @@ describe("App", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    await navigateToStep(user, "图像标注");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
+    await navigateToStep(user, "质量与版本");
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "target" }));
     await user.click(screen.getByRole("checkbox", { name: "target" }));
     await user.click(screen.getByRole("button", { name: "创建数据集版本" }));
     expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
+
+    await navigateToStep(user, "模型训练");
     expect(await screen.findByText("训练任务 #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
     expect(apiMock.getTrainingRunArtifacts).toHaveBeenCalledWith(1);
@@ -1147,6 +1151,8 @@ describe("App", () => {
         }),
       }),
     );
+    expect(screen.queryByText("实验看板")).not.toBeInTheDocument();
+    await navigateToStep(user, "评估与导出");
     expect(await screen.findByText("实验看板")).toBeInTheDocument();
     expect(apiMock.getProjectTrainingSummary).toHaveBeenCalledWith(1);
     const comparisonPanel = (await screen.findByText("任务对比")).closest(
@@ -1237,6 +1243,7 @@ describe("App", () => {
 
     await user.click(screen.getAllByRole("button", { name: "打开图像" })[0]);
 
+    await navigateToStep(user, "图像标注");
     expect(await screen.findByText("预测结果叠加")).toBeInTheDocument();
     expect(screen.getByLabelText("标注审查图层")).toBeInTheDocument();
     const predictionLegend = screen.getByLabelText("预测结果图例");
@@ -1279,16 +1286,14 @@ describe("App", () => {
   }, 15000);
 
   it("shows annotation readiness before a dataset is loaded", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
-    const readiness = screen.getByLabelText("标注就绪状态");
-
-    expect(within(readiness).getByText("待完成 | 数据集已加载")).toBeInTheDocument();
-    expect(within(readiness).getByText("待完成 | 类别库")).toBeInTheDocument();
-    expect(within(readiness).getByText("待完成 | 已选择图像")).toBeInTheDocument();
-    expect(within(readiness).getByText("待完成 | 已选择类别")).toBeInTheDocument();
-    expect(screen.getByText("请加载或导入数据集后开始标注。")).toBeInTheDocument();
+    await navigateToStep(user, "图像标注");
+    expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
+    expect(screen.getByLabelText("数据集路径")).toBeInTheDocument();
+    expect(screen.queryByLabelText("标注就绪状态")).not.toBeInTheDocument();
   });
 
   it("guides empty class libraries and selects a created class", async () => {
@@ -1297,13 +1302,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
-
-    const readiness = screen.getByLabelText("标注就绪状态");
-    expect(within(readiness).getByText("就绪 | 数据集已加载")).toBeInTheDocument();
-    expect(within(readiness).getByText("待完成 | 类别库")).toBeInTheDocument();
-    expect(within(readiness).getByText("就绪 | 已选择图像")).toBeInTheDocument();
-    expect(within(readiness).getByText("待完成 | 已选择类别")).toBeInTheDocument();
-    expect(screen.getByText("绘制边界框前，请先创建项目类别。")).toBeInTheDocument();
+    await navigateToStep(user, "类别管理");
 
     await user.type(screen.getByLabelText("类别名称"), "vehicle");
     await user.click(screen.getByRole("button", { name: "创建类别" }));
@@ -1313,6 +1312,8 @@ describe("App", () => {
       color: "#ef4444",
     });
     expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
+    await navigateToStep(user, "图像标注");
+    const readiness = screen.getByLabelText("标注就绪状态");
     expect(within(readiness).getByText("就绪 | 类别库")).toBeInTheDocument();
     expect(within(readiness).getByText("就绪 | 已选择类别")).toBeInTheDocument();
     expect(screen.getByText("在图像上拖动以添加边界框。")).toBeInTheDocument();
@@ -1323,11 +1324,8 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
-    await user.click(await screen.findByText("iris/frame002.jpg"));
-    expect(
-      await screen.findByText("target", { selector: ".box-editor-title strong" }),
-    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "编辑 target" }));
     await user.clear(screen.getByLabelText("编辑类别名称 target"));
@@ -1348,9 +1346,12 @@ describe("App", () => {
     );
     expect(screen.queryByRole("button", { name: "target" })).not.toBeInTheDocument();
 
+    await navigateToStep(user, "质量与版本");
     const versionSubset = screen.getByLabelText("版本类别子集");
     expect(within(versionSubset).getByRole("checkbox", { name: "vehicle" })).toBeChecked();
 
+    await navigateToStep(user, "图像标注");
+    await user.click(await screen.findByText("iris/frame002.jpg"));
     expect(
       screen.getByText("vehicle", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
@@ -1361,10 +1362,12 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
     await user.type(screen.getByLabelText("类别名称"), "vehicle");
     await user.click(screen.getByRole("button", { name: "创建类别" }));
     expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
 
+    await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
     expect(
       await screen.findByText("target", { selector: ".box-editor-title strong" }),
@@ -1398,6 +1401,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
     expect(
       await screen.findByText("target", { selector: ".box-editor-title strong" }),
@@ -1441,6 +1445,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
     expect(
       await screen.findByText("target", { selector: ".box-editor-title strong" }),
@@ -1500,8 +1505,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
     await flushPromises();
 
+    fireEvent.click(screen.getByRole("button", { name: /模型训练/ }));
     expect(screen.getByText("训练任务 #2")).toBeInTheDocument();
-    expect(screen.getAllByText("自动刷新中").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("自动刷新中")).toBeInTheDocument();
 
     await act(async () => {
       vi.advanceTimersByTime(2500);
@@ -1513,7 +1519,7 @@ describe("App", () => {
     expect(screen.getByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
     expect(apiMock.getPredictionJobLogs).toHaveBeenCalledWith(2);
-    expect(screen.getAllByText("空闲")).toHaveLength(2);
+    expect(screen.getByText("空闲")).toBeInTheDocument();
   });
 
   it("loads a historical run config and reruns it on the latest version", async () => {
@@ -1521,6 +1527,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "模型训练");
     expect(await screen.findByText("训练任务 #1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "加载配置" }));
@@ -1572,8 +1579,6 @@ describe("App", () => {
 
     expect(apiMock.importDataset).not.toHaveBeenCalled();
     expect(apiMock.listImages).toHaveBeenCalledWith(1, {}, { limit: 50, offset: 0 });
-    expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
-    expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
     const summaries = await screen.findAllByText((_, element) =>
       Boolean(
         element?.classList.contains("summary-line") &&
@@ -1581,6 +1586,10 @@ describe("App", () => {
       ),
     );
     expect(summaries).toHaveLength(1);
+    await navigateToStep(user, "类别管理");
+    expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
+    await navigateToStep(user, "图像标注");
+    expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
   });
 
   it("surfaces duplicate box quality issues", async () => {
@@ -1615,6 +1624,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "质量与版本");
 
     expect(await screen.findByText("需要处理")).toBeInTheDocument();
     expect(
@@ -1639,6 +1649,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    await navigateToStep(user, "图像标注");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
   });
 
@@ -1673,6 +1684,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "质量与版本");
 
     expect(await screen.findByText("可以导出")).toBeInTheDocument();
     expect(
@@ -1688,6 +1700,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    await navigateToStep(user, "图像标注");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
   });
 
@@ -1722,6 +1735,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "质量与版本");
 
     expect(await screen.findByText("可以导出")).toBeInTheDocument();
     expect(
@@ -1737,6 +1751,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
+    await navigateToStep(user, "图像标注");
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
   });
 
@@ -1753,6 +1768,7 @@ describe("App", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "质量与版本");
     expect(
       within(screen.getByLabelText("质量指标")).getByText("缺少图像尺寸"),
     ).toBeInTheDocument();
@@ -1777,6 +1793,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
     await flushPromises();
 
+    fireEvent.click(screen.getByRole("button", { name: /模型训练/ }));
     expect(screen.getByText("训练任务 #2")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "取消训练" }));
@@ -1787,6 +1804,16 @@ describe("App", () => {
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
   });
 });
+
+async function navigateToStep(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+) {
+  const workflowNavigation = screen.getByRole("navigation", { name: "工作流步骤" });
+  await user.click(
+    within(workflowNavigation).getByRole("button", { name: new RegExp(label) }),
+  );
+}
 
 async function flushPromises() {
   await act(async () => {

@@ -394,6 +394,36 @@ th {
   align-items: start;
 }
 
+.class-management-panel {
+  max-width: 760px;
+}
+
+.annotation-class-selector {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 320px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.annotation-class-selector label {
+  color: #62727e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.annotation-class-selector span {
+  min-width: 0;
+  overflow: hidden;
+  color: #62727e;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-workbench {
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+}
+
 .prep-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
@@ -1784,8 +1814,13 @@ input[type="color"] {
   .topbar,
   .input-row,
   .import-name-grid,
-  .saved-dataset-row {
+  .saved-dataset-row,
+  .annotation-class-selector {
     grid-template-columns: 1fr;
+  }
+
+  .annotation-class-selector span {
+    white-space: normal;
   }
 
   .topbar {

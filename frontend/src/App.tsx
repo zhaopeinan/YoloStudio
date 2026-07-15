@@ -98,6 +98,8 @@ import {
   formatQualityIssueType,
   formatRunStatus,
 } from "./localization";
+import { WorkflowShell } from "./WorkflowShell";
+import { buildWorkflowSteps, type WorkflowStep } from "./workflow";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
 const defaultProjectName = "YOLO 目标检测项目";
@@ -197,6 +199,8 @@ type BoxResizeState = {
 };
 
 export default function App() {
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>("dataset");
+  const [navigationNotice, setNavigationNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [datasetPath, setDatasetPath] = useState(defaultDatasetPath);
@@ -382,6 +386,29 @@ export default function App() {
         : "所选范围内的全部图像",
     [activePredictionImageFilters, classById],
   );
+  const workflowSteps = useMemo(
+    () =>
+      buildWorkflowSteps({
+        hasDataset: Boolean(importedDataset),
+        classCount: classes.length,
+        annotatedImageCount: quality?.annotated_image_count ?? 0,
+        versionCount: versions.length,
+        runCount: runs.length,
+        predictionJobCount: predictionJobs.length,
+        exportCount: exports.length,
+      }),
+    [classes.length, exports.length, importedDataset, predictionJobs.length, quality, runs.length, versions.length],
+  );
+
+  function handleWorkflowNavigate(stepId: WorkflowStep) {
+    const step = workflowSteps.find((item) => item.id === stepId);
+    if (!step || step.availability === "locked") {
+      setNavigationNotice(step?.lockedReason ?? "当前步骤暂不可用");
+      return;
+    }
+    setNavigationNotice(null);
+    setCurrentStep(stepId);
+  }
 
   useEffect(() => {
     if (!selectedImageId) {
@@ -1689,7 +1716,13 @@ export default function App() {
 
       {healthError ? <div className="error-banner">{healthError}</div> : null}
 
-      <section className="panel">
+      <WorkflowShell
+        currentStep={currentStep}
+        steps={workflowSteps}
+        navigationNotice={navigationNotice}
+        onNavigate={handleWorkflowNavigate}
+      >
+      {currentStep === "dataset" ? <section className="panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">数据集导入</p>
@@ -1833,9 +1866,9 @@ export default function App() {
             {importedDataset.project_name} / {importedDataset.dataset_name}
           </div>
         ) : null}
-      </section>
+      </section> : null}
 
-      <section className="prep-grid" aria-label="训练准备情况">
+      {currentStep === "quality" ? <section className="prep-grid" aria-label="训练准备情况">
         <section className="panel prep-panel">
           <div className="panel-heading compact-heading">
             <div>
@@ -2044,9 +2077,9 @@ export default function App() {
             )}
           </div>
         </section>
-      </section>
+      </section> : null}
 
-      <section className="training-grid" aria-label="训练设置与训练记录">
+      {currentStep === "training" ? <section className="training-grid" aria-label="训练设置与训练记录">
         <section className="panel training-panel">
           <div className="panel-heading compact-heading">
             <div>
@@ -2299,14 +2332,10 @@ export default function App() {
             )}
           </div>
 
-          {summaryError ? <div className="error-banner">{summaryError}</div> : null}
-          <ExperimentDashboard
-            summary={runSummary}
-            projectSummary={projectExperimentSummary}
-          />
         </section>
-      </section>
+      </section> : null}
 
+      {currentStep === "evaluation" ? <>
       <section className="panel prediction-panel" aria-label="预测分析">
         <div className="panel-heading compact-heading">
           <div>
@@ -2608,6 +2637,12 @@ export default function App() {
         </div>
       </section>
 
+      {summaryError ? <div className="error-banner">{summaryError}</div> : null}
+      <ExperimentDashboard
+        summary={runSummary}
+        projectSummary={projectExperimentSummary}
+      />
+
       <section className="panel export-panel" aria-label="模型导出">
         <div className="panel-heading compact-heading">
           <div>
@@ -2679,9 +2714,9 @@ export default function App() {
           )}
         </div>
       </section>
+      </> : null}
 
-      <section className="workbench-grid" aria-label="标注工作台">
-        <aside className="panel side-panel">
+      {currentStep === "classes" ? <section className="panel class-management-panel" aria-label="类别管理">
           <div className="panel-heading compact-heading">
             <div>
               <p className="eyebrow">项目标签</p>
@@ -2783,8 +2818,28 @@ export default function App() {
               )
             )}
           </div>
-        </aside>
+      </section> : null}
 
+      {currentStep === "annotation" ? <>
+        <section className="panel annotation-class-selector" aria-label="当前标注类别">
+          <label htmlFor="annotation-active-class">当前绘制类别</label>
+          <select
+            id="annotation-active-class"
+            value={selectedClassId ?? ""}
+            onChange={(event) => setSelectedClassId(Number(event.target.value))}
+            disabled={classes.length === 0}
+          >
+            {classes.length === 0 ? <option value="">暂无可用类别</option> : null}
+            {classes.map((classItem) => (
+              <option key={classItem.id} value={classItem.id}>
+                {classItem.name}
+              </option>
+            ))}
+          </select>
+          <span>{selectedClass ? `新边界框将标注为 ${selectedClass.name}` : "请先选择一个类别"}</span>
+        </section>
+
+      <section className="workbench-grid annotation-workbench" aria-label="标注工作台">
         <aside className="panel side-panel">
           <div className="panel-heading compact-heading">
             <div>
@@ -3359,6 +3414,8 @@ export default function App() {
           )}
         </section>
       </section>
+      </> : null}
+      </WorkflowShell>
     </main>
   );
 }
