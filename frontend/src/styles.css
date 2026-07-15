@@ -1679,18 +1679,13 @@ input[type="color"] {
 
 .workflow-shell {
   display: grid;
-  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
   align-items: start;
 }
 
-.workflow-sidebar {
-  position: sticky;
-  top: 16px;
-  min-width: 0;
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+.workflow-shell-top {
+  width: 100%;
 }
 
 .workflow-navigation {
@@ -1698,11 +1693,21 @@ input[type="color"] {
   gap: 6px;
 }
 
+.workflow-navigation-horizontal {
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+  overscroll-behavior-x: contain;
+}
+
 .workflow-step {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
   width: 100%;
-  min-height: 68px;
+  min-width: 150px;
+  min-height: 52px;
+  border-bottom: 3px solid transparent;
   padding: 10px;
   color: #172026;
   text-align: left;
@@ -1715,7 +1720,7 @@ input[type="color"] {
 
 .workflow-step.active {
   background: #dff6f2;
-  box-shadow: inset 3px 0 #1f6f78;
+  border-bottom-color: #1f6f78;
 }
 
 .workflow-step[data-availability="locked"] {
@@ -1736,21 +1741,11 @@ input[type="color"] {
   font-weight: 800;
 }
 
-.workflow-step-copy,
-.workflow-step-copy strong,
-.workflow-step-copy small {
-  display: block;
+.workflow-step strong {
   min-width: 0;
-}
-
-.workflow-step-copy small {
-  margin-top: 3px;
   overflow: hidden;
-  color: #62727e;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.35;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflow-step-status {
@@ -1848,11 +1843,7 @@ input[type="color"] {
 }
 
 @media (max-width: 820px) {
-  .workflow-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .workflow-sidebar {
+  .workflow-navigation-horizontal {
     display: none;
   }
 

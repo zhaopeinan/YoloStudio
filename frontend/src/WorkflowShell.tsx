@@ -36,31 +36,29 @@ export function WorkflowShell({
     : null;
 
   return (
-    <div className="workflow-shell">
-      <aside className="workflow-sidebar">
-        <nav aria-label="工作流步骤" className="workflow-navigation">
-          {steps.map((step) => (
-            <button
-              type="button"
-              key={step.id}
-              className={step.id === currentStep ? "workflow-step active" : "workflow-step"}
-              aria-current={step.id === currentStep ? "step" : undefined}
-              data-availability={step.availability}
-              title={step.lockedReason}
-              onClick={() => onNavigate(step.id)}
-            >
-              <span className="workflow-step-number">{step.number}</span>
-              <span className="workflow-step-copy">
-                <strong>{step.label}</strong>
-                <small>{step.description}</small>
-              </span>
-              <span className={`workflow-step-status ${step.status}`}>
-                {formatStepStatus(step)}
-              </span>
-            </button>
-          ))}
-        </nav>
-      </aside>
+    <div className="workflow-shell workflow-shell-top" data-testid="workflow-shell">
+      <nav
+        aria-label="工作流步骤"
+        className="workflow-navigation workflow-navigation-horizontal"
+      >
+        {steps.map((step) => (
+          <button
+            type="button"
+            key={step.id}
+            className={step.id === currentStep ? "workflow-step active" : "workflow-step"}
+            aria-current={step.id === currentStep ? "step" : undefined}
+            data-availability={step.availability}
+            title={step.lockedReason}
+            onClick={() => onNavigate(step.id)}
+          >
+            <span className="workflow-step-number">{step.number}</span>
+            <strong>{step.label}</strong>
+            <span className={`workflow-step-status ${step.status}`}>
+              {formatStepStatus(step)}
+            </span>
+          </button>
+        ))}
+      </nav>
 
       <div className="workflow-mobile-picker">
         <label htmlFor="workflow-step-select">当前步骤</label>

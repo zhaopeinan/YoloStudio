@@ -28,7 +28,14 @@ describe("WorkflowShell", () => {
       </WorkflowShell>,
     );
 
-    expect(screen.getByRole("navigation", { name: "工作流步骤" })).toBeInTheDocument();
+    const shell = screen.getByTestId("workflow-shell");
+    expect(shell).toHaveClass("workflow-shell-top");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+
+    const navigation = screen.getByRole("navigation", { name: "工作流步骤" });
+    expect(navigation).toHaveClass("workflow-navigation-horizontal");
+    expect(navigation).toHaveTextContent("项目与数据");
+    expect(navigation).not.toHaveTextContent("扫描、导入或加载数据集");
     expect(screen.getByRole("button", { name: /1 项目与数据/ })).toHaveAttribute(
       "aria-current",
       "step",
