@@ -1726,6 +1726,12 @@ describe("App", () => {
     });
 
     const resizeHandle = await screen.findByTestId("resize-handle-annotation-101-bottom-right");
+    const annotationFrame = screen.getByTestId("annotation-frame-annotation-101");
+    expect(annotationFrame).toHaveAttribute("stroke-width", "3");
+    expect(resizeHandle).toHaveAttribute("width", "0.014");
+    expect(resizeHandle).toHaveAttribute("fill", "#ef4444");
+    expect(resizeHandle).toHaveAttribute("stroke", "#ffffff");
+    expect(resizeHandle).toHaveAttribute("stroke-width", "2");
     fireEvent(resizeHandle, pointerEvent("pointerdown", 725, 650));
     await act(async () => {
       fireEvent(window, pointerEvent("pointermove", 875, 750));

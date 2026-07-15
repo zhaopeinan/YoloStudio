@@ -3918,13 +3918,14 @@ function BoxRect(props: {
         onPointerDown={(event) => onPointerDown(event, annotation)}
       />
       <rect
+        data-testid={`annotation-frame-${annotation.local_id}`}
         x={left}
         y={top}
         width={annotation.width}
         height={annotation.height}
         fill={selected ? "rgba(31, 111, 120, 0.08)" : "transparent"}
         stroke={color}
-        strokeWidth={selected ? 0.007 : 0.004}
+        strokeWidth={selected ? 3 : 2}
         vectorEffect="non-scaling-stroke"
         onPointerDown={(event) => onPointerDown(event, annotation)}
       />
@@ -3933,14 +3934,14 @@ function BoxRect(props: {
             <rect
               key={handle.handle}
               className={`resize-handle ${handle.handle}`}
-              x={handle.x - 0.012}
-              y={handle.y - 0.012}
-              width={0.024}
-              height={0.024}
-              rx={0.004}
-              fill="#ffffff"
-              stroke={color}
-              strokeWidth={0.004}
+              x={handle.x - 0.007}
+              y={handle.y - 0.007}
+              width={0.014}
+              height={0.014}
+              rx={0.002}
+              fill={color}
+              stroke="#ffffff"
+              strokeWidth={2}
               vectorEffect="non-scaling-stroke"
               role="button"
               aria-label={`调整边界框 ${annotation.class_name ?? annotation.class_id} ${formatResizeHandle(
