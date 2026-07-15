@@ -1402,7 +1402,7 @@ describe("App", () => {
     expect(wheel.defaultPrevented).toBe(true);
     expect(screen.getByRole("button", { name: "当前倍率 73%" })).toBeInTheDocument();
     expect(screen.getByTestId("annotation-transform-layer").getAttribute("style")).toContain(
-      "scale(0.726",
+      "--canvas-zoom: 0.726",
     );
   });
 
@@ -1423,7 +1423,9 @@ describe("App", () => {
 
     expect(viewport).toHaveClass("is-panning");
     expect(screen.getByTestId("annotation-transform-layer")).toHaveStyle({
-      transform: "translate(-110px, -120px) scale(1)",
+      "--canvas-pan-x": "-110px",
+      "--canvas-pan-y": "-120px",
+      "--canvas-zoom": "1",
     });
     expect(screen.getByText("已保存", { selector: ".annotation-save-status" })).toBeInTheDocument();
 
@@ -1587,6 +1589,46 @@ describe("App", () => {
 
     expect(screen.getByDisplayValue("copy-source-mobile")).toBeInTheDocument();
     expect(screen.getByLabelText("边界框检查器")).toHaveClass("active");
+  });
+
+  it("移动端保留全部缩放控件并使用滚动画布浏览放大图像", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(max-width: 820px)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "图像标注");
+
+    const toolbar = screen.getByRole("toolbar", { name: "画布缩放" });
+    expect(within(toolbar).getByRole("button", { name: "缩小图像" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: /当前倍率/ })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "放大图像" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "显示原始大小" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: "适应窗口" })).toBeInTheDocument();
+
+    const viewport = screen.getByLabelText("标注画布视口");
+    fireEvent.keyDown(window, { key: " ", code: "Space" });
+    expect(viewport).not.toHaveClass("is-space-ready");
+
+    await user.click(within(toolbar).getByRole("button", { name: "显示原始大小" }));
+    expect(screen.getByTestId("annotation-canvas-scroll-content")).toHaveStyle({
+      width: "640px",
+      height: "480px",
+    });
+
+    const wheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
+    fireEvent(viewport, wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(screen.queryByText(/双指/)).not.toBeInTheDocument();
   });
 
   it("guides empty class libraries and selects a created class", async () => {

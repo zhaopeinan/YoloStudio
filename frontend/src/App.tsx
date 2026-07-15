@@ -22,7 +22,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import type { FormEvent, PointerEvent, ReactNode } from "react";
+import type { CSSProperties, FormEvent, PointerEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Annotation,
@@ -123,6 +123,13 @@ const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset
 const defaultProjectName = "YOLO 目标检测项目";
 const defaultDatasetName = "image_dataset";
 const defaultClassColor = "#ef4444";
+const compactAnnotationViewportQuery = "(max-width: 820px)";
+
+function usesCompactAnnotationViewport(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(compactAnnotationViewportQuery).matches;
+}
 const imagePageSize = 50;
 const monitorRefreshMs = 2500;
 const activeRunStatuses = new Set(["queued", "preparing", "running"]);
@@ -460,6 +467,9 @@ export default function App() {
     }
 
     const handleWheel = (event: WheelEvent) => {
+      if (usesCompactAnnotationViewport()) {
+        return;
+      }
       event.preventDefault();
       if (
         event.deltaY === 0 ||
@@ -512,7 +522,11 @@ export default function App() {
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if ((event.key !== " " && event.code !== "Space") || isEditableEventTarget(event.target)) {
+      if (
+        usesCompactAnnotationViewport()
+        || (event.key !== " " && event.code !== "Space")
+        || isEditableEventTarget(event.target)
+      ) {
         return;
       }
       event.preventDefault();
@@ -1442,7 +1456,7 @@ export default function App() {
   }
 
   function handleViewportPointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (!isSpacePressedRef.current || event.button !== 0) {
+    if (usesCompactAnnotationViewport() || !isSpacePressedRef.current || event.button !== 0) {
       return;
     }
     event.preventDefault();
@@ -1460,6 +1474,9 @@ export default function App() {
   }
 
   function handleViewportPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (usesCompactAnnotationViewport()) {
+      return;
+    }
     const activePan = canvasPanStateRef.current;
     if (!activePan || activePan.pointerId !== event.pointerId) {
       return;
@@ -3517,66 +3534,90 @@ export default function App() {
               onPointerCancel={handleViewportPointerCancel}
             >
               <div
-                className="annotation-transform-layer"
-                data-testid="annotation-transform-layer"
+                className="annotation-canvas-scroll-content"
+                data-testid="annotation-canvas-scroll-content"
                 style={{
-                  width: annotationImageSize.width,
-                  height: annotationImageSize.height,
-                  transform: `translate(${canvasViewport.panX}px, ${canvasViewport.panY}px) scale(${canvasViewport.zoom})`,
-                  transformOrigin: "0 0",
+                  width: Math.max(
+                    annotationImageSize.width * canvasViewport.zoom,
+                    annotationViewportSize.width,
+                  ),
+                  height: Math.max(
+                    annotationImageSize.height * canvasViewport.zoom,
+                    annotationViewportSize.height,
+                  ),
                 }}
               >
-                <img
-                  src={selectedImage.image_url}
-                  alt={selectedImage.relative_path}
-                  width={annotationImageSize.width || undefined}
-                  height={annotationImageSize.height || undefined}
-                  onLoad={(event) => {
-                    if (!selectedImage.width || !selectedImage.height) {
-                      setAnnotationImageSize({
-                        width: event.currentTarget.naturalWidth,
-                        height: event.currentTarget.naturalHeight,
-                      });
-                    }
-                  }}
-                />
-                <svg
-                  ref={annotationCanvasRef}
-                  aria-label="标注画布"
-                  className={selectedClass ? "annotation-overlay drawable" : "annotation-overlay"}
-                  viewBox="0 0 1 1"
-                  preserveAspectRatio="none"
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  onPointerCancel={handlePointerCancel}
+                <div
+                  className="annotation-transform-layer"
+                  data-testid="annotation-transform-layer"
+                  style={{
+                    width: annotationImageSize.width,
+                    height: annotationImageSize.height,
+                    "--canvas-pan-x": `${canvasViewport.panX}px`,
+                    "--canvas-pan-y": `${canvasViewport.panY}px`,
+                    "--canvas-mobile-pan-x": `${Math.max(
+                      0,
+                      (annotationViewportSize.width - annotationImageSize.width * canvasViewport.zoom) / 2,
+                    )}px`,
+                    "--canvas-mobile-pan-y": `${Math.max(
+                      0,
+                      (annotationViewportSize.height - annotationImageSize.height * canvasViewport.zoom) / 2,
+                    )}px`,
+                    "--canvas-zoom": canvasViewport.zoom,
+                  } as CSSProperties}
                 >
-                  {showGroundTruthLayer
-                    ? annotations.map((annotation) => (
-                        <BoxRect
-                          key={annotation.local_id}
-                          annotation={annotation}
-                          color={resolveClassColor(annotation, classById)}
-                          selected={annotation.local_id === selectedAnnotationId}
-                          onPointerDown={beginMoveAnnotation}
-                          onResizePointerDown={beginResizeAnnotation}
-                          zoom={canvasViewport.zoom}
-                          imageWidth={annotationImageSize.width}
-                          imageHeight={annotationImageSize.height}
-                        />
-                      ))
-                    : null}
-                  {activeReview && activeReview.image.id === selectedImage.id && showPredictionLayer
-                    ? activeReview.predictions.map((prediction) => (
-                        <PredictionRect
-                          key={prediction.id}
-                          prediction={prediction}
-                          className={classById.get(prediction.class_id)?.name}
-                        />
-                      ))
-                    : null}
-                  {dragState ? <DragRect dragState={dragState} color={selectedClass?.color} /> : null}
-                </svg>
+                  <img
+                    src={selectedImage.image_url}
+                    alt={selectedImage.relative_path}
+                    width={annotationImageSize.width || undefined}
+                    height={annotationImageSize.height || undefined}
+                    onLoad={(event) => {
+                      if (!selectedImage.width || !selectedImage.height) {
+                        setAnnotationImageSize({
+                          width: event.currentTarget.naturalWidth,
+                          height: event.currentTarget.naturalHeight,
+                        });
+                      }
+                    }}
+                  />
+                  <svg
+                    ref={annotationCanvasRef}
+                    aria-label="标注画布"
+                    className={selectedClass ? "annotation-overlay drawable" : "annotation-overlay"}
+                    viewBox="0 0 1 1"
+                    preserveAspectRatio="none"
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerCancel}
+                  >
+                    {showGroundTruthLayer
+                      ? annotations.map((annotation) => (
+                          <BoxRect
+                            key={annotation.local_id}
+                            annotation={annotation}
+                            color={resolveClassColor(annotation, classById)}
+                            selected={annotation.local_id === selectedAnnotationId}
+                            onPointerDown={beginMoveAnnotation}
+                            onResizePointerDown={beginResizeAnnotation}
+                            zoom={canvasViewport.zoom}
+                            imageWidth={annotationImageSize.width}
+                            imageHeight={annotationImageSize.height}
+                          />
+                        ))
+                      : null}
+                    {activeReview && activeReview.image.id === selectedImage.id && showPredictionLayer
+                      ? activeReview.predictions.map((prediction) => (
+                          <PredictionRect
+                            key={prediction.id}
+                            prediction={prediction}
+                            className={classById.get(prediction.class_id)?.name}
+                          />
+                        ))
+                      : null}
+                    {dragState ? <DragRect dragState={dragState} color={selectedClass?.color} /> : null}
+                  </svg>
+                </div>
               </div>
             </div>
           ) : (

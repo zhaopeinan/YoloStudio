@@ -674,6 +674,13 @@ th {
   overscroll-behavior: contain;
 }
 
+.annotation-canvas-scroll-content {
+  position: absolute;
+  inset: 0;
+  min-width: 100%;
+  min-height: 100%;
+}
+
 .annotation-canvas-viewport.is-space-ready,
 .annotation-canvas-viewport.is-space-ready .annotation-overlay,
 .annotation-canvas-viewport.is-space-ready .annotation-box,
@@ -692,6 +699,8 @@ th {
   position: absolute;
   top: 0;
   left: 0;
+  transform: translate(var(--canvas-pan-x), var(--canvas-pan-y)) scale(var(--canvas-zoom));
+  transform-origin: 0 0;
   will-change: transform;
 }
 
@@ -2372,10 +2381,15 @@ input[type="color"] {
 
   .annotation-pane-heading-main {
     align-items: flex-start;
+    flex-wrap: wrap;
   }
 
   .annotation-canvas-toolbar {
-    grid-template-columns: 32px 50px 32px 32px 32px;
+    grid-template-columns: 34px 54px 34px 34px 34px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .annotation-canvas-toolbar .icon-button,
@@ -2384,7 +2398,28 @@ input[type="color"] {
   }
 
   .canvas-zoom-value {
-    width: 50px;
+    width: 54px;
+  }
+
+  .annotation-canvas-viewport {
+    height: clamp(320px, calc(100vh - 360px), 520px);
+    min-height: 320px;
+    max-height: 520px;
+    overflow: auto;
+    touch-action: pan-x pan-y;
+  }
+
+  .annotation-canvas-viewport .annotation-overlay {
+    touch-action: pan-x pan-y;
+  }
+
+  .annotation-canvas-scroll-content {
+    position: relative;
+    inset: auto;
+  }
+
+  .annotation-transform-layer {
+    transform: translate(var(--canvas-mobile-pan-x), var(--canvas-mobile-pan-y)) scale(var(--canvas-zoom));
   }
 
   .navigation-notice {
