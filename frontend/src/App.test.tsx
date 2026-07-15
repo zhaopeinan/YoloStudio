@@ -1002,28 +1002,28 @@ describe("App", () => {
 
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
     expect(await screen.findByText("cpu")).toBeInTheDocument();
-    expect(screen.getByLabelText("Dataset path")).toBeInTheDocument();
-    expect(screen.getByLabelText("Project name")).toBeInTheDocument();
-    expect(screen.getByLabelText("Dataset name")).toBeInTheDocument();
-    expect(await screen.findByLabelText("Saved dataset")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Load Dataset" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Scan Dataset" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import Dataset" })).toBeInTheDocument();
-    expect(screen.getByText("Class Library")).toBeInTheDocument();
-    expect(screen.getByText("Image Browser")).toBeInTheDocument();
-    expect(screen.getByText("Annotation")).toBeInTheDocument();
-    expect(screen.getByText("Quality Review")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create Dataset Version" })).toBeInTheDocument();
+    expect(screen.getByLabelText("数据集路径")).toBeInTheDocument();
+    expect(screen.getByLabelText("项目名称")).toBeInTheDocument();
+    expect(screen.getByLabelText("数据集名称")).toBeInTheDocument();
+    expect(await screen.findByLabelText("已保存数据集")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "加载数据集" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "扫描数据集" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入数据集" })).toBeInTheDocument();
+    expect(screen.getByText("类别库")).toBeInTheDocument();
+    expect(screen.getByText("图像浏览器")).toBeInTheDocument();
+    expect(screen.getByText("标注")).toBeInTheDocument();
+    expect(screen.getByText("质量审查")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建数据集版本" })).toBeInTheDocument();
     expect(screen.getByText("Training Setup")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start Training Run" })).toBeInTheDocument();
     expect(screen.getByText("Run History")).toBeInTheDocument();
     expect(screen.getByText("Prediction Analysis")).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText("Project name"));
-    await user.type(screen.getByLabelText("Project name"), "Drone QA Project");
-    await user.clear(screen.getByLabelText("Dataset name"));
-    await user.type(screen.getByLabelText("Dataset name"), "camouflage-set");
-    await user.click(screen.getByRole("button", { name: "Import Dataset" }));
+    await user.clear(screen.getByLabelText("项目名称"));
+    await user.type(screen.getByLabelText("项目名称"), "Drone QA Project");
+    await user.clear(screen.getByLabelText("数据集名称"));
+    await user.type(screen.getByLabelText("数据集名称"), "camouflage-set");
+    await user.click(screen.getByRole("button", { name: "导入数据集" }));
 
     expect(apiMock.importDataset).toHaveBeenCalledWith(
       "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip",
@@ -1033,12 +1033,12 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     expect(await screen.findByText("iris/frame001.jpg")).toBeInTheDocument();
-    expect(screen.getByLabelText("Image filters")).toBeInTheDocument();
-    expect(screen.getByLabelText("Version class subset")).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Label status"), "annotated");
-    await user.selectOptions(screen.getByLabelText("Failure"), "false_negative");
-    fireEvent.change(screen.getByLabelText("Edge tag"), { target: { value: "occluded" } });
-    await user.click(screen.getByRole("button", { name: "Apply Filters" }));
+    expect(screen.getByLabelText("图像筛选器")).toBeInTheDocument();
+    expect(screen.getByLabelText("版本类别子集")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("标注状态"), "annotated");
+    await user.selectOptions(screen.getByLabelText("识别结果"), "false_negative");
+    fireEvent.change(screen.getByLabelText("边缘案例标签"), { target: { value: "occluded" } });
+    await user.click(screen.getByRole("button", { name: "应用筛选" }));
     expect(apiMock.listImages).toHaveBeenLastCalledWith(
       1,
       {
@@ -1055,8 +1055,8 @@ describe("App", () => {
         offset: 0,
       },
     );
-    expect(screen.getByLabelText("Image pagination")).toHaveTextContent("1-2 of 51");
-    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByLabelText("图像分页")).toHaveTextContent("第 1-2 张，共 51 张");
+    await user.click(screen.getByRole("button", { name: "下一页" }));
     expect(apiMock.listImages).toHaveBeenLastCalledWith(
       1,
       {
@@ -1074,8 +1074,8 @@ describe("App", () => {
       },
     );
     expect(await screen.findByText("iris/frame051.jpg")).toBeInTheDocument();
-    expect(screen.getByLabelText("Image pagination")).toHaveTextContent("51-51 of 51");
-    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByLabelText("图像分页")).toHaveTextContent("第 51-51 张，共 51 张");
+    await user.click(screen.getByRole("button", { name: "上一页" }));
     expect(apiMock.listImages).toHaveBeenLastCalledWith(
       1,
       {
@@ -1092,30 +1092,32 @@ describe("App", () => {
         offset: 0,
       },
     );
-    expect(await screen.findByRole("button", { name: "Save Annotations" })).toBeInTheDocument();
-    expect(await screen.findByText("Ready to export")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "保存标注" })).toBeInTheDocument();
+    expect(await screen.findByText("可以导出")).toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("Quality metrics")).getByText("Duplicate boxes"),
+      within(screen.getByLabelText("质量指标")).getByText("重复边界框"),
     ).toBeInTheDocument();
     expect(apiMock.getDatasetCoverage).toHaveBeenCalledWith(1);
-    const coveragePanel = screen.getByLabelText("Dataset coverage");
-    expect(within(coveragePanel).getByText("Dataset Coverage")).toBeInTheDocument();
-    expect(within(coveragePanel).getByText("1/2 images | 1 boxes")).toBeInTheDocument();
-    expect(within(coveragePanel).getByText("Platforms")).toBeInTheDocument();
-    expect(within(coveragePanel).getByText("Altitude")).toBeInTheDocument();
-    expect(within(coveragePanel).getByText("Edge Tags")).toBeInTheDocument();
+    const coveragePanel = screen.getByLabelText("数据集覆盖情况");
+    expect(within(coveragePanel).getByText("数据集覆盖情况")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("1/2 张图像 | 1 个边界框")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("平台")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("高度")).toBeInTheDocument();
+    expect(within(coveragePanel).getByText("边缘案例标签")).toBeInTheDocument();
     expect(within(coveragePanel).getByText("iris")).toBeInTheDocument();
     expect(within(coveragePanel).getByText("20-50m")).toBeInTheDocument();
     expect(within(coveragePanel).getByText("vehicle")).toBeInTheDocument();
-    expect(within(coveragePanel).getByText("occluded")).toBeInTheDocument();
-    expect(await screen.findByText("tiny box")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Open Issue" }));
+    expect(within(coveragePanel).getByText("遮挡")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("质量问题样本")).getByText("极小边界框"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "打开问题图像" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
     expect(await screen.findByText("smoke-export")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "target" }));
     await user.click(screen.getByRole("checkbox", { name: "target" }));
-    await user.click(screen.getByRole("button", { name: "Create Dataset Version" }));
+    await user.click(screen.getByRole("button", { name: "创建数据集版本" }));
     expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
     expect(await screen.findByText("metrics/mAP50(B): 0.420")).toBeInTheDocument();
@@ -1186,7 +1188,7 @@ describe("App", () => {
     await user.click(screen.getByRole("checkbox", { name: "Use image filters" }));
     expect(
       await screen.findByText(
-        "Image filters: annotated | tag occluded | false negative",
+        "图像筛选：已标注 | 标签 遮挡 | 漏报",
       ),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Run Prediction Analysis" }));
@@ -1232,30 +1234,32 @@ describe("App", () => {
 
     await user.click(screen.getAllByRole("button", { name: "Open Image" })[0]);
 
-    expect(await screen.findByText("Prediction overlay")).toBeInTheDocument();
-    expect(screen.getByLabelText("Annotation review layers")).toBeInTheDocument();
-    expect(screen.getByLabelText("Prediction legend")).toBeInTheDocument();
-    expect(screen.getByText("false positive")).toBeInTheDocument();
-    expect(screen.getByText("false negative")).toBeInTheDocument();
-    expect(screen.getByText("class confusion")).toBeInTheDocument();
+    expect(await screen.findByText("预测结果叠加")).toBeInTheDocument();
+    expect(screen.getByLabelText("标注审查图层")).toBeInTheDocument();
+    const predictionLegend = screen.getByLabelText("预测结果图例");
+    expect(within(predictionLegend).getByText("误报")).toBeInTheDocument();
+    expect(within(predictionLegend).getByText("漏报")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("预测修正操作")).getByText("类别混淆"),
+    ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Add as annotation" }));
+    await user.click(screen.getByRole("button", { name: "添加为标注" }));
 
     expect(screen.getByDisplayValue("false_positive, reviewed_prediction")).toBeInTheDocument();
 
-    await user.click(screen.getAllByRole("button", { name: "Mark reviewed" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "标记为已审查" })[0]);
 
     expect(
       await screen.findByDisplayValue("occluded, false_negative, reviewed_prediction"),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Copy Next" }));
+    await user.click(screen.getByRole("button", { name: "复制下一张" }));
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("X"), { target: { value: "0.42" } });
-    await user.click(screen.getByRole("button", { name: "camouflaged" }));
-    await user.click(screen.getByRole("button", { name: "hard negative" }));
-    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+    await user.click(screen.getByRole("button", { name: "伪装" }));
+    await user.click(screen.getByRole("button", { name: "困难负样本" }));
+    await user.click(screen.getByRole("button", { name: "保存标注" }));
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       10,
       expect.arrayContaining([
@@ -1275,13 +1279,13 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
-    const readiness = screen.getByLabelText("Annotation readiness");
+    const readiness = screen.getByLabelText("标注就绪状态");
 
-    expect(within(readiness).getByText("Needed | Dataset loaded")).toBeInTheDocument();
-    expect(within(readiness).getByText("Needed | Class library")).toBeInTheDocument();
-    expect(within(readiness).getByText("Needed | Image selected")).toBeInTheDocument();
-    expect(within(readiness).getByText("Needed | Class selected")).toBeInTheDocument();
-    expect(screen.getByText("Load or import a dataset to begin annotation.")).toBeInTheDocument();
+    expect(within(readiness).getByText("待完成 | 数据集已加载")).toBeInTheDocument();
+    expect(within(readiness).getByText("待完成 | 类别库")).toBeInTheDocument();
+    expect(within(readiness).getByText("待完成 | 已选择图像")).toBeInTheDocument();
+    expect(within(readiness).getByText("待完成 | 已选择类别")).toBeInTheDocument();
+    expect(screen.getByText("请加载或导入数据集后开始标注。")).toBeInTheDocument();
   });
 
   it("guides empty class libraries and selects a created class", async () => {
@@ -1289,59 +1293,59 @@ describe("App", () => {
     apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
 
-    const readiness = screen.getByLabelText("Annotation readiness");
-    expect(within(readiness).getByText("Ready | Dataset loaded")).toBeInTheDocument();
-    expect(within(readiness).getByText("Needed | Class library")).toBeInTheDocument();
-    expect(within(readiness).getByText("Ready | Image selected")).toBeInTheDocument();
-    expect(within(readiness).getByText("Needed | Class selected")).toBeInTheDocument();
-    expect(screen.getByText("Create a project class before drawing boxes.")).toBeInTheDocument();
+    const readiness = screen.getByLabelText("标注就绪状态");
+    expect(within(readiness).getByText("就绪 | 数据集已加载")).toBeInTheDocument();
+    expect(within(readiness).getByText("待完成 | 类别库")).toBeInTheDocument();
+    expect(within(readiness).getByText("就绪 | 已选择图像")).toBeInTheDocument();
+    expect(within(readiness).getByText("待完成 | 已选择类别")).toBeInTheDocument();
+    expect(screen.getByText("绘制边界框前，请先创建项目类别。")).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Class name"), "vehicle");
-    await user.click(screen.getByRole("button", { name: "Create Class" }));
+    await user.type(screen.getByLabelText("类别名称"), "vehicle");
+    await user.click(screen.getByRole("button", { name: "创建类别" }));
 
     expect(apiMock.createClass).toHaveBeenCalledWith(1, {
       name: "vehicle",
       color: "#ef4444",
     });
     expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
-    expect(within(readiness).getByText("Ready | Class library")).toBeInTheDocument();
-    expect(within(readiness).getByText("Ready | Class selected")).toBeInTheDocument();
-    expect(screen.getByText("Drag over the image to add a bounding box.")).toBeInTheDocument();
+    expect(within(readiness).getByText("就绪 | 类别库")).toBeInTheDocument();
+    expect(within(readiness).getByText("就绪 | 已选择类别")).toBeInTheDocument();
+    expect(screen.getByText("在图像上拖动以添加边界框。")).toBeInTheDocument();
   });
 
   it("edits a project class and refreshes dependent annotation labels", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(await screen.findByRole("button", { name: "target" })).toBeInTheDocument();
     await user.click(await screen.findByText("iris/frame002.jpg"));
     expect(
       await screen.findByText("target", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Edit target" }));
-    await user.clear(screen.getByLabelText("Edit class name target"));
-    await user.type(screen.getByLabelText("Edit class name target"), "vehicle");
-    fireEvent.change(screen.getByLabelText("Edit class color target"), {
+    await user.click(screen.getByRole("button", { name: "编辑 target" }));
+    await user.clear(screen.getByLabelText("编辑类别名称 target"));
+    await user.type(screen.getByLabelText("编辑类别名称 target"), "vehicle");
+    fireEvent.change(screen.getByLabelText("编辑类别颜色 target"), {
       target: { value: "#22c55e" },
     });
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
 
     expect(apiMock.updateClass).toHaveBeenCalledWith(1, 1, {
       name: "vehicle",
       color: "#22c55e",
     });
 
-    const classLibrary = screen.getByLabelText("Available classes");
+    const classLibrary = screen.getByLabelText("可用类别");
     expect(await within(classLibrary).findByRole("button", { name: "vehicle" })).toHaveClass(
       "selected",
     );
     expect(screen.queryByRole("button", { name: "target" })).not.toBeInTheDocument();
 
-    const versionSubset = screen.getByLabelText("Version class subset");
+    const versionSubset = screen.getByLabelText("版本类别子集");
     expect(within(versionSubset).getByRole("checkbox", { name: "vehicle" })).toBeChecked();
 
     expect(
@@ -1353,9 +1357,9 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
-    await user.type(screen.getByLabelText("Class name"), "vehicle");
-    await user.click(screen.getByRole("button", { name: "Create Class" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await user.type(screen.getByLabelText("类别名称"), "vehicle");
+    await user.click(screen.getByRole("button", { name: "创建类别" }));
     expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
 
     await user.click(await screen.findByText("iris/frame002.jpg"));
@@ -1363,12 +1367,12 @@ describe("App", () => {
       await screen.findByText("target", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Box 1 class"), "2");
+    await user.selectOptions(screen.getByLabelText("边界框 1 类别"), "2");
     expect(
       screen.getByText("vehicle", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+    await user.click(screen.getByRole("button", { name: "保存标注" }));
 
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       11,
@@ -1390,13 +1394,13 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await user.click(await screen.findByText("iris/frame002.jpg"));
     expect(
       await screen.findByText("target", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
 
-    const canvas = screen.getByLabelText("Annotation canvas");
+    const canvas = screen.getByLabelText("标注画布");
     Object.defineProperty(canvas, "getBoundingClientRect", {
       configurable: true,
       value: () => ({ left: 0, top: 0, width: 1000, height: 1000, right: 1000, bottom: 1000 }),
@@ -1409,9 +1413,9 @@ describe("App", () => {
       fireEvent(window, pointerEvent("pointermove", 650, 520));
       fireEvent(window, pointerEvent("pointerup", 650, 520));
     });
-    await user.click(screen.getByRole("button", { name: "Move box 1 left" }));
+    await user.click(screen.getByRole("button", { name: "向左移动边界框 1" }));
 
-    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+    await user.click(screen.getByRole("button", { name: "保存标注" }));
 
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       11,
@@ -1433,13 +1437,13 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await user.click(await screen.findByText("iris/frame002.jpg"));
     expect(
       await screen.findByText("target", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
 
-    const canvas = screen.getByLabelText("Annotation canvas");
+    const canvas = screen.getByLabelText("标注画布");
     Object.defineProperty(canvas, "getBoundingClientRect", {
       configurable: true,
       value: () => ({ left: 0, top: 0, width: 1000, height: 1000, right: 1000, bottom: 1000 }),
@@ -1458,7 +1462,7 @@ describe("App", () => {
       fireEvent(window, pointerEvent("pointerup", 875, 750));
     });
 
-    await user.click(screen.getByRole("button", { name: "Save Annotations" }));
+    await user.click(screen.getByRole("button", { name: "保存标注" }));
 
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(
       11,
@@ -1490,7 +1494,7 @@ describe("App", () => {
     await flushPromises();
     vi.useFakeTimers();
 
-    fireEvent.click(screen.getByRole("button", { name: "Import Dataset" }));
+    fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
     await flushPromises();
 
     expect(screen.getByText("Run #2")).toBeInTheDocument();
@@ -1513,7 +1517,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(await screen.findByText("Run #1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Load Config" }));
@@ -1559,9 +1563,9 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByLabelText("Saved dataset")).toBeInTheDocument();
+    expect(await screen.findByLabelText("已保存数据集")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Load Dataset" }));
+    await user.click(screen.getByRole("button", { name: "加载数据集" }));
 
     expect(apiMock.importDataset).not.toHaveBeenCalled();
     expect(apiMock.listImages).toHaveBeenCalledWith(1, {}, { limit: 50, offset: 0 });
@@ -1607,27 +1611,29 @@ describe("App", () => {
     }));
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
 
-    expect(await screen.findByText("Needs attention")).toBeInTheDocument();
+    expect(await screen.findByText("需要处理")).toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("Quality metrics")).getByText("Duplicate boxes"),
+      within(screen.getByLabelText("质量指标")).getByText("重复边界框"),
     ).toBeInTheDocument();
-    expect(await screen.findByText("duplicate box")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("质量问题样本")).getByText("重复边界框"),
+    ).toBeInTheDocument();
     expect(
       await screen.findByText("Box duplicates annotation 1 on the same image and class."),
     ).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Quality issue type"), "duplicate_box");
+    await user.selectOptions(screen.getByLabelText("质量问题类型"), "duplicate_box");
 
     expect(apiMock.listQualityIssues).toHaveBeenLastCalledWith(1, "duplicate_box");
 
-    await user.click(screen.getByRole("button", { name: "Apply Auto Tags" }));
+    await user.click(screen.getByRole("button", { name: "应用自动标签" }));
 
     expect(apiMock.applyQualityTags).toHaveBeenCalledWith(1, "duplicate_box");
-    expect(await screen.findByText("1 tags applied to 1 annotations")).toBeInTheDocument();
+    expect(await screen.findByText("已向 1 个标注应用 1 个标签")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open Issue" }));
+    await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
@@ -1663,18 +1669,20 @@ describe("App", () => {
     }));
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
 
-    expect(await screen.findByText("Ready to export")).toBeInTheDocument();
+    expect(await screen.findByText("可以导出")).toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("Quality metrics")).getByText("Missing metadata"),
+      within(screen.getByLabelText("质量指标")).getByText("缺少元数据"),
     ).toBeInTheDocument();
-    expect(await screen.findByText("missing metadata")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("质量问题样本")).getByText("缺少元数据"),
+    ).toBeInTheDocument();
     expect(
       await screen.findByText("Image is missing source metadata row, altitude, timestamp."),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open Issue" }));
+    await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
@@ -1710,18 +1718,20 @@ describe("App", () => {
     }));
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
 
-    expect(await screen.findByText("Ready to export")).toBeInTheDocument();
+    expect(await screen.findByText("可以导出")).toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("Quality metrics")).getByText("Missing dimensions"),
+      within(screen.getByLabelText("质量指标")).getByText("缺少图像尺寸"),
     ).toBeInTheDocument();
-    expect(await screen.findByText("missing image dimensions")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("质量问题样本")).getByText("缺少图像尺寸"),
+    ).toBeInTheDocument();
     expect(
       await screen.findByText("Image width or height could not be read."),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open Issue" }));
+    await user.click(screen.getByRole("button", { name: "打开问题图像" }));
 
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
     expect(await screen.findByDisplayValue("copy-source")).toBeInTheDocument();
@@ -1739,15 +1749,15 @@ describe("App", () => {
 
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Load Dataset" }));
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(
-      within(screen.getByLabelText("Quality metrics")).getByText("Missing dimensions"),
+      within(screen.getByLabelText("质量指标")).getByText("缺少图像尺寸"),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Refresh Dimensions" }));
+    await user.click(screen.getByRole("button", { name: "刷新图像尺寸" }));
 
     expect(apiMock.refreshImageDimensions).toHaveBeenCalledWith(1);
-    expect(await screen.findByText("2 scanned, 1 updated, 0 still missing")).toBeInTheDocument();
+    expect(await screen.findByText("已扫描 2 张，已更新 1 张，仍缺失 0 张")).toBeInTheDocument();
     expect(apiMock.listImages).toHaveBeenCalledTimes(2);
     expect(apiMock.getQuality).toHaveBeenCalledTimes(2);
   });
@@ -1761,7 +1771,7 @@ describe("App", () => {
     render(<App />);
     await flushPromises();
 
-    fireEvent.click(screen.getByRole("button", { name: "Import Dataset" }));
+    fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
     await flushPromises();
 
     expect(screen.getByText("Run #2")).toBeInTheDocument();

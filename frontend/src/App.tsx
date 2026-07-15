@@ -92,6 +92,11 @@ import {
   scanDataset,
   updateClass,
 } from "./api";
+import {
+  formatEdgeTag,
+  formatFailureType,
+  formatQualityIssueType,
+} from "./localization";
 
 const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
 const defaultProjectName = "YOLO Trainer Project";
@@ -102,14 +107,14 @@ const monitorRefreshMs = 2500;
 const activeRunStatuses = new Set(["queued", "preparing", "running"]);
 const activePredictionStatuses = new Set(["queued", "running"]);
 const qualityIssueTypeOptions: Array<{ value: DatasetQualityIssueType; label: string }> = [
-  { value: "all", label: "All issues" },
-  { value: "unannotated_image", label: "Unannotated images" },
-  { value: "tiny_box", label: "Tiny boxes" },
-  { value: "invalid_box", label: "Invalid boxes" },
-  { value: "duplicate_box", label: "Duplicate boxes" },
-  { value: "missing_metadata", label: "Missing metadata" },
-  { value: "missing_image_dimensions", label: "Missing dimensions" },
-  { value: "unknown_class_reference", label: "Unknown class references" },
+  { value: "all", label: "全部问题" },
+  { value: "unannotated_image", label: "未标注图像" },
+  { value: "tiny_box", label: "极小边界框" },
+  { value: "invalid_box", label: "无效边界框" },
+  { value: "duplicate_box", label: "重复边界框" },
+  { value: "missing_metadata", label: "缺少元数据" },
+  { value: "missing_image_dimensions", label: "缺少图像尺寸" },
+  { value: "unknown_class_reference", label: "未知类别引用" },
 ];
 const predictionFailureOptions: Array<{ value: PredictionFailureType; label: string }> = [
   { value: "all", label: "All" },
@@ -321,10 +326,10 @@ export default function App() {
 
   const annotationReadinessSteps = useMemo(
     () => [
-      { label: "Dataset loaded", complete: Boolean(importedDataset) },
-      { label: "Class library", complete: classes.length > 0 },
-      { label: "Image selected", complete: Boolean(selectedImage) },
-      { label: "Class selected", complete: Boolean(selectedClass) },
+      { label: "数据集已加载", complete: Boolean(importedDataset) },
+      { label: "类别库", complete: classes.length > 0 },
+      { label: "已选择图像", complete: Boolean(selectedImage) },
+      { label: "已选择类别", complete: Boolean(selectedClass) },
     ],
     [classes.length, importedDataset, selectedClass, selectedImage],
   );
@@ -445,7 +450,7 @@ export default function App() {
     try {
       setScan(await scanDataset(datasetPath));
     } catch (error) {
-      setScanError(error instanceof Error ? error.message : "Dataset scan failed");
+      setScanError(error instanceof Error ? error.message : "数据集扫描失败");
     } finally {
       setIsScanning(false);
     }
@@ -467,7 +472,7 @@ export default function App() {
       await loadDatasetWorkspace(imported);
       await refreshProjects();
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Dataset import failed");
+      setImportError(error instanceof Error ? error.message : "数据集导入失败");
     } finally {
       setIsImporting(false);
     }
@@ -485,7 +490,7 @@ export default function App() {
         return firstSavedDatasetValue(response.items);
       });
     } catch (error) {
-      setSavedDatasetError(error instanceof Error ? error.message : "Saved datasets failed to load");
+      setSavedDatasetError(error instanceof Error ? error.message : "已保存数据集加载失败");
     }
   }
 
@@ -563,7 +568,7 @@ export default function App() {
         groups: [],
       });
     } catch (error) {
-      setSavedDatasetError(error instanceof Error ? error.message : "Dataset load failed");
+      setSavedDatasetError(error instanceof Error ? error.message : "数据集加载失败");
     } finally {
       setIsLoadingSavedDataset(false);
     }
@@ -594,7 +599,7 @@ export default function App() {
         await refreshRunArtifacts(runResponse.items.map((run) => run.id));
       }
     } catch (error) {
-      setQualityError(error instanceof Error ? error.message : "Quality refresh failed");
+      setQualityError(error instanceof Error ? error.message : "质量信息刷新失败");
     } finally {
       setIsLoadingQuality(false);
     }
@@ -613,7 +618,7 @@ export default function App() {
       const response = await listQualityIssues(datasetId, issueType);
       setQualityIssues(response.items);
     } catch (error) {
-      setQualityError(error instanceof Error ? error.message : "Quality issues failed to load");
+      setQualityError(error instanceof Error ? error.message : "质量问题加载失败");
     }
   }
 
@@ -623,7 +628,7 @@ export default function App() {
       setAnnotations(response.items.map(toDraftBox));
       setSelectedAnnotationId(null);
     } catch (error) {
-      setAnnotationError(error instanceof Error ? error.message : "Annotations failed to load");
+      setAnnotationError(error instanceof Error ? error.message : "标注加载失败");
     }
   }
 
@@ -654,7 +659,7 @@ export default function App() {
         return response.items[0]?.id ?? null;
       });
     } catch (error) {
-      setImageFilterError(error instanceof Error ? error.message : "Image filters failed");
+      setImageFilterError(error instanceof Error ? error.message : "图像筛选失败");
     }
   }
 
@@ -676,7 +681,7 @@ export default function App() {
         selectedImageId ? loadAnnotations(selectedImageId) : Promise.resolve(),
       ]);
     } catch (error) {
-      setQualityError(error instanceof Error ? error.message : "Quality tags failed to apply");
+      setQualityError(error instanceof Error ? error.message : "自动质量标签应用失败");
     } finally {
       setIsApplyingQualityTags(false);
     }
@@ -698,7 +703,7 @@ export default function App() {
         refreshTrainingPrep(importedDataset.dataset_id),
       ]);
     } catch (error) {
-      setQualityError(error instanceof Error ? error.message : "Dimension refresh failed");
+      setQualityError(error instanceof Error ? error.message : "图像尺寸刷新失败");
     } finally {
       setIsRefreshingDimensions(false);
     }
@@ -972,7 +977,7 @@ export default function App() {
       setClassName("");
       void refreshTrainingPrep();
     } catch (error) {
-      setClassError(error instanceof Error ? error.message : "Class creation failed");
+      setClassError(error instanceof Error ? error.message : "类别创建失败");
     } finally {
       setIsCreatingClass(false);
     }
@@ -1010,7 +1015,7 @@ export default function App() {
       cancelEditClass();
       void refreshTrainingPrep();
     } catch (error) {
-      setClassError(error instanceof Error ? error.message : "Class update failed");
+      setClassError(error instanceof Error ? error.message : "类别更新失败");
     } finally {
       setIsUpdatingClass(false);
     }
@@ -1329,7 +1334,7 @@ export default function App() {
       );
       setSelectedAnnotationId(null);
     } catch (error) {
-      setAnnotationError(error instanceof Error ? error.message : "Copy annotations failed");
+      setAnnotationError(error instanceof Error ? error.message : "复制标注失败");
     }
   }
 
@@ -1394,7 +1399,7 @@ export default function App() {
       );
       void refreshTrainingPrep();
     } catch (error) {
-      setAnnotationError(error instanceof Error ? error.message : "Saving annotations failed");
+      setAnnotationError(error instanceof Error ? error.message : "保存标注失败");
     } finally {
       setIsSavingAnnotations(false);
     }
@@ -1418,7 +1423,7 @@ export default function App() {
       setVersionName("");
       await refreshTrainingPrep(importedDataset.dataset_id);
     } catch (error) {
-      setVersionError(error instanceof Error ? error.message : "Version export failed");
+      setVersionError(error instanceof Error ? error.message : "数据集版本导出失败");
     } finally {
       setIsCreatingVersion(false);
     }
@@ -1650,32 +1655,32 @@ export default function App() {
 
   return (
     <main className="app-shell">
-      <section className="topbar" aria-label="Application status">
+      <section className="topbar" aria-label="应用状态">
         <div>
-          <p className="eyebrow">Local Detection Workbench</p>
+          <p className="eyebrow">本地目标检测工作台</p>
           <h1>YOLO Trainer</h1>
         </div>
         <div className="device-pill">
           <Activity size={16} />
-          <span>{health?.devices.selected ?? "connecting"}</span>
+          <span>{health?.devices.selected ?? "连接中"}</span>
         </div>
       </section>
 
-      <section className="status-grid" aria-label="Backend details">
+      <section className="status-grid" aria-label="后端详情">
         <StatusTile
           icon={<HardDrive size={20} />}
-          label="Workspace"
-          value={health?.workspace_root ?? "Waiting for backend"}
+          label="工作空间"
+          value={health?.workspace_root ?? "等待后端响应"}
         />
         <StatusTile
           icon={<Database size={20} />}
-          label="Database"
-          value={health?.database_path ?? "SQLite will initialize on startup"}
+          label="数据库"
+          value={health?.database_path ?? "SQLite 将在启动时初始化"}
         />
         <StatusTile
           icon={<Activity size={20} />}
-          label="Devices"
-          value={health ? `${health.devices.available.length} available` : "Detecting"}
+          label="计算设备"
+          value={health ? `${health.devices.available.length} 个可用` : "检测中"}
         />
       </section>
 
@@ -1684,14 +1689,14 @@ export default function App() {
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Dataset Intake</p>
-            <h2>Scan Local Dataset</h2>
+            <p className="eyebrow">数据集导入</p>
+            <h2>扫描本地数据集</h2>
           </div>
           <FolderSearch size={22} />
         </div>
 
         <form className="scan-form" onSubmit={handleScan}>
-          <label htmlFor="dataset-path">Dataset path</label>
+          <label htmlFor="dataset-path">数据集路径</label>
           <div className="input-row">
             <input
               id="dataset-path"
@@ -1699,7 +1704,7 @@ export default function App() {
               onChange={(event) => setDatasetPath(event.target.value)}
             />
             <button type="submit" disabled={isScanning || datasetPath.trim().length === 0}>
-              {isScanning ? "Scanning" : "Scan Dataset"}
+              {isScanning ? "扫描中" : "扫描数据集"}
             </button>
             <button
               type="button"
@@ -1713,12 +1718,12 @@ export default function App() {
               onClick={handleImportDataset}
             >
               <Upload size={16} />
-              {isImporting ? "Importing" : "Import Dataset"}
+              {isImporting ? "导入中" : "导入数据集"}
             </button>
           </div>
           <div className="import-name-grid">
             <label htmlFor="project-name">
-              Project name
+              项目名称
               <input
                 id="project-name"
                 value={projectName}
@@ -1726,7 +1731,7 @@ export default function App() {
               />
             </label>
             <label htmlFor="dataset-name">
-              Dataset name
+              数据集名称
               <input
                 id="dataset-name"
                 value={datasetName}
@@ -1734,22 +1739,22 @@ export default function App() {
               />
             </label>
           </div>
-          <div className="saved-dataset-row" aria-label="Saved dataset loader">
+          <div className="saved-dataset-row" aria-label="已保存数据集加载器">
             <label htmlFor="saved-dataset">
-              Saved dataset
+              已保存数据集
               <select
                 id="saved-dataset"
                 value={selectedSavedDataset}
                 onChange={(event) => setSelectedSavedDataset(event.target.value)}
               >
-                {projects.length === 0 ? <option value="">No saved datasets</option> : null}
+                {projects.length === 0 ? <option value="">暂无已保存数据集</option> : null}
                 {projects.flatMap((project) =>
                   project.datasets.map((dataset) => (
                     <option
                       key={`${project.id}-${dataset.id}`}
                       value={savedDatasetValue(project.id, dataset.id)}
                     >
-                      {project.name} / {dataset.name} ({dataset.image_count} images)
+                      {project.name} / {dataset.name}（{dataset.image_count} 张图像）
                     </option>
                   )),
                 )}
@@ -1761,7 +1766,7 @@ export default function App() {
               disabled={!selectedSavedDataset || isLoadingSavedDataset}
               onClick={handleLoadSavedDataset}
             >
-              {isLoadingSavedDataset ? "Loading" : "Load Dataset"}
+              {isLoadingSavedDataset ? "加载中" : "加载数据集"}
             </button>
           </div>
         </form>
@@ -1773,20 +1778,20 @@ export default function App() {
         {scan ? (
           <div className="scan-results">
             <div className="metrics-row">
-              <Metric label="Images" value={scan.total_images.toLocaleString()} />
-              <Metric label="Metadata rows" value={scan.total_metadata_rows.toLocaleString()} />
-              <Metric label="YOLO labels" value={scan.total_yolo_labels.toLocaleString()} />
-              <Metric label="Class config" value={scan.has_data_yaml ? "Found" : "Missing"} />
+              <Metric label="图像" value={scan.total_images.toLocaleString()} />
+              <Metric label="元数据行" value={scan.total_metadata_rows.toLocaleString()} />
+              <Metric label="YOLO 标签" value={scan.total_yolo_labels.toLocaleString()} />
+              <Metric label="类别配置" value={scan.has_data_yaml ? "已找到" : "缺失"} />
             </div>
 
             <div className="group-table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Group</th>
-                    <th>Images</th>
-                    <th>Metadata</th>
-                    <th>Altitude</th>
+                    <th>分组</th>
+                    <th>图像数</th>
+                    <th>元数据</th>
+                    <th>高度</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1803,7 +1808,7 @@ export default function App() {
             </div>
 
             <div className="summary-line">
-              Grouped images: {totalGroupImages.toLocaleString()} from {scan.archive_name}
+              已分组图像：{totalGroupImages.toLocaleString()} 张，来源：{scan.archive_name}
             </div>
 
             {scan.warnings.length > 0 ? (
@@ -1821,18 +1826,18 @@ export default function App() {
 
         {importedDataset ? (
           <div className="summary-line">
-            Imported {importedDataset.image_count.toLocaleString()} images into{" "}
+            已将 {importedDataset.image_count.toLocaleString()} 张图像导入{" "}
             {importedDataset.project_name} / {importedDataset.dataset_name}
           </div>
         ) : null}
       </section>
 
-      <section className="prep-grid" aria-label="Training readiness">
+      <section className="prep-grid" aria-label="训练准备情况">
         <section className="panel prep-panel">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">Training Prep</p>
-              <h2>Quality Review</h2>
+              <p className="eyebrow">训练准备</p>
+              <h2>质量审查</h2>
             </div>
             <div className="panel-heading-actions">
               {importedDataset ? (
@@ -1843,7 +1848,7 @@ export default function App() {
                   disabled={isRefreshingDimensions}
                 >
                   <ImageIcon size={16} />
-                  {isRefreshingDimensions ? "Refreshing" : "Refresh Dimensions"}
+                  {isRefreshingDimensions ? "刷新中" : "刷新图像尺寸"}
                 </button>
               ) : null}
               {quality?.ready_for_training ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
@@ -1853,28 +1858,28 @@ export default function App() {
           {quality ? (
             <>
               <div className="readiness-row">
-                <strong>{quality.ready_for_training ? "Ready to export" : "Needs attention"}</strong>
-                <span>{isLoadingQuality ? "Refreshing" : `${quality.annotation_count} boxes`}</span>
+                <strong>{quality.ready_for_training ? "可以导出" : "需要处理"}</strong>
+                <span>{isLoadingQuality ? "刷新中" : `${quality.annotation_count} 个边界框`}</span>
               </div>
 
-              <div className="metrics-row quality-metrics" aria-label="Quality metrics">
-                <Metric label="Images" value={quality.image_count.toLocaleString()} />
+              <div className="metrics-row quality-metrics" aria-label="质量指标">
+                <Metric label="图像" value={quality.image_count.toLocaleString()} />
                 <Metric
-                  label="Annotated"
+                  label="已标注"
                   value={quality.annotated_image_count.toLocaleString()}
                 />
-                <Metric label="Classes" value={quality.class_count.toLocaleString()} />
-                <Metric label="Tiny boxes" value={quality.tiny_box_count.toLocaleString()} />
+                <Metric label="类别" value={quality.class_count.toLocaleString()} />
+                <Metric label="极小边界框" value={quality.tiny_box_count.toLocaleString()} />
                 <Metric
-                  label="Duplicate boxes"
+                  label="重复边界框"
                   value={quality.duplicate_box_count.toLocaleString()}
                 />
                 <Metric
-                  label="Missing metadata"
+                  label="缺少元数据"
                   value={quality.missing_metadata_count.toLocaleString()}
                 />
                 <Metric
-                  label="Missing dimensions"
+                  label="缺少图像尺寸"
                   value={quality.missing_image_dimensions_count.toLocaleString()}
                 />
               </div>
@@ -1886,7 +1891,7 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <p className="empty-state">No blocking quality issues detected.</p>
+                <p className="empty-state">未检测到阻塞训练的质量问题。</p>
               )}
 
               {dimensionRefresh ? (
@@ -1896,7 +1901,7 @@ export default function App() {
               <DatasetCoveragePanel coverage={coverage} />
 
               <label className="quality-issue-filter" htmlFor="quality-issue-type">
-                Quality issue type
+                质量问题类型
                 <select
                   id="quality-issue-type"
                   value={qualityIssueType}
@@ -1922,7 +1927,7 @@ export default function App() {
                   onClick={handleApplyQualityTags}
                 >
                   <Tags size={16} />
-                  {isApplyingQualityTags ? "Applying Tags" : "Apply Auto Tags"}
+                  {isApplyingQualityTags ? "正在应用标签" : "应用自动标签"}
                 </button>
                 {qualityTagSummary ? (
                   <span className="summary-line">{formatQualityTagSummary(qualityTagSummary)}</span>
@@ -1930,14 +1935,14 @@ export default function App() {
               </div>
 
               {qualityIssues.length > 0 ? (
-                <div className="quality-issue-list" aria-label="Quality issue samples">
+                <div className="quality-issue-list" aria-label="质量问题样本">
                   {qualityIssues.map((issue) => (
                     <div
                       className={`quality-issue-row ${issue.severity}`}
                       key={`${issue.issue_type}-${issue.image_id}-${issue.annotation_id ?? "image"}`}
                     >
                       <div>
-                        <strong>{formatIssueType(issue.issue_type)}</strong>
+                        <strong>{formatQualityIssueType(issue.issue_type)}</strong>
                         <span>{issue.message}</span>
                         <small>
                           {issue.image_path}
@@ -1949,17 +1954,17 @@ export default function App() {
                         className="secondary-button"
                         onClick={() => openQualityIssue(issue)}
                       >
-                        Open Issue
+                        打开问题图像
                       </button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="empty-state">No samples for the selected quality issue type.</p>
+                <p className="empty-state">所选质量问题类型暂无样本。</p>
               )}
             </>
           ) : (
-            <p className="empty-state">Import a dataset to compute label quality and export readiness.</p>
+            <p className="empty-state">导入数据集后可计算标注质量和导出准备情况。</p>
           )}
 
           {qualityError ? <div className="error-banner">{qualityError}</div> : null}
@@ -1968,14 +1973,14 @@ export default function App() {
         <section className="panel prep-panel">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">Frozen Dataset</p>
-              <h2>Version Export</h2>
+              <p className="eyebrow">冻结数据集</p>
+              <h2>版本导出</h2>
             </div>
             <PackageCheck size={20} />
           </div>
 
           <div className="version-controls">
-            <label htmlFor="version-name">Version name</label>
+            <label htmlFor="version-name">版本名称</label>
             <div className="input-row">
               <input
                 id="version-name"
@@ -1989,14 +1994,14 @@ export default function App() {
                 disabled={!importedDataset || !quality?.ready_for_training || isCreatingVersion}
                 onClick={handleCreateDatasetVersion}
               >
-                {isCreatingVersion ? "Exporting" : "Create Dataset Version"}
+                {isCreatingVersion ? "导出中" : "创建数据集版本"}
               </button>
             </div>
-            <div className="subset-controls" aria-label="Version class subset">
-              <span>Class subset</span>
+            <div className="subset-controls" aria-label="版本类别子集">
+              <span>类别子集</span>
               <div className="subset-grid">
                 {classes.length === 0 ? (
-                  <p className="empty-state">Create project classes before freezing a subset.</p>
+                  <p className="empty-state">冻结类别子集前，请先创建项目类别。</p>
                 ) : (
                   classes.map((classItem) => (
                     <label key={classItem.id}>
@@ -2017,9 +2022,9 @@ export default function App() {
 
           {versionError ? <div className="error-banner">{versionError}</div> : null}
 
-          <div className="version-list" aria-label="Dataset versions">
+          <div className="version-list" aria-label="数据集版本">
             {versions.length === 0 ? (
-              <p className="empty-state">Exported YOLO versions will appear here.</p>
+              <p className="empty-state">导出的 YOLO 数据集版本将显示在这里。</p>
             ) : (
               versions.map((version) => (
                 <div className="version-row" key={version.id}>
@@ -2672,18 +2677,18 @@ export default function App() {
         </div>
       </section>
 
-      <section className="workbench-grid" aria-label="Annotation workbench">
+      <section className="workbench-grid" aria-label="标注工作台">
         <aside className="panel side-panel">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">Project Labels</p>
-              <h2>Class Library</h2>
+              <p className="eyebrow">项目标签</p>
+              <h2>类别库</h2>
             </div>
             <Library size={20} />
           </div>
 
           <form className="class-form" onSubmit={handleCreateClass}>
-            <label htmlFor="class-name">Class name</label>
+            <label htmlFor="class-name">类别名称</label>
             <input
               id="class-name"
               value={className}
@@ -2691,7 +2696,7 @@ export default function App() {
               onChange={(event) => setClassName(event.target.value)}
               placeholder="target"
             />
-            <label htmlFor="class-color">Class color</label>
+            <label htmlFor="class-color">类别颜色</label>
             <div className="color-row">
               <input
                 id="class-color"
@@ -2699,22 +2704,22 @@ export default function App() {
                 value={classColor}
                 disabled={!importedDataset}
                 onChange={(event) => setClassColor(event.target.value)}
-                aria-label="Class color"
+                aria-label="类别颜色"
               />
               <button
                 type="submit"
                 disabled={!importedDataset || isCreatingClass || className.trim().length === 0}
               >
-                Create Class
+                创建类别
               </button>
             </div>
           </form>
 
           {classError ? <div className="error-banner">{classError}</div> : null}
 
-          <div className="class-list" aria-label="Available classes">
+          <div className="class-list" aria-label="可用类别">
             {classes.length === 0 ? (
-              <p className="empty-state">Import a dataset, then create a class to draw boxes.</p>
+              <p className="empty-state">请先导入数据集，再创建类别以绘制边界框。</p>
             ) : (
               classes.map((classItem) =>
                 editingClassId === classItem.id ? (
@@ -2722,13 +2727,13 @@ export default function App() {
                     <input
                       value={classEditName}
                       onChange={(event) => setClassEditName(event.target.value)}
-                      aria-label={`Edit class name ${classItem.name}`}
+                      aria-label={`编辑类别名称 ${classItem.name}`}
                     />
                     <input
                       type="color"
                       value={classEditColor}
                       onChange={(event) => setClassEditColor(event.target.value)}
-                      aria-label={`Edit class color ${classItem.name}`}
+                      aria-label={`编辑类别颜色 ${classItem.name}`}
                     />
                     <div className="class-row-actions">
                       <button
@@ -2737,7 +2742,7 @@ export default function App() {
                         disabled={isUpdatingClass || classEditName.trim().length === 0}
                       >
                         <Save size={15} />
-                        Save
+                        保存
                       </button>
                       <button
                         type="button"
@@ -2745,7 +2750,7 @@ export default function App() {
                         onClick={cancelEditClass}
                         disabled={isUpdatingClass}
                       >
-                        Cancel
+                        取消
                       </button>
                     </div>
                   </div>
@@ -2764,8 +2769,8 @@ export default function App() {
                     <button
                       type="button"
                       className="icon-button"
-                      aria-label={`Edit ${classItem.name}`}
-                      title={`Edit ${classItem.name}`}
+                      aria-label={`编辑 ${classItem.name}`}
+                      title={`编辑 ${classItem.name}`}
                       onClick={() => beginEditClass(classItem)}
                     >
                       <Edit3 size={16} />
@@ -2780,14 +2785,14 @@ export default function App() {
         <aside className="panel side-panel">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">Dataset Frames</p>
-              <h2>Image Browser</h2>
+              <p className="eyebrow">数据集图像</p>
+              <h2>图像浏览器</h2>
             </div>
             <ImageIcon size={20} />
           </div>
 
-          <div className="image-filter-panel" aria-label="Image filters">
-            <label htmlFor="filter-platform">Platform</label>
+          <div className="image-filter-panel" aria-label="图像筛选器">
+            <label htmlFor="filter-platform">平台</label>
             <input
               id="filter-platform"
               value={imageFilters.platform}
@@ -2797,7 +2802,7 @@ export default function App() {
               }
               placeholder="iris"
             />
-            <label htmlFor="filter-label-status">Label status</label>
+            <label htmlFor="filter-label-status">标注状态</label>
             <select
               id="filter-label-status"
               value={imageFilters.label_status}
@@ -2809,11 +2814,11 @@ export default function App() {
                 }))
               }
             >
-              <option value="all">All</option>
-              <option value="annotated">Annotated</option>
-              <option value="unannotated">Unannotated</option>
+              <option value="all">全部</option>
+              <option value="annotated">已标注</option>
+              <option value="unannotated">未标注</option>
             </select>
-            <label htmlFor="filter-class">Class</label>
+            <label htmlFor="filter-class">类别</label>
             <select
               id="filter-class"
               value={imageFilters.class_id}
@@ -2822,14 +2827,14 @@ export default function App() {
                 setImageFilters((current) => ({ ...current, class_id: event.target.value }))
               }
             >
-              <option value="">All classes</option>
+              <option value="">全部类别</option>
               {classes.map((classItem) => (
                 <option key={classItem.id} value={classItem.id}>
                   {classItem.name}
                 </option>
               ))}
             </select>
-            <label htmlFor="filter-failure-type">Failure</label>
+            <label htmlFor="filter-failure-type">识别结果</label>
             <select
               id="filter-failure-type"
               value={imageFilters.failure_type}
@@ -2843,11 +2848,11 @@ export default function App() {
             >
               {predictionFailureOptions.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.value === "all" ? "All failures" : option.label}
+                  {option.value === "all" ? "全部识别结果" : formatFailureType(option.value)}
                 </option>
               ))}
             </select>
-            <label htmlFor="filter-edge-tag">Edge tag</label>
+            <label htmlFor="filter-edge-tag">边缘案例标签</label>
             <input
               id="filter-edge-tag"
               value={imageFilters.edge_tag}
@@ -2859,7 +2864,7 @@ export default function App() {
             />
             <div className="range-row">
               <label htmlFor="filter-altitude-min">
-                Min altitude
+                最低高度
                 <input
                   id="filter-altitude-min"
                   type="number"
@@ -2874,7 +2879,7 @@ export default function App() {
                 />
               </label>
               <label htmlFor="filter-altitude-max">
-                Max altitude
+                最高高度
                 <input
                   id="filter-altitude-max"
                   type="number"
@@ -2891,7 +2896,7 @@ export default function App() {
             </div>
             <div className="filter-actions">
               <button type="button" disabled={!importedDataset} onClick={handleApplyImageFilters}>
-                Apply Filters
+                应用筛选
               </button>
               <button
                 type="button"
@@ -2899,16 +2904,16 @@ export default function App() {
                 disabled={!importedDataset}
                 onClick={handleResetImageFilters}
               >
-                Reset
+                重置
               </button>
             </div>
           </div>
 
           {imageFilterError ? <div className="error-banner">{imageFilterError}</div> : null}
 
-          <div className="image-pager" aria-label="Image pagination">
+          <div className="image-pager" aria-label="图像分页">
             <span>
-              {imagePageStart}-{imagePageEnd} of {imagePage.total}
+              第 {imagePageStart}-{imagePageEnd} 张，共 {imagePage.total} 张
             </span>
             <div>
               <button
@@ -2917,7 +2922,7 @@ export default function App() {
                 disabled={!importedDataset || !canPageImagesPrevious}
                 onClick={handlePreviousImagePage}
               >
-                Previous
+                上一页
               </button>
               <button
                 type="button"
@@ -2925,14 +2930,14 @@ export default function App() {
                 disabled={!importedDataset || !canPageImagesNext}
                 onClick={handleNextImagePage}
               >
-                Next
+                下一页
               </button>
             </div>
           </div>
 
-          <div className="image-list" aria-label="Imported images">
+          <div className="image-list" aria-label="已导入图像">
             {images.length === 0 ? (
-              <p className="empty-state">Imported images will appear here.</p>
+              <p className="empty-state">导入的图像将显示在这里。</p>
             ) : (
               images.map((image) => (
                 <button
@@ -2946,8 +2951,8 @@ export default function App() {
                 >
                   <strong>{image.relative_path}</strong>
                   <span>
-                    {image.platform ?? "unknown"} | {formatImageAltitude(image.altitude)} |{" "}
-                    {image.annotation_count} boxes
+                    {image.platform ?? "未知平台"} | {formatImageAltitude(image.altitude)} |{" "}
+                    {image.annotation_count} 个边界框
                   </span>
                 </button>
               ))
@@ -2958,19 +2963,19 @@ export default function App() {
         <section className="panel annotation-panel">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">Draw And Review</p>
-              <h2>Annotation</h2>
+              <p className="eyebrow">标注与审查</p>
+              <h2>标注</h2>
             </div>
             <Box size={20} />
           </div>
 
-          <div className="annotation-readiness" aria-label="Annotation readiness">
+          <div className="annotation-readiness" aria-label="标注就绪状态">
             {annotationReadinessSteps.map((step) => (
               <span
                 key={step.label}
                 className={step.complete ? "readiness-step complete" : "readiness-step"}
               >
-                {step.complete ? "Ready" : "Needed"} | {step.label}
+                {step.complete ? "就绪" : "待完成"} | {step.label}
               </span>
             ))}
           </div>
@@ -2982,7 +2987,7 @@ export default function App() {
                   <img src={selectedImage.image_url} alt={selectedImage.relative_path} />
                   <svg
                     ref={annotationCanvasRef}
-                    aria-label="Annotation canvas"
+                    aria-label="标注画布"
                     className={selectedClass ? "annotation-overlay drawable" : "annotation-overlay"}
                     viewBox="0 0 1 1"
                     preserveAspectRatio="none"
@@ -3019,7 +3024,7 @@ export default function App() {
 
               <div className="box-list">
                 <div className="box-list-heading">
-                  <strong>Boxes</strong>
+                  <strong>边界框</strong>
                   <div className="box-list-actions">
                     <button
                       type="button"
@@ -3027,7 +3032,7 @@ export default function App() {
                       onClick={() => copyAdjacentAnnotations("previous")}
                       disabled={images.findIndex((image) => image.id === selectedImage.id) <= 0}
                     >
-                      Copy Previous
+                      复制上一张
                     </button>
                     <button
                       type="button"
@@ -3038,7 +3043,7 @@ export default function App() {
                         images.length - 1
                       }
                     >
-                      Copy Next
+                      复制下一张
                     </button>
                     <button
                       type="button"
@@ -3046,7 +3051,7 @@ export default function App() {
                       disabled={isSavingAnnotations || !selectedImage}
                     >
                       <Save size={16} />
-                      {isSavingAnnotations ? "Saving" : "Save Annotations"}
+                      {isSavingAnnotations ? "保存中" : "保存标注"}
                     </button>
                   </div>
                 </div>
@@ -3057,22 +3062,22 @@ export default function App() {
                   <div className="review-banner">
                     <div className="review-banner-heading">
                       <div>
-                        <strong>Prediction overlay</strong>
+                        <strong>预测结果叠加</strong>
                         <span>
-                          matched {activeReview.counts.matched ?? 0} | false+{" "}
-                          {activeReview.counts.false_positive ?? 0} | false-{" "}
-                          {activeReview.counts.false_negative ?? 0} | confused{" "}
+                          匹配正确 {activeReview.counts.matched ?? 0} | 误报{" "}
+                          {activeReview.counts.false_positive ?? 0} | 漏报{" "}
+                          {activeReview.counts.false_negative ?? 0} | 类别混淆{" "}
                           {activeReview.counts.class_confusion ?? 0}
                         </span>
                       </div>
-                      <div className="layer-toggles" aria-label="Annotation review layers">
+                      <div className="layer-toggles" aria-label="标注审查图层">
                         <label>
                           <input
                             type="checkbox"
                             checked={showGroundTruthLayer}
                             onChange={(event) => setShowGroundTruthLayer(event.target.checked)}
                           />
-                          GT
+                          真实标注（GT）
                         </label>
                         <label>
                           <input
@@ -3080,16 +3085,16 @@ export default function App() {
                             checked={showPredictionLayer}
                             onChange={(event) => setShowPredictionLayer(event.target.checked)}
                           />
-                          Pred
+                          模型预测（Pred）
                         </label>
                       </div>
                     </div>
-                    <div className="review-legend" aria-label="Prediction legend">
-                      <span className="legend matched">Matched</span>
-                      <span className="legend false-positive">False +</span>
-                      <span className="legend false-negative">False -</span>
+                    <div className="review-legend" aria-label="预测结果图例">
+                      <span className="legend matched">匹配正确</span>
+                      <span className="legend false-positive">误报</span>
+                      <span className="legend false-negative">漏报</span>
                     </div>
-                    <div className="review-actions" aria-label="Prediction correction actions">
+                    <div className="review-actions" aria-label="预测修正操作">
                       {activeReview.predictions
                         .filter((prediction) => prediction.failure_type !== "matched")
                         .map((prediction) => (
@@ -3097,7 +3102,7 @@ export default function App() {
                             <div>
                               <strong>{formatFailureType(prediction.failure_type)}</strong>
                               <span>
-                                Class #{prediction.class_id} | {prediction.confidence.toFixed(2)}
+                                类别 #{prediction.class_id} | 置信度 {prediction.confidence.toFixed(2)}
                               </span>
                             </div>
                             {prediction.failure_type === "false_positive" ? (
@@ -3110,7 +3115,7 @@ export default function App() {
                                     annotation.local_id === predictionDraftId(prediction.id),
                                 )}
                               >
-                                Add as annotation
+                                添加为标注
                               </button>
                             ) : (
                               <button
@@ -3119,7 +3124,7 @@ export default function App() {
                                 onClick={() => markFalseNegativeReviewed(prediction)}
                                 disabled={!prediction.matched_annotation_id}
                               >
-                                Mark reviewed
+                                标记为已审查
                               </button>
                             )}
                           </div>
@@ -3131,7 +3136,7 @@ export default function App() {
                 {annotations.length === 0 ? (
                   <p className="empty-state">
                     {annotationReady
-                      ? "Drag over the image to add a bounding box."
+                      ? "在图像上拖动以添加边界框。"
                       : annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
                   </p>
                 ) : (
@@ -3152,23 +3157,23 @@ export default function App() {
                         <strong>
                           {classById.get(annotation.class_id)?.name ??
                             annotation.class_name ??
-                            `Class ${annotation.class_id}`}
+                            `类别 ${annotation.class_id}`}
                         </strong>
                         <button
                           type="button"
                           className="icon-button"
-                          aria-label={`Delete box ${index + 1}`}
+                          aria-label={`删除边界框 ${index + 1}`}
                           onClick={() => deleteAnnotation(annotation.local_id)}
                         >
                           <Trash2 size={16} />
                         </button>
                       </div>
-                      <div className="nudge-controls" aria-label={`Move box ${index + 1}`}>
+                      <div className="nudge-controls" aria-label={`移动边界框 ${index + 1}`}>
                         <button
                           type="button"
                           className="icon-button"
-                          aria-label={`Move box ${index + 1} left`}
-                          title="Move left"
+                          aria-label={`向左移动边界框 ${index + 1}`}
+                          title="向左移动"
                           onClick={() => nudgeAnnotation(annotation.local_id, -0.01, 0)}
                         >
                           <ArrowLeft size={15} />
@@ -3176,8 +3181,8 @@ export default function App() {
                         <button
                           type="button"
                           className="icon-button"
-                          aria-label={`Move box ${index + 1} up`}
-                          title="Move up"
+                          aria-label={`向上移动边界框 ${index + 1}`}
+                          title="向上移动"
                           onClick={() => nudgeAnnotation(annotation.local_id, 0, -0.01)}
                         >
                           <ArrowUp size={15} />
@@ -3185,8 +3190,8 @@ export default function App() {
                         <button
                           type="button"
                           className="icon-button"
-                          aria-label={`Move box ${index + 1} down`}
-                          title="Move down"
+                          aria-label={`向下移动边界框 ${index + 1}`}
+                          title="向下移动"
                           onClick={() => nudgeAnnotation(annotation.local_id, 0, 0.01)}
                         >
                           <ArrowDown size={15} />
@@ -3194,8 +3199,8 @@ export default function App() {
                         <button
                           type="button"
                           className="icon-button"
-                          aria-label={`Move box ${index + 1} right`}
-                          title="Move right"
+                          aria-label={`向右移动边界框 ${index + 1}`}
+                          title="向右移动"
                           onClick={() => nudgeAnnotation(annotation.local_id, 0.01, 0)}
                         >
                           <ArrowRight size={15} />
@@ -3206,10 +3211,10 @@ export default function App() {
                         className="box-class-control"
                         htmlFor={`box-class-${annotation.local_id}`}
                       >
-                        Class
+                        类别
                         <select
                           id={`box-class-${annotation.local_id}`}
-                          aria-label={`Box ${index + 1} class`}
+                          aria-label={`边界框 ${index + 1} 类别`}
                           value={annotation.class_id}
                           onChange={(event) =>
                             updateAnnotationClass(annotation.local_id, Number(event.target.value))
@@ -3224,7 +3229,7 @@ export default function App() {
                         </select>
                       </label>
 
-                      <div className="geometry-grid" aria-label={`Box ${index + 1} geometry`}>
+                      <div className="geometry-grid" aria-label={`边界框 ${index + 1} 几何参数`}>
                         <label htmlFor={`box-x-${annotation.local_id}`}>
                           X
                           <input
@@ -3299,7 +3304,7 @@ export default function App() {
                         </label>
                       </div>
 
-                      <label htmlFor={`track-${annotation.local_id}`}>Track ID</label>
+                      <label htmlFor={`track-${annotation.local_id}`}>目标轨迹 ID</label>
                       <input
                         id={`track-${annotation.local_id}`}
                         value={annotation.track_id ?? ""}
@@ -3308,7 +3313,7 @@ export default function App() {
                         }
                       />
 
-                      <label htmlFor={`tags-${annotation.local_id}`}>Edge tags</label>
+                      <label htmlFor={`tags-${annotation.local_id}`}>边缘案例标签</label>
                       <input
                         id={`tags-${annotation.local_id}`}
                         value={(annotation.edge_tags ?? []).join(", ")}
@@ -3319,7 +3324,7 @@ export default function App() {
                         }
                         placeholder="occluded, small"
                       />
-                      <div className="edge-tag-presets" aria-label={`Box ${index + 1} edge tag presets`}>
+                      <div className="edge-tag-presets" aria-label={`边界框 ${index + 1} 边缘案例标签预设`}>
                         {edgeTagPresets.map((tag) => {
                           const isSelected = (annotation.edge_tags ?? []).includes(tag);
                           return (
@@ -3334,7 +3339,7 @@ export default function App() {
                                 })
                               }
                             >
-                              {formatIssueType(tag)}
+                              {formatEdgeTag(tag)}
                             </button>
                           );
                         })}
@@ -3357,14 +3362,14 @@ export default function App() {
 
 function formatAltitude(minimum: number | null, maximum: number | null) {
   if (minimum === null || maximum === null) {
-    return "Not available";
+    return "暂无数据";
   }
 
   return `${minimum.toFixed(1)}-${maximum.toFixed(1)}m`;
 }
 
 function formatImageAltitude(altitude: number | null) {
-  return altitude === null ? "altitude n/a" : `${altitude.toFixed(1)}m`;
+  return altitude === null ? "高度未知" : `${altitude.toFixed(1)}m`;
 }
 
 function formatGeometryValue(value: number) {
@@ -3432,26 +3437,28 @@ function formatImageFilterSummary(
 ) {
   const parts: string[] = [];
   if (filters.platform) {
-    parts.push(`platform ${filters.platform}`);
+    parts.push(`平台 ${filters.platform}`);
   }
   if (filters.label_status && filters.label_status !== "all") {
-    parts.push(filters.label_status);
+    parts.push(filters.label_status === "annotated" ? "已标注" : "未标注");
   }
   if (filters.class_id !== undefined) {
-    parts.push(`class ${classById.get(filters.class_id)?.name ?? filters.class_id}`);
+    parts.push(`类别 ${classById.get(filters.class_id)?.name ?? filters.class_id}`);
   }
   if (filters.edge_tag) {
-    parts.push(`tag ${filters.edge_tag}`);
+    parts.push(`标签 ${formatEdgeTag(filters.edge_tag)}`);
   }
   if (filters.failure_type && filters.failure_type !== "all") {
     parts.push(formatFailureType(filters.failure_type));
   }
   if (filters.altitude_min !== undefined || filters.altitude_max !== undefined) {
     const minimum = filters.altitude_min ?? 0;
-    const maximum = filters.altitude_max ?? "max";
-    parts.push(`alt ${minimum}-${maximum}`);
+    const maximum = filters.altitude_max ?? "最大值";
+    parts.push(`高度 ${minimum}-${maximum}`);
   }
-  return parts.length > 0 ? `Image filters: ${parts.join(" | ")}` : "All images in selected scope";
+  return parts.length > 0
+    ? `图像筛选：${parts.join(" | ")}`
+    : "所选范围内的全部图像";
 }
 
 function toPredictionFilterRequest(filters: ReturnType<typeof defaultPredictionFilters>): PredictionFilters {
@@ -3687,14 +3694,6 @@ function toggleTag(existing: string[] | undefined, tag: string) {
   return [...tags, tag];
 }
 
-function formatFailureType(value: string) {
-  return value.replace(/_/g, " ");
-}
-
-function formatIssueType(value: string) {
-  return value.replace(/_/g, " ");
-}
-
 function isActiveRun(status: string) {
   return activeRunStatuses.has(status);
 }
@@ -3735,7 +3734,7 @@ function BoxRect(props: {
       className={selected ? "annotation-box selected" : "annotation-box"}
       onPointerDown={(event) => onPointerDown(event, annotation)}
       role="button"
-      aria-label={`Select box ${annotation.class_name ?? annotation.class_id}`}
+      aria-label={`选择边界框 ${annotation.class_name ?? annotation.class_id}`}
       tabIndex={0}
       data-testid={`annotation-box-${annotation.local_id}`}
     >
@@ -3776,7 +3775,7 @@ function BoxRect(props: {
               strokeWidth={0.004}
               vectorEffect="non-scaling-stroke"
               role="button"
-              aria-label={`Resize box ${annotation.class_name ?? annotation.class_id} ${handle.handle.replace(
+              aria-label={`调整边界框 ${annotation.class_name ?? annotation.class_id} ${handle.handle.replace(
                 "-",
                 " ",
               )}`}
@@ -3831,7 +3830,7 @@ function PredictionRect(props: { prediction: Prediction; className?: string }) {
   const left = prediction.x_center - prediction.width / 2;
   const top = prediction.y_center - prediction.height / 2;
   const label = `${formatFailureType(prediction.failure_type)} | ${
-    className ?? `Class ${prediction.class_id}`
+    className ?? `类别 ${prediction.class_id}`
   }${prediction.failure_type === "false_negative" ? "" : ` ${prediction.confidence.toFixed(2)}`}`;
   const labelX = clamp(left);
   const labelY = clamp(top - 0.018);
@@ -4248,11 +4247,11 @@ function formatBytes(size: number) {
 }
 
 function formatDimensionRefresh(summary: DatasetDimensionRefreshSummary) {
-  return `${summary.scanned_count} scanned, ${summary.updated_count} updated, ${summary.missing_count} still missing`;
+  return `已扫描 ${summary.scanned_count} 张，已更新 ${summary.updated_count} 张，仍缺失 ${summary.missing_count} 张`;
 }
 
 function formatQualityTagSummary(summary: QualityTagApplySummary) {
-  return `${summary.applied_tag_count} tags applied to ${summary.updated_annotation_count} annotations`;
+  return `已向 ${summary.updated_annotation_count} 个标注应用 ${summary.applied_tag_count} 个标签`;
 }
 
 function annotationGuidance(
@@ -4262,39 +4261,39 @@ function annotationGuidance(
   selectedClass: ProjectClass | null,
 ) {
   if (!dataset) {
-    return "Load or import a dataset to begin annotation.";
+    return "请加载或导入数据集后开始标注。";
   }
   if (classCount === 0) {
-    return "Create a project class before drawing boxes.";
+    return "绘制边界框前，请先创建项目类别。";
   }
   if (!selectedImage) {
-    return "Select an image in the browser to begin annotation.";
+    return "请在图像浏览器中选择一张图像后开始标注。";
   }
   if (!selectedClass) {
-    return "Select a class before drawing boxes.";
+    return "绘制边界框前，请先选择类别。";
   }
-  return "Drag over the image to add a bounding box.";
+  return "在图像上拖动以添加边界框。";
 }
 
 function DatasetCoveragePanel(props: { coverage: DatasetCoverageSummary | null }) {
   const { coverage } = props;
   return (
-    <div className="coverage-panel" aria-label="Dataset coverage">
+    <div className="coverage-panel" aria-label="数据集覆盖情况">
       <div className="coverage-heading">
-        <strong>Dataset Coverage</strong>
+        <strong>数据集覆盖情况</strong>
         {coverage ? (
           <span>
-            {coverage.annotated_image_count}/{coverage.image_count} images |{" "}
-            {coverage.annotation_count} boxes
+            {coverage.annotated_image_count}/{coverage.image_count} 张图像 |{" "}
+            {coverage.annotation_count} 个边界框
           </span>
         ) : null}
       </div>
       {!coverage ? (
-        <p className="empty-state">Import a dataset to inspect scene and label coverage.</p>
+        <p className="empty-state">导入数据集后可查看场景与标签覆盖情况。</p>
       ) : (
         <div className="coverage-grid">
-          <CoverageBucketList title="Platforms" rows={coverage.platforms} />
-          <CoverageBucketList title="Altitude" rows={coverage.altitude_bands} />
+          <CoverageBucketList title="平台" rows={coverage.platforms} />
+          <CoverageBucketList title="高度" rows={coverage.altitude_bands} />
           <ClassCoverageList rows={coverage.classes} />
           <EdgeTagCoverageList rows={coverage.edge_tags} />
         </div>
@@ -4308,14 +4307,14 @@ function CoverageBucketList(props: { title: string; rows: DatasetCoverageSummary
     <div className="coverage-card">
       <strong>{props.title}</strong>
       {props.rows.length === 0 ? (
-        <p className="empty-state">No samples yet.</p>
+        <p className="empty-state">暂无样本。</p>
       ) : (
         props.rows.map((row) => (
           <div className="coverage-row" key={row.label}>
             <span>{row.label}</span>
             <strong>{row.annotation_count}</strong>
             <small>
-              {row.annotated_image_count}/{row.image_count} images
+              {row.annotated_image_count}/{row.image_count} 张图像
             </small>
           </div>
         ))
@@ -4327,9 +4326,9 @@ function CoverageBucketList(props: { title: string; rows: DatasetCoverageSummary
 function ClassCoverageList(props: { rows: DatasetCoverageSummary["classes"] }) {
   return (
     <div className="coverage-card">
-      <strong>Classes</strong>
+      <strong>类别</strong>
       {props.rows.length === 0 ? (
-        <p className="empty-state">Create classes to track label coverage.</p>
+        <p className="empty-state">创建类别后可跟踪标签覆盖情况。</p>
       ) : (
         props.rows.map((row) => (
           <div className="coverage-row class-coverage-row" key={row.class_id}>
@@ -4338,7 +4337,7 @@ function ClassCoverageList(props: { rows: DatasetCoverageSummary["classes"] }) {
               {row.class_name}
             </span>
             <strong>{row.annotation_count}</strong>
-            <small>{row.image_count} images</small>
+            <small>{row.image_count} 张图像</small>
           </div>
         ))
       )}
@@ -4349,15 +4348,15 @@ function ClassCoverageList(props: { rows: DatasetCoverageSummary["classes"] }) {
 function EdgeTagCoverageList(props: { rows: DatasetCoverageSummary["edge_tags"] }) {
   return (
     <div className="coverage-card">
-      <strong>Edge Tags</strong>
+      <strong>边缘案例标签</strong>
       {props.rows.length === 0 ? (
-        <p className="empty-state">Add tags such as occluded or camouflaged.</p>
+        <p className="empty-state">可添加“遮挡”或“伪装”等标签。</p>
       ) : (
         props.rows.slice(0, 6).map((row) => (
           <div className="coverage-row" key={row.tag}>
-            <span>{row.tag}</span>
+            <span>{formatEdgeTag(row.tag)}</span>
             <strong>{row.annotation_count}</strong>
-            <small>{row.image_count} images</small>
+            <small>{row.image_count} 张图像</small>
           </div>
         ))
       )}
