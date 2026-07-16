@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
+import shutil
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -16,8 +18,10 @@ from app.db.models import (
     DatasetVersion,
     ExportArtifact,
     Image,
+    Prediction,
     PredictionJob,
     Project,
+    RunMetric,
     TrashItem,
     TrainingRun,
 )
@@ -27,11 +31,16 @@ from app.storage.schemas import (
     StorageItemDetail,
     StorageItemList,
     StorageItemRead,
+    StorageMutationResponse,
+    PurgeSummary,
+    ReconcileSummary,
+    TrashItemList,
     TrashItemRead,
 )
 from app.storage.visibility import (
     StorageEntityNotFoundError,
     active_entity_predicate,
+    is_entity_trashed,
     require_active_entity,
 )
 
@@ -53,6 +62,10 @@ class StorageConflictError(RuntimeError):
 
 
 class StorageMoveError(RuntimeError):
+    pass
+
+
+class StorageConfirmationError(ValueError):
     pass
 
 
@@ -620,3 +633,337 @@ def move_storage_item_to_trash(
         raise StorageMoveError("数据已移动，但回收站状态更新失败") from exc
     db.refresh(trash)
     return TrashItemRead.model_validate(trash)
+
+
+def _trash_root(settings: Settings) -> Path:
+    return _canonical_path(settings.workspace_root, ".trash")
+
+
+def _expected_trash_path(settings: Settings, item: TrashItem) -> Path:
+    return _trash_root(settings) / f"{item.id}-{item.entity_type}-{item.entity_id}"
+
+
+def _validate_trash_item_paths(
+    db: Session,
+    settings: Settings,
+    item: TrashItem,
+) -> tuple[Path, Path]:
+    entity = _load_trash_entity(db, item.entity_type, item.entity_id)
+    source = expected_entity_path(settings, item.entity_type, entity)
+    _validate_stored_artifact_path(item.original_path, source, settings.workspace_root)
+
+    expected_trash = _expected_trash_path(settings, item)
+    _validate_stored_artifact_path(item.trash_path, expected_trash, _trash_root(settings))
+    if not expected_trash.resolve().is_relative_to(_trash_root(settings).resolve()):
+        raise StoragePathError("回收站路径不在规范目录内")
+    return source, expected_trash
+
+
+def list_trash_items(db: Session) -> TrashItemList:
+    items = list(
+        db.scalars(
+            select(TrashItem)
+            .order_by(TrashItem.deleted_at.desc(), TrashItem.id.desc())
+        ).all()
+    )
+    payload = [TrashItemRead.model_validate(item) for item in items]
+    return TrashItemList(
+        items=payload,
+        total_size_bytes=sum(item.size_bytes for item in payload),
+    )
+
+
+def _require_restore_parent(db: Session, item: TrashItem) -> None:
+    if item.entity_type == "training_run":
+        if item.version_id is None or db.get(DatasetVersion, item.version_id) is None:
+            raise StorageConflictError("训练任务关联的标注版本不存在，无法恢复。")
+        if is_entity_trashed(db, "dataset_version", item.version_id):
+            parent = db.scalar(
+                select(TrashItem).where(
+                    TrashItem.entity_type == "dataset_version",
+                    TrashItem.entity_id == item.version_id,
+                )
+            )
+            name = parent.display_name if parent is not None else f"版本 #{item.version_id}"
+            raise StorageConflictError(f"请先恢复标注版本“{name}”。")
+    elif item.entity_type == "dataset_version":
+        if item.dataset_id is None or db.get(Dataset, item.dataset_id) is None:
+            raise StorageConflictError("标注版本关联的原始数据集不存在，无法恢复。")
+        if is_entity_trashed(db, "dataset", item.dataset_id):
+            parent = db.scalar(
+                select(TrashItem).where(
+                    TrashItem.entity_type == "dataset",
+                    TrashItem.entity_id == item.dataset_id,
+                )
+            )
+            name = parent.display_name if parent is not None else f"数据集 #{item.dataset_id}"
+            raise StorageConflictError(f"请先恢复原始数据集“{name}”。")
+
+
+def restore_trash_item(
+    db: Session,
+    settings: Settings,
+    trash_id: int,
+) -> StorageMutationResponse:
+    item = db.get(TrashItem, trash_id)
+    if item is None:
+        raise StorageEntityNotFoundError("回收站记录不存在")
+    if item.status != "active":
+        raise StorageConflictError("该回收站记录当前无法恢复，请先刷新回收站状态。")
+    _require_restore_parent(db, item)
+    source, trash = _validate_trash_item_paths(db, settings, item)
+    if source.exists():
+        raise StorageConflictError("原目录已存在，无法恢复以免覆盖现有数据。")
+    if not trash.is_dir():
+        raise StoragePathError("回收站数据目录不存在")
+
+    item.status = "pending_restore"
+    item.error_message = None
+    db.commit()
+    try:
+        source.parent.mkdir(parents=True, exist_ok=True)
+        trash.rename(source)
+    except OSError as exc:
+        item.status = "active"
+        item.error_message = str(exc)
+        db.commit()
+        raise StorageMoveError(f"恢复数据目录失败：{exc}") from exc
+
+    response = StorageMutationResponse(
+        trash_id=item.id,
+        entity_type=item.entity_type,
+        entity_id=item.entity_id,
+        status="restored",
+        message="数据已恢复。",
+    )
+    try:
+        db.delete(item)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise StorageMoveError("目录已恢复，数据库状态将在下次维护时自动修复。") from exc
+    return response
+
+
+def _purging_path(settings: Settings, trash_id: int) -> Path:
+    return _trash_root(settings) / ".purging" / str(trash_id)
+
+
+def _delete_training_run_rows(db: Session, run_id: int) -> None:
+    db.execute(delete(Prediction).where(Prediction.run_id == run_id))
+    db.execute(delete(PredictionJob).where(PredictionJob.run_id == run_id))
+    db.execute(delete(ExportArtifact).where(ExportArtifact.run_id == run_id))
+    db.execute(delete(RunMetric).where(RunMetric.run_id == run_id))
+    db.execute(delete(TrainingRun).where(TrainingRun.id == run_id))
+
+
+def _delete_entity_rows(db: Session, item: TrashItem) -> None:
+    if item.entity_type == "training_run":
+        _delete_training_run_rows(db, item.entity_id)
+        return
+    if item.entity_type == "dataset_version":
+        run_count = db.scalar(
+            select(func.count(TrainingRun.id)).where(
+                TrainingRun.version_id == item.entity_id
+            )
+        ) or 0
+        if run_count:
+            raise StorageConflictError("该标注版本仍有关联训练任务，无法彻底删除。")
+        db.execute(delete(DatasetVersion).where(DatasetVersion.id == item.entity_id))
+        return
+    if item.entity_type == "dataset":
+        version_count = db.scalar(
+            select(func.count(DatasetVersion.id)).where(
+                DatasetVersion.dataset_id == item.entity_id
+            )
+        ) or 0
+        if version_count:
+            raise StorageConflictError("该数据集仍有关联标注版本，无法彻底删除。")
+        image_ids = select(Image.id).where(Image.dataset_id == item.entity_id)
+        db.execute(delete(Annotation).where(Annotation.image_id.in_(image_ids)))
+        db.execute(delete(Image).where(Image.dataset_id == item.entity_id))
+        db.execute(delete(Dataset).where(Dataset.id == item.entity_id))
+        return
+    raise StorageEntityNotFoundError("不支持的存储对象类型")
+
+
+def purge_trash_item(
+    db: Session,
+    settings: Settings,
+    trash_id: int,
+    confirm_name: str,
+) -> StorageMutationResponse:
+    item = db.get(TrashItem, trash_id)
+    if item is None:
+        raise StorageEntityNotFoundError("回收站记录不存在")
+    if confirm_name != item.display_name:
+        raise StorageConfirmationError("确认名称不匹配，未执行彻底删除。")
+    if item.status not in {"active", "error"}:
+        raise StorageConflictError("该回收站记录正在处理中，暂时无法彻底删除。")
+    source, trash = _validate_trash_item_paths(db, settings, item)
+    if source.exists():
+        raise StorageConflictError("原目录仍然存在，无法确认可彻底删除。")
+    if not trash.is_dir():
+        raise StoragePathError("回收站数据目录不存在")
+
+    staged = _purging_path(settings, item.id)
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    if staged.exists():
+        raise StorageConflictError("该对象已有未完成的彻底删除暂存目录。")
+    trash_marker = trash / ".purge.json"
+    staged_marker = staged / ".purge.json"
+    try:
+        trash_marker.write_text(
+            json.dumps({"entity_type": item.entity_type, "entity_id": item.entity_id}),
+            encoding="utf-8",
+        )
+        trash.rename(staged)
+    except OSError as exc:
+        trash_marker.unlink(missing_ok=True)
+        staged_marker.unlink(missing_ok=True)
+        if staged.exists() and not trash.exists():
+            staged.rename(trash)
+        raise StorageMoveError(f"暂存待删除数据失败：{exc}") from exc
+
+    response = StorageMutationResponse(
+        trash_id=item.id,
+        entity_type=item.entity_type,
+        entity_id=item.entity_id,
+        status="purged",
+        message="数据已彻底删除。",
+    )
+    try:
+        _delete_entity_rows(db, item)
+        db.delete(item)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        try:
+            staged_marker.unlink(missing_ok=True)
+            staged.rename(trash)
+        except OSError as restore_exc:
+            raise StorageMoveError(
+                f"数据库删除失败，且暂存目录恢复失败：{restore_exc}"
+            ) from exc
+        if isinstance(exc, StorageConflictError):
+            raise
+        raise StorageMoveError("数据库删除失败，数据已恢复到回收站。") from exc
+
+    shutil.rmtree(staged, ignore_errors=True)
+    return response
+
+
+def purge_expired_trash(
+    db: Session,
+    settings: Settings,
+    now: datetime | None = None,
+) -> PurgeSummary:
+    current = now or datetime.now(UTC)
+    priority = {"training_run": 0, "dataset_version": 1, "dataset": 2}
+    expired = list(
+        db.scalars(
+            select(TrashItem).where(TrashItem.purge_after <= current)
+        ).all()
+    )
+    expired.sort(key=lambda item: (priority.get(item.entity_type, 99), item.id))
+    purged = 0
+    failed = 0
+    for candidate in expired:
+        item_id = candidate.id
+        display_name = candidate.display_name
+        try:
+            purge_trash_item(db, settings, item_id, display_name)
+            purged += 1
+        except Exception as exc:
+            db.rollback()
+            failed += 1
+            item = db.get(TrashItem, item_id)
+            if item is not None:
+                item.status = "error"
+                item.error_message = str(exc)
+                try:
+                    db.commit()
+                except SQLAlchemyError:
+                    db.rollback()
+    return PurgeSummary(purged_count=purged, failed_count=failed)
+
+
+def _mark_reconcile_error(db: Session, item: TrashItem, message: str) -> None:
+    item.status = "error"
+    item.error_message = message
+    db.commit()
+
+
+def _cleanup_abandoned_purging(db: Session, settings: Settings) -> None:
+    purging_root = _purging_path(settings, 0).parent
+    if not purging_root.is_dir():
+        return
+    for staged in purging_root.iterdir():
+        if not staged.is_dir() or not staged.name.isdigit():
+            continue
+        trash_id = int(staged.name)
+        if db.get(TrashItem, trash_id) is not None:
+            continue
+        marker = staged / ".purge.json"
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        model = {
+            "training_run": TrainingRun,
+            "dataset_version": DatasetVersion,
+            "dataset": Dataset,
+        }.get(payload.get("entity_type"))
+        entity_id = payload.get("entity_id")
+        if model is not None and isinstance(entity_id, int) and db.get(model, entity_id) is None:
+            shutil.rmtree(staged, ignore_errors=True)
+
+
+def reconcile_trash(db: Session, settings: Settings) -> ReconcileSummary:
+    reconciled = 0
+    errors = 0
+    items = list(
+        db.scalars(
+            select(TrashItem).where(
+                TrashItem.status.in_({"pending_move", "pending_restore"})
+            )
+        ).all()
+    )
+    for item in items:
+        try:
+            source, trash = _validate_trash_item_paths(db, settings, item)
+            source_exists = source.exists()
+            trash_exists = trash.exists()
+            if source_exists == trash_exists:
+                _mark_reconcile_error(
+                    db,
+                    item,
+                    "原目录与回收站目录同时存在或同时缺失，需要人工检查。",
+                )
+                errors += 1
+                continue
+            if item.status == "pending_move":
+                if source_exists:
+                    db.delete(item)
+                else:
+                    item.status = "active"
+                    item.error_message = None
+            else:
+                if source_exists:
+                    db.delete(item)
+                else:
+                    item.status = "active"
+                    item.error_message = None
+            db.commit()
+            reconciled += 1
+        except Exception as exc:
+            db.rollback()
+            current = db.get(TrashItem, item.id)
+            if current is not None:
+                try:
+                    _mark_reconcile_error(db, current, str(exc))
+                except SQLAlchemyError:
+                    db.rollback()
+            errors += 1
+    _cleanup_abandoned_purging(db, settings)
+    return ReconcileSummary(reconciled_count=reconciled, error_count=errors)

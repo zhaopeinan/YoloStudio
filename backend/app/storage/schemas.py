@@ -70,6 +70,33 @@ class TrashItemRead(BaseModel):
     purge_after: datetime
 
 
+class TrashItemList(BaseModel):
+    items: list[TrashItemRead]
+    total_size_bytes: int
+
+
+class StorageMutationResponse(BaseModel):
+    trash_id: int
+    entity_type: str
+    entity_id: int
+    status: str
+    message: str
+
+
+class TrashPurgeRequest(BaseModel):
+    confirm_name: str
+
+
+class PurgeSummary(BaseModel):
+    purged_count: int
+    failed_count: int
+
+
+class ReconcileSummary(BaseModel):
+    reconciled_count: int
+    error_count: int
+
+
 class StorageConflictDetail(BaseModel):
     message: str
     blockers: list[StorageBlocker]

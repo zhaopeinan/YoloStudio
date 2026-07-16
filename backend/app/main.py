@@ -1,26 +1,57 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import inspect
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 
 from app.annotations.router import router as annotations_router
 from app.classes.router import router as classes_router
 from app.core.devices import detect_devices
-from app.core.settings import get_settings
+from app.core.settings import Settings, get_settings
 from app.datasets.router import images_router, projects_router, router as datasets_router
-from app.db.session import init_db
+from app.db.session import create_engine_for_settings, init_db
 from app.exports.router import router as exports_router
 from app.prediction.router import router as prediction_router
 from app.quality.router import router as quality_router
 from app.storage.router import router as storage_router
+from app.storage.service import purge_expired_trash, reconcile_trash
 from app.training.router import router as training_router
 from app.versions.router import router as versions_router
 
 
+logger = logging.getLogger(__name__)
+
+
+def run_storage_maintenance(
+    settings: Settings,
+    db_engine: Engine | None = None,
+) -> None:
+    owns_engine = db_engine is None
+    engine = db_engine or create_engine_for_settings(settings)
+    try:
+        init_db(engine)
+        with Session(engine) as db:
+            reconcile_trash(db, settings)
+            purge_expired_trash(db, settings)
+    finally:
+        if owns_engine:
+            engine.dispose()
+
+
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    init_db()
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    settings_override = application.dependency_overrides.get(get_settings)
+    settings = settings_override() if settings_override is not None else get_settings()
+    if inspect.isawaitable(settings):
+        settings = await settings
+    try:
+        run_storage_maintenance(settings)
+    except Exception:
+        logger.exception("Storage startup maintenance failed")
     yield
 
 
