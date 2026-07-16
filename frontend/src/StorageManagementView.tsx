@@ -301,18 +301,22 @@ export function StorageManagementView({
       {notice && <div role="status" className="status-message success-message">{notice}</div>}
       {loading ? (
         <p role="status">正在加载数据...</p>
-      ) : tab === "active" ? (
-        <ActiveTable items={items} onDetail={openDetail} onTrash={setTrashTarget} />
       ) : (
-        <TrashTable
-          items={trashItems}
-          busy={busy}
-          onRestore={restore}
-          onPurge={(item) => {
-            setPurgeName("");
-            setPurgeTarget(item);
-          }}
-        />
+        <div className="storage-table-scroll">
+          {tab === "active" ? (
+            <ActiveTable items={items} onDetail={openDetail} onTrash={setTrashTarget} />
+          ) : (
+            <TrashTable
+              items={trashItems}
+              busy={busy}
+              onRestore={restore}
+              onPurge={(item) => {
+                setPurgeName("");
+                setPurgeTarget(item);
+              }}
+            />
+          )}
+        </div>
       )}
 
       {detailOpen && (

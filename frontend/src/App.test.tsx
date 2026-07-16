@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -722,6 +722,76 @@ const apiMock = vi.hoisted(() => {
     exportArtifacts.unshift(artifact);
     return artifact;
   });
+  const storageItemsResponse = {
+    items: [
+      {
+        entity_type: "dataset" as const,
+        entity_id: 1,
+        display_name: "camouflage-set",
+        project_id: 1,
+        project_name: "Drone QA Project",
+        dataset_id: 1,
+        version_id: null,
+        artifact_path: "/tmp/workspace/projects/1/datasets/1",
+        size_bytes: 2048,
+        image_count: 2,
+        annotation_count: 2,
+        split_counts: null,
+        created_at: "2026-06-30T00:00:00",
+        protected: false,
+        blockers: [],
+      },
+      {
+        entity_type: "dataset_version" as const,
+        entity_id: 1,
+        display_name: "smoke-export",
+        project_id: 1,
+        project_name: "Drone QA Project",
+        dataset_id: 1,
+        version_id: 1,
+        artifact_path: "/tmp/workspace/projects/1/versions/1",
+        size_bytes: 1024,
+        image_count: 2,
+        annotation_count: 2,
+        split_counts: { train: 1, val: 1, test: 0 },
+        created_at: "2026-06-30T00:01:00",
+        protected: false,
+        blockers: [],
+      },
+    ],
+    total_size_bytes: 3072,
+  };
+  const listStorageItems = vi.fn(async () => storageItemsResponse);
+  const getStorageItem = vi.fn(async (entityType: "dataset" | "dataset_version" | "training_run", entityId: number) => {
+    const item = storageItemsResponse.items.find(
+      (candidate) => candidate.entity_type === entityType && candidate.entity_id === entityId,
+    );
+    if (!item) throw new Error("数据不存在");
+    return { ...item, class_names: ["target"], related_runs: [] };
+  });
+  const trashStorageItem = vi.fn(async (entityType: "dataset" | "dataset_version" | "training_run", entityId: number) => ({
+    id: 100 + entityId,
+    entity_type: entityType,
+    entity_id: entityId,
+    project_id: 1,
+    dataset_id: 1,
+    version_id: entityType === "dataset_version" ? entityId : null,
+    display_name: entityType === "dataset" ? "camouflage-set" : "smoke-export",
+    original_path: "/tmp/original",
+    trash_path: "/tmp/trash",
+    size_bytes: 1024,
+    summary: {},
+    status: "active",
+    error_message: null,
+    deleted_at: "2026-06-30T00:02:00",
+    purge_after: "2026-07-30T00:02:00",
+    created_at: "2026-06-30T00:02:00",
+    updated_at: "2026-06-30T00:02:00",
+  }));
+  const listTrashItems = vi.fn(async () => ({ items: [], total_size_bytes: 0 }));
+  const restoreTrashItem = vi.fn(async () => ({ status: "restored", message: "已恢复" }));
+  const purgeTrashItem = vi.fn(async () => ({ status: "purged", message: "已删除" }));
+  const purgeExpiredTrash = vi.fn(async () => ({ purged_count: 0, failed_count: 0, failures: [] }));
 
   return {
     completedRun,
@@ -767,6 +837,14 @@ const apiMock = vi.hoisted(() => {
     listRunExports,
     createRunExport,
     exportArtifacts,
+    storageItemsResponse,
+    listStorageItems,
+    getStorageItem,
+    trashStorageItem,
+    listTrashItems,
+    restoreTrashItem,
+    purgeTrashItem,
+    purgeExpiredTrash,
   };
 });
 
@@ -925,6 +1003,13 @@ vi.mock("./api", () => ({
   getExportCapabilities: apiMock.getExportCapabilities,
   listRunExports: apiMock.listRunExports,
   createRunExport: apiMock.createRunExport,
+  listStorageItems: apiMock.listStorageItems,
+  getStorageItem: apiMock.getStorageItem,
+  trashStorageItem: apiMock.trashStorageItem,
+  listTrashItems: apiMock.listTrashItems,
+  restoreTrashItem: apiMock.restoreTrashItem,
+  purgeTrashItem: apiMock.purgeTrashItem,
+  purgeExpiredTrash: apiMock.purgeExpiredTrash,
 }));
 
 describe("App", () => {
@@ -1023,6 +1108,13 @@ describe("App", () => {
     apiMock.listRunExports.mockClear();
     apiMock.createRunExport.mockClear();
     apiMock.exportArtifacts.length = 0;
+    apiMock.listStorageItems.mockClear();
+    apiMock.getStorageItem.mockClear();
+    apiMock.trashStorageItem.mockClear();
+    apiMock.listTrashItems.mockClear();
+    apiMock.restoreTrashItem.mockClear();
+    apiMock.purgeTrashItem.mockClear();
+    apiMock.purgeExpiredTrash.mockClear();
   });
 
   afterEach(() => {
@@ -1322,6 +1414,137 @@ describe("App", () => {
       ]),
     );
   }, 15000);
+
+  it("在项目与数据页面切换导入数据和数据管理", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByRole("tab", { name: "导入数据" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("数据集路径")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "数据管理" }));
+
+    expect(screen.getByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("table", { name: "现有数据" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("数据集路径")).not.toBeInTheDocument();
+    expect(window.location.hash).toBe("#dataset");
+  });
+
+  it("当前数据集移入回收站后清空数据集状态并避免重新请求已删除数据", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
+    apiMock.createClass.mockRejectedValueOnce(new Error("旧类别错误"));
+    await user.type(screen.getByLabelText("类别名称"), "待清理类别");
+    await user.click(screen.getByRole("button", { name: "创建类别" }));
+    expect(await screen.findByText("旧类别错误")).toBeInTheDocument();
+
+    await navigateToStep(user, "图像标注");
+    await user.type(screen.getByLabelText("文件名搜索"), "frame002");
+    await user.selectOptions(screen.getByLabelText("标注状态"), "unannotated");
+    await user.click(screen.getByRole("button", { name: /高级筛选/ }));
+    fireEvent.change(screen.getByLabelText("平台"), { target: { value: "iris" } });
+    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+
+    await navigateToStep(user, "质量与版本");
+    apiMock.refreshImageDimensions.mockRejectedValueOnce(new Error("旧质量错误"));
+    await user.click(screen.getByRole("button", { name: "刷新图像尺寸" }));
+    expect(await screen.findByText("旧质量错误")).toBeInTheDocument();
+
+    await navigateToStep(user, "模型训练");
+    await user.click(screen.getByRole("button", { name: "加载配置" }));
+    expect(await screen.findByText("已加载训练任务 #1 的配置")).toBeInTheDocument();
+
+    await navigateToStep(user, "项目与数据");
+    await user.click(screen.getByRole("tab", { name: "数据管理" }));
+    apiMock.listClasses.mockClear();
+    apiMock.listImages.mockClear();
+    await user.click(await screen.findByRole("button", { name: "移入回收站 camouflage-set" }));
+    await user.click(screen.getByRole("button", { name: "确认移入回收站" }));
+
+    expect(apiMock.trashStorageItem).toHaveBeenCalledWith("dataset", 1);
+    expect(apiMock.listClasses).not.toHaveBeenCalled();
+    expect(apiMock.listImages).not.toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
+    expect(
+      within(screen.getByRole("navigation", { name: "工作流步骤" })).getByRole("button", { name: /类别管理/ }),
+    ).toHaveAttribute("data-availability", "locked");
+
+    await user.click(screen.getByRole("tab", { name: "导入数据" }));
+    expect(screen.queryByText(/已将 1 张图像导入/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
+    expect(screen.getByLabelText("类别名称")).toHaveValue("");
+    expect(screen.queryByText("旧类别错误")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("编辑类别名称 target")).not.toBeInTheDocument();
+
+    await navigateToStep(user, "图像标注");
+    expect(screen.getByLabelText("文件名搜索")).toHaveValue("");
+    expect(screen.getByLabelText("标注状态")).toHaveValue("all");
+    expect(screen.getByRole("button", { name: "高级筛选" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("图像高级筛选")).not.toBeInTheDocument();
+
+    await navigateToStep(user, "质量与版本");
+    expect(screen.queryByText("旧质量错误")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("质量问题类型")).toHaveValue("all");
+    expect(screen.getByText("可以导出")).toBeInTheDocument();
+
+    await navigateToStep(user, "模型训练");
+    expect(screen.queryByText("已加载训练任务 #1 的配置")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("模型预设或本地权重")).toHaveValue("yolov8n.pt");
+  });
+
+  it("删除其他存储对象时完整重新加载当前数据集工作区", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "项目与数据");
+    await user.click(screen.getByRole("tab", { name: "数据管理" }));
+    apiMock.listClasses.mockClear();
+    apiMock.listImages.mockClear();
+    apiMock.getQuality.mockClear();
+    apiMock.getDatasetCoverage.mockClear();
+    apiMock.listQualityIssues.mockClear();
+    apiMock.listDatasetVersions.mockClear();
+    apiMock.listTrainingRuns.mockClear();
+    apiMock.getTrainingRunArtifacts.mockClear();
+    apiMock.getTrainingRunSummary.mockClear();
+    apiMock.getProjectTrainingSummary.mockClear();
+    apiMock.listPredictionJobs.mockClear();
+    apiMock.listPredictions.mockClear();
+    apiMock.getExportCapabilities.mockClear();
+    apiMock.listRunExports.mockClear();
+    await user.click(await screen.findByRole("button", { name: "移入回收站 smoke-export" }));
+    await user.click(screen.getByRole("button", { name: "确认移入回收站" }));
+
+    expect(apiMock.trashStorageItem).toHaveBeenCalledWith("dataset_version", 1);
+    await waitFor(() => {
+      expect(apiMock.listClasses).toHaveBeenCalledWith(1);
+      expect(apiMock.listImages).toHaveBeenCalledWith(1, {}, { limit: 50, offset: 0 });
+      expect(apiMock.getQuality).toHaveBeenCalledWith(1);
+      expect(apiMock.getDatasetCoverage).toHaveBeenCalledWith(1);
+      expect(apiMock.listQualityIssues).toHaveBeenCalledWith(1, "all");
+      expect(apiMock.listDatasetVersions).toHaveBeenCalledWith(1);
+      expect(apiMock.listTrainingRuns).toHaveBeenCalledWith(1);
+      expect(apiMock.getTrainingRunArtifacts).toHaveBeenCalledWith(1);
+      expect(apiMock.getTrainingRunSummary).toHaveBeenCalledWith(1);
+      expect(apiMock.getProjectTrainingSummary).toHaveBeenCalledWith(1);
+      expect(apiMock.listPredictionJobs).toHaveBeenCalledWith(1);
+      expect(apiMock.listPredictions).toHaveBeenCalled();
+      expect(apiMock.getExportCapabilities).toHaveBeenCalledWith(1);
+      expect(apiMock.listRunExports).toHaveBeenCalledWith(1);
+    });
+    expect(
+      within(screen.getByRole("navigation", { name: "工作流步骤" })).getByRole("button", { name: /类别管理/ }),
+    ).not.toHaveAttribute("data-availability", "locked");
+
+    await user.click(screen.getByRole("tab", { name: "导入数据" }));
+    expect(screen.getByText(/已将 2 张图像导入/)).toBeInTheDocument();
+  });
 
   it("shows annotation readiness before a dataset is loaded", async () => {
     const user = userEvent.setup();

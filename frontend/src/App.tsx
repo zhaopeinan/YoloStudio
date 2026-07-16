@@ -102,6 +102,7 @@ import { WorkflowShell } from "./WorkflowShell";
 import { AnnotationCanvasToolbar } from "./AnnotationCanvasToolbar";
 import { AnnotationFilterDrawer } from "./AnnotationFilterDrawer";
 import { AnnotationToolbar } from "./AnnotationToolbar";
+import { StorageManagementView } from "./StorageManagementView";
 import {
   fitViewport,
   constrainPan,
@@ -193,6 +194,18 @@ function defaultPredictionFilters() {
   };
 }
 
+function defaultImageFilters(): ImageFiltersState {
+  return {
+    platform: "",
+    label_status: "all",
+    class_id: "",
+    edge_tag: "",
+    failure_type: "all",
+    altitude_min: "",
+    altitude_max: "",
+  };
+}
+
 type DraftBox = Annotation & {
   local_id: string;
 };
@@ -238,8 +251,10 @@ type CanvasPanState = {
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("dataset");
+  const [datasetPageTab, setDatasetPageTab] = useState<"import" | "management">("import");
   const currentStepRef = useRef<WorkflowStep>("dataset");
   const workflowStepsRef = useRef<ReturnType<typeof buildWorkflowSteps>>([]);
+  const skipNextStorageWorkspaceRefreshRef = useRef(false);
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -273,15 +288,7 @@ export default function App() {
   const [pendingAnnotationImageId, setPendingAnnotationImageId] = useState<number | null>(null);
   const [annotationNotice, setAnnotationNotice] = useState<string | null>(null);
   const [mobileAnnotationPane, setMobileAnnotationPane] = useState<"canvas" | "images" | "properties">("canvas");
-  const [imageFilters, setImageFilters] = useState<ImageFiltersState>({
-    platform: "",
-    label_status: "all" as "all" | "annotated" | "unannotated",
-    class_id: "",
-    edge_tag: "",
-    failure_type: "all" as PredictionFailureType,
-    altitude_min: "",
-    altitude_max: "",
-  });
+  const [imageFilters, setImageFilters] = useState<ImageFiltersState>(defaultImageFilters);
   const [imageFilenameSearch, setImageFilenameSearch] = useState("");
   const [isImageFilterDrawerOpen, setIsImageFilterDrawerOpen] = useState(false);
   const [imageFilterError, setImageFilterError] = useState<string | null>(null);
@@ -623,6 +630,105 @@ export default function App() {
     setAnnotationsDirty(false);
   }
 
+  function clearLoadedDatasetWorkspace() {
+    skipNextStorageWorkspaceRefreshRef.current = true;
+    stopBoxInteractionTrackingRef.current?.();
+    stopBoxInteractionTrackingRef.current = null;
+    boxMoveStateRef.current = null;
+    boxResizeStateRef.current = null;
+    canvasPanStateRef.current = null;
+    isSpacePressedRef.current = false;
+    setImportedDataset(null);
+    setClasses([]);
+    setClassName("");
+    setClassColor(defaultClassColor);
+    setSelectedClassId(null);
+    setVersionClassIds([]);
+    setClassError(null);
+    setIsCreatingClass(false);
+    setEditingClassId(null);
+    setClassEditName("");
+    setClassEditColor(defaultClassColor);
+    setIsUpdatingClass(false);
+    setImages([]);
+    setImagePage({ limit: imagePageSize, offset: 0, total: 0 });
+    setSelectedImageId(null);
+    setPendingAnnotationImageId(null);
+    setAnnotationNotice(null);
+    setMobileAnnotationPane("canvas");
+    setImageFilters(defaultImageFilters());
+    setImageFilenameSearch("");
+    setIsImageFilterDrawerOpen(false);
+    setImageFilterError(null);
+    setAnnotations([]);
+    setSelectedAnnotationId(null);
+    clearAnnotationsDirty();
+    setPendingWorkflowStep(null);
+    setAnnotationError(null);
+    setIsSavingAnnotations(false);
+    setDragState(null);
+    setActiveBoxMoveState(null);
+    setActiveBoxResizeState(null);
+    setAnnotationViewportSize({ width: 0, height: 0 });
+    setAnnotationImageSize({ width: 0, height: 0 });
+    setCanvasViewport({ zoom: 1, panX: 0, panY: 0, mode: "fit" });
+    setIsSpacePressed(false);
+    setCanvasPanState(null);
+    setShowAnnotationGeometry(false);
+    setActiveReview(null);
+    setQuality(null);
+    setCoverage(null);
+    setQualityIssues([]);
+    setQualityIssueType("all");
+    setQualityError(null);
+    setIsLoadingQuality(false);
+    setIsApplyingQualityTags(false);
+    setQualityTagSummary(null);
+    setDimensionRefresh(null);
+    setIsRefreshingDimensions(false);
+    setVersions([]);
+    setVersionName("");
+    setVersionError(null);
+    setIsCreatingVersion(false);
+    setRuns([]);
+    setRunLogs({});
+    setRunArtifacts({});
+    setRunSummary(null);
+    setProjectExperimentSummary(null);
+    setSummaryError(null);
+    setTrainingError(null);
+    setTrainingNotice(null);
+    setIsStartingRun(false);
+    setCancellingRunId(null);
+    setTrainingModel("yolov8n.pt");
+    setTrainingEpochs(50);
+    setTrainingImageSize(640);
+    setTrainingBatchSize(8);
+    setTrainingDevice("");
+    setAugmentationPreset("balanced");
+    setAugmentation(defaultAugmentation);
+    setTrainingTta(false);
+    setThresholdScan(false);
+    setPredictionJobs([]);
+    setPredictions([]);
+    setPredictionLogs({});
+    setPredictionError(null);
+    setIsCreatingPrediction(false);
+    setIsCreatingThresholdScan(false);
+    setPredictionScope("all");
+    setPredictionConfidence(0.25);
+    setUseImageFiltersForPrediction(false);
+    setPredictionThresholds("0.15, 0.25, 0.35, 0.5, 0.65");
+    setPredictionFilters(defaultPredictionFilters());
+    setShowGroundTruthLayer(true);
+    setShowPredictionLayer(true);
+    setExportCapabilities(null);
+    setExports([]);
+    setExportError(null);
+    setIsCreatingExport(null);
+    setNavigationNotice(null);
+  }
+
   function commitWorkflowStep(stepId: WorkflowStep) {
     setNavigationNotice(null);
     setPendingWorkflowStep(null);
@@ -862,6 +968,18 @@ export default function App() {
     }
   }
 
+  async function handleStorageChanged() {
+    const loadedDataset = importedDataset;
+    await refreshProjects();
+    if (skipNextStorageWorkspaceRefreshRef.current) {
+      skipNextStorageWorkspaceRefreshRef.current = false;
+      return;
+    }
+    if (loadedDataset) {
+      await loadDatasetWorkspace(loadedDataset);
+    }
+  }
+
   async function loadDatasetWorkspace(dataset: DatasetImportResponse) {
     setImportedDataset(dataset);
     setProjectName(dataset.project_name);
@@ -905,6 +1023,7 @@ export default function App() {
     setDimensionRefresh(null);
     setVersions(versionResponse.items);
     setRuns(runResponse.items);
+    setRunLogs({});
     await refreshRunArtifacts(runResponse.items.map((run) => run.id));
     setPredictionJobs([]);
     setPredictions([]);
@@ -915,6 +1034,7 @@ export default function App() {
       await refreshRunSummary(runResponse.items[0].id);
       await refreshProjectTrainingSummary(dataset.project_id);
       await refreshPredictionJobs(runResponse.items[0].id);
+      await refreshExports(runResponse.items[0].id);
     } else {
       setRunSummary(null);
       setProjectExperimentSummary(null);
@@ -2236,7 +2356,29 @@ export default function App() {
           </div>
         </div>
       ) : null}
-      {currentStep === "dataset" ? <section className="panel">
+      {currentStep === "dataset" ? <div className="dataset-page">
+        <div className="dataset-primary-tabs" role="tablist" aria-label="项目与数据视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={datasetPageTab === "import"}
+            onClick={() => setDatasetPageTab("import")}
+          >
+            <Upload size={16} />
+            导入数据
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={datasetPageTab === "management"}
+            onClick={() => setDatasetPageTab("management")}
+          >
+            <Database size={16} />
+            数据管理
+          </button>
+        </div>
+
+        {datasetPageTab === "import" ? <section className="panel">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">数据集导入</p>
@@ -2380,7 +2522,14 @@ export default function App() {
             {importedDataset.project_name} / {importedDataset.dataset_name}
           </div>
         ) : null}
-      </section> : null}
+        </section> : (
+          <StorageManagementView
+            loadedDatasetId={importedDataset?.dataset_id ?? null}
+            onDatasetTrashed={() => clearLoadedDatasetWorkspace()}
+            onStorageChanged={handleStorageChanged}
+          />
+        )}
+      </div> : null}
 
       {currentStep === "quality" ? <section className="prep-grid" aria-label="训练准备情况">
         <section className="panel prep-panel">
