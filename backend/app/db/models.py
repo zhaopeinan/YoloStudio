@@ -33,6 +33,31 @@ class Project(TimestampMixin, Base):
     training_runs: Mapped[list["TrainingRun"]] = relationship(back_populates="project")
 
 
+class TrashItem(TimestampMixin, Base):
+    __tablename__ = "trash_items"
+    __table_args__ = (
+        UniqueConstraint("entity_type", "entity_id", name="uq_trash_items_entity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    dataset_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    version_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    original_path: Mapped[str] = mapped_column(Text, nullable=False)
+    trash_path: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    purge_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
 class Dataset(TimestampMixin, Base):
     __tablename__ = "datasets"
 
