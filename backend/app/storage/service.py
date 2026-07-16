@@ -45,7 +45,8 @@ from app.storage.visibility import (
 )
 
 
-ACTIVE_RUN_STATUSES = {"queued", "preparing", "running"}
+ENDED_RUN_STATUSES = {"completed", "failed", "cancelled"}
+ENDED_CHILD_JOB_STATUSES = {"completed", "failed", "cancelled"}
 TRASH_RETENTION_DAYS = 30
 CATALOG_ENTITY_TYPES = {"dataset", "dataset_version"}
 TRASH_ENTITY_TYPES = {"dataset", "dataset_version", "training_run"}
@@ -484,7 +485,7 @@ def _trash_context(
         if version is None:
             raise StorageEntityNotFoundError("训练任务关联的标注版本不存在")
         blockers = []
-        if entity.status in ACTIVE_RUN_STATUSES:
+        if entity.status not in ENDED_RUN_STATUSES:
             blockers.append(
                 StorageBlocker(
                     entity_type="training_run",
@@ -493,6 +494,36 @@ def _trash_context(
                     status=entity.status,
                 )
             )
+        active_prediction_jobs = db.scalars(
+            select(PredictionJob).where(
+                PredictionJob.run_id == entity.id,
+                PredictionJob.status.not_in(ENDED_CHILD_JOB_STATUSES),
+            )
+        ).all()
+        blockers.extend(
+            StorageBlocker(
+                entity_type="prediction_job",
+                entity_id=job.id,
+                display_name=f"预测任务 #{job.id}",
+                status=job.status,
+            )
+            for job in active_prediction_jobs
+        )
+        active_exports = db.scalars(
+            select(ExportArtifact).where(
+                ExportArtifact.run_id == entity.id,
+                ExportArtifact.status.not_in(ENDED_CHILD_JOB_STATUSES),
+            )
+        ).all()
+        blockers.extend(
+            StorageBlocker(
+                entity_type="export_artifact",
+                entity_id=artifact.id,
+                display_name=f"模型导出 #{artifact.id}",
+                status=artifact.status,
+            )
+            for artifact in active_exports
+        )
         return (
             entity.project_id,
             version.dataset_id,
@@ -515,7 +546,13 @@ def _raise_for_blockers(
         "dataset_version": "该标注版本仍有关联的训练任务，请先将关联训练任务移入回收站。",
         "training_run": "训练任务仍在运行中，无法移入回收站。",
     }
-    raise StorageConflictError(messages[entity_type], blockers)
+    message = messages[entity_type]
+    if entity_type == "training_run" and any(
+        blocker.entity_type in {"prediction_job", "export_artifact"}
+        for blocker in blockers
+    ):
+        message = "训练任务仍有关联任务正在处理中，无法移入回收站。"
+    raise StorageConflictError(message, blockers)
 
 
 def _trash_summary(
@@ -894,16 +931,19 @@ def _mark_reconcile_error(db: Session, item: TrashItem, message: str) -> None:
     db.commit()
 
 
-def _cleanup_abandoned_purging(db: Session, settings: Settings) -> None:
+def _cleanup_abandoned_purging(
+    db: Session,
+    settings: Settings,
+) -> tuple[int, int]:
     purging_root = _purging_path(settings, 0).parent
     if not purging_root.is_dir():
-        return
+        return 0, 0
+    reconciled = 0
+    errors = 0
     for staged in purging_root.iterdir():
         if not staged.is_dir() or not staged.name.isdigit():
             continue
         trash_id = int(staged.name)
-        if db.get(TrashItem, trash_id) is not None:
-            continue
         marker = staged / ".purge.json"
         try:
             payload = json.loads(marker.read_text(encoding="utf-8"))
@@ -915,8 +955,68 @@ def _cleanup_abandoned_purging(db: Session, settings: Settings) -> None:
             "dataset": Dataset,
         }.get(payload.get("entity_type"))
         entity_id = payload.get("entity_id")
-        if model is not None and isinstance(entity_id, int) and db.get(model, entity_id) is None:
-            shutil.rmtree(staged, ignore_errors=True)
+        if model is None or not isinstance(entity_id, int):
+            continue
+
+        item = db.get(TrashItem, trash_id)
+        entity = db.get(model, entity_id)
+        if item is None:
+            if entity is None:
+                shutil.rmtree(staged, ignore_errors=True)
+                reconciled += 1
+            continue
+
+        try:
+            if item.entity_type != payload["entity_type"] or item.entity_id != entity_id:
+                _mark_reconcile_error(
+                    db,
+                    item,
+                    "彻底删除暂存标记与回收站记录不一致，需要人工检查。",
+                )
+                errors += 1
+                continue
+            if entity is None:
+                _mark_reconcile_error(
+                    db,
+                    item,
+                    "回收站记录仍存在，但源数据记录缺失，需要人工检查。",
+                )
+                errors += 1
+                continue
+
+            source, trash = _validate_trash_item_paths(db, settings, item)
+            conflicts = []
+            if trash.exists():
+                conflicts.append("规范回收站目录")
+            if source.exists():
+                conflicts.append("原目录")
+            if conflicts:
+                _mark_reconcile_error(
+                    db,
+                    item,
+                    f"彻底删除恢复发生路径冲突：{'、'.join(conflicts)}已存在，需要人工检查。",
+                )
+                errors += 1
+                continue
+
+            trash.parent.mkdir(parents=True, exist_ok=True)
+            staged.rename(trash)
+            (trash / ".purge.json").unlink(missing_ok=True)
+            item.status = "active"
+            item.error_message = None
+            db.commit()
+            reconciled += 1
+        except Exception as exc:
+            db.rollback()
+            current = db.get(TrashItem, trash_id)
+            if current is not None:
+                try:
+                    _mark_reconcile_error(db, current, str(exc))
+                except SQLAlchemyError:
+                    db.rollback()
+            errors += 1
+
+    return reconciled, errors
 
 
 def reconcile_trash(db: Session, settings: Settings) -> ReconcileSummary:
@@ -965,5 +1065,7 @@ def reconcile_trash(db: Session, settings: Settings) -> ReconcileSummary:
                 except SQLAlchemyError:
                     db.rollback()
             errors += 1
-    _cleanup_abandoned_purging(db, settings)
+    purging_reconciled, purging_errors = _cleanup_abandoned_purging(db, settings)
+    reconciled += purging_reconciled
+    errors += purging_errors
     return ReconcileSummary(reconciled_count=reconciled, error_count=errors)

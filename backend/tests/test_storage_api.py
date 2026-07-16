@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from test_dataset_import_api import create_import_zip, isolated_client
@@ -301,6 +302,57 @@ def _set_run_status(tmp_path: Path, run_id: int, status: str) -> None:
         run.status = status
         db.commit()
     bind.dispose()
+
+
+@pytest.mark.parametrize(
+    ("child_type", "status", "expected_entity_type", "expected_name"),
+    [
+        ("prediction", "running", "prediction_job", "预测任务"),
+        ("export", "queued", "export_artifact", "模型导出"),
+    ],
+)
+def test_completed_run_trash_is_blocked_by_active_child_job(
+    tmp_path: Path,
+    child_type: str,
+    status: str,
+    expected_entity_type: str,
+    expected_name: str,
+):
+    from app.core.settings import Settings
+    from app.db.models import ExportArtifact, PredictionJob
+    from app.db.session import create_engine_for_settings
+
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        bind = create_engine_for_settings(
+            Settings(workspace_root=tmp_path / "workspace")
+        )
+        with Session(bind) as db:
+            model = PredictionJob if child_type == "prediction" else ExportArtifact
+            child = db.scalar(
+                select(model).where(model.run_id == fixture["completed_run_id"])
+            )
+            assert child is not None
+            child.status = status
+            db.commit()
+            child_id = child.id
+        bind.dispose()
+
+        response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert detail["message"] == "训练任务仍有关联任务正在处理中，无法移入回收站。"
+        assert detail["blockers"] == [
+            {
+                "entity_type": expected_entity_type,
+                "entity_id": child_id,
+                "display_name": f"{expected_name} #{child_id}",
+                "status": status,
+            }
+        ]
 
 
 def test_storage_trash_enforces_dependencies_and_moves_child_to_parent(

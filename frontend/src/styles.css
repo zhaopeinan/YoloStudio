@@ -351,6 +351,65 @@ h2 {
   background: #fff0e8;
 }
 
+.trash-table {
+  min-width: 1080px;
+}
+
+.trash-table th:nth-child(7) {
+  width: 18%;
+}
+
+.trash-status-cell small {
+  line-height: 1.35;
+}
+
+.trash-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.trash-status-badge.active {
+  color: #14532d;
+  background: #e8f7ee;
+}
+
+.trash-status-badge.pending {
+  color: #184e63;
+  background: #e8f2f6;
+}
+
+.trash-status-badge.error,
+.trash-status-badge.unknown {
+  color: #8a2c16;
+  background: #fff0e8;
+}
+
+.trash-row.error {
+  background: #fffaf7;
+}
+
+.trash-row.error:hover {
+  background: #fff5ef;
+}
+
+.purge-risk-text,
+.purge-risk-warning {
+  color: #8a2c16;
+  font-weight: 700;
+}
+
+.purge-risk-warning {
+  border-left: 3px solid #c24120;
+  padding: 8px 10px;
+  background: #fff5ef;
+}
+
 .blocker-summary {
   display: flex;
   align-items: center;

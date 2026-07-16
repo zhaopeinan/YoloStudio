@@ -538,8 +538,13 @@ export type ExportCapabilities = {
 
 export type StorageEntityType = "dataset" | "dataset_version" | "training_run";
 
+export type StorageBlockerEntityType =
+  | StorageEntityType
+  | "prediction_job"
+  | "export_artifact";
+
 export type StorageBlocker = {
-  entity_type: StorageEntityType;
+  entity_type: StorageBlockerEntityType;
   entity_id: number;
   display_name: string;
   status: string | null;

@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import json
 import shutil
 
 import pytest
@@ -354,6 +355,97 @@ def test_reconcile_cleans_abandoned_staged_directory_after_db_purge(
             assert db.get(TrainingRun, fixture["completed_run_id"]) is None
             reconcile_trash(db, _settings(tmp_path))
         assert not staged.exists()
+
+
+def test_reconcile_restores_interrupted_purge_to_canonical_trash_path(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        trashed = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        ).json()
+        trash = Path(trashed["trash_path"])
+        staged = (
+            _settings(tmp_path).workspace_root
+            / ".trash"
+            / ".purging"
+            / str(trashed["id"])
+        )
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        (trash / ".purge.json").write_text(
+            json.dumps(
+                {
+                    "entity_type": "training_run",
+                    "entity_id": fixture["completed_run_id"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        trash.rename(staged)
+
+        with _db(tmp_path) as db:
+            summary = reconcile_trash(db, _settings(tmp_path))
+
+        assert summary.reconciled_count == 1
+        assert summary.error_count == 0
+        assert trash.is_dir()
+        assert not staged.exists()
+        assert not (trash / ".purge.json").exists()
+        with _db(tmp_path) as db:
+            item = db.get(TrashItem, trashed["id"])
+            assert item is not None
+            assert item.status == "active"
+            assert item.error_message is None
+            assert db.get(TrainingRun, fixture["completed_run_id"]) is not None
+
+
+@pytest.mark.parametrize("conflict", ["trash", "source"])
+def test_reconcile_interrupted_purge_conflict_marks_error_without_deleting_paths(
+    tmp_path: Path,
+    conflict: str,
+):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        trashed = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        ).json()
+        source = Path(trashed["original_path"])
+        trash = Path(trashed["trash_path"])
+        staged = (
+            _settings(tmp_path).workspace_root
+            / ".trash"
+            / ".purging"
+            / str(trashed["id"])
+        )
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        (trash / ".purge.json").write_text(
+            json.dumps(
+                {
+                    "entity_type": "training_run",
+                    "entity_id": fixture["completed_run_id"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        trash.rename(staged)
+        conflict_path = trash if conflict == "trash" else source
+        conflict_path.mkdir(parents=True)
+        (conflict_path / "keep.txt").write_text("keep", encoding="utf-8")
+
+        with _db(tmp_path) as db:
+            summary = reconcile_trash(db, _settings(tmp_path))
+
+        assert summary.reconciled_count == 0
+        assert summary.error_count == 1
+        assert staged.is_dir()
+        assert (staged / ".purge.json").is_file()
+        assert conflict_path.is_dir()
+        assert (conflict_path / "keep.txt").read_text(encoding="utf-8") == "keep"
+        with _db(tmp_path) as db:
+            item = db.get(TrashItem, trashed["id"])
+            assert item is not None
+            assert item.status == "error"
+            assert "冲突" in (item.error_message or "")
+            assert db.get(TrainingRun, fixture["completed_run_id"]) is not None
 
 
 def test_restore_db_failure_leaves_recoverable_pending_state(tmp_path: Path, monkeypatch):

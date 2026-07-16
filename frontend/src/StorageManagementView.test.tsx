@@ -114,6 +114,34 @@ const trashItem = {
   purge_after: "2026-08-14T08:00:00Z",
 };
 
+const errorTrashItem = {
+  ...trashItem,
+  id: 22,
+  entity_id: 4,
+  display_name: "异常标注版本",
+  trash_path: "/workspace/.trash/22",
+  status: "error",
+  error_message: "回收站目录与数据库记录不一致，请检查磁盘目录。",
+};
+
+const pendingMoveTrashItem = {
+  ...trashItem,
+  id: 23,
+  entity_id: 5,
+  display_name: "正在移入的版本",
+  trash_path: "/workspace/.trash/23",
+  status: "pending_move",
+};
+
+const pendingRestoreTrashItem = {
+  ...trashItem,
+  id: 24,
+  entity_id: 6,
+  display_name: "正在恢复的版本",
+  trash_path: "/workspace/.trash/24",
+  status: "pending_restore",
+};
+
 function arrangeApi() {
   apiMock.listStorageItems.mockResolvedValue({
     items: [dataset, version],
@@ -216,6 +244,43 @@ describe("StorageManagementView", () => {
     await user.click(purgeButton);
 
     expect(apiMock.purgeTrashItem).toHaveBeenCalledWith(21, "旧标注版本");
+  });
+
+  it("按回收站状态展示诊断信息并限制操作", async () => {
+    const user = userEvent.setup();
+    apiMock.listTrashItems.mockResolvedValue({
+      items: [trashItem, errorTrashItem, pendingMoveTrashItem, pendingRestoreTrashItem],
+      total_size_bytes: 24_576,
+    });
+    render(
+      <StorageManagementView
+        loadedDatasetId={null}
+        onDatasetTrashed={vi.fn()}
+        onStorageChanged={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "回收站" }));
+    const table = await screen.findByRole("table", { name: "回收站数据" });
+
+    const activeRow = within(table).getByRole("row", { name: /旧标注版本/ });
+    expect(within(activeRow).getByText("可恢复")).toBeInTheDocument();
+    expect(within(activeRow).getByRole("button", { name: "恢复 旧标注版本" })).toBeEnabled();
+    expect(within(activeRow).getByRole("button", { name: "彻底删除 旧标注版本" })).toBeEnabled();
+
+    const errorRow = within(table).getByRole("row", { name: /异常标注版本/ });
+    expect(within(errorRow).getByText("需要检查")).toBeInTheDocument();
+    expect(within(errorRow).getByText(errorTrashItem.error_message)).toBeInTheDocument();
+    expect(within(errorRow).getByText("彻底删除前请确认磁盘数据状态")).toBeInTheDocument();
+    expect(within(errorRow).getByRole("button", { name: "恢复 异常标注版本" })).toBeDisabled();
+    expect(within(errorRow).getByRole("button", { name: "彻底删除 异常标注版本" })).toBeEnabled();
+
+    for (const name of ["正在移入的版本", "正在恢复的版本"]) {
+      const pendingRow = within(table).getByRole("row", { name: new RegExp(name) });
+      expect(within(pendingRow).getByText("处理中")).toBeInTheDocument();
+      expect(within(pendingRow).getByRole("button", { name: `恢复 ${name}` })).toBeDisabled();
+      expect(within(pendingRow).getByRole("button", { name: `彻底删除 ${name}` })).toBeDisabled();
+    }
   });
 
   it("删除当前数据集后通知上层清空工作区", async () => {

@@ -91,6 +91,43 @@ function daysUntil(value: string): number {
   return Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 86_400_000));
 }
 
+function trashStatus(item: TrashItem) {
+  if (item.status === "active") {
+    return {
+      label: "可恢复",
+      className: "active",
+      detail: null,
+      canRestore: true,
+      canPurge: true,
+    };
+  }
+  if (item.status === "error") {
+    return {
+      label: "需要检查",
+      className: "error",
+      detail: item.error_message || "回收站记录状态异常，请检查磁盘数据。",
+      canRestore: false,
+      canPurge: true,
+    };
+  }
+  if (item.status === "pending_move" || item.status === "pending_restore") {
+    return {
+      label: "处理中",
+      className: "pending",
+      detail: item.status === "pending_move" ? "正在移入回收站" : "正在恢复数据",
+      canRestore: false,
+      canPurge: false,
+    };
+  }
+  return {
+    label: item.status || "状态未知",
+    className: "unknown",
+    detail: "请刷新页面后重试；若状态未恢复，请检查后端日志。",
+    canRestore: false,
+    canPurge: false,
+  };
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "操作失败，请稍后重试";
 }
@@ -366,6 +403,11 @@ export function StorageManagementView({
               </IconButton>
             </header>
             <p>此操作不可恢复。请输入“{purgeTarget.display_name}”确认。</p>
+            {purgeTarget.status === "error" && (
+              <p className="purge-risk-warning">
+                该记录处于异常状态。彻底删除前请确认磁盘数据状态，避免遗漏或误删文件。
+              </p>
+            )}
             <label>
               输入名称确认
               <input
@@ -529,7 +571,7 @@ function TrashTable({
   const [openMenu, setOpenMenu] = useState<number | null>(null);
 
   return (
-    <table className="storage-table" aria-label="回收站数据">
+    <table className="storage-table trash-table" aria-label="回收站数据">
       <thead>
         <tr>
           <th scope="col">名称</th>
@@ -538,76 +580,96 @@ function TrashTable({
           <th scope="col">占用空间</th>
           <th scope="col">删除时间</th>
           <th scope="col">自动清理</th>
+          <th scope="col">状态</th>
           <th scope="col">操作</th>
         </tr>
       </thead>
       <tbody>
         {items.length === 0 && (
           <tr className="storage-empty-row">
-            <td colSpan={7}>回收站为空</td>
+            <td colSpan={8}>回收站为空</td>
           </tr>
         )}
-        {items.map((item) => (
-          <tr key={item.id}>
-            <th scope="row">{item.display_name}</th>
-            <td>{entityLabel(item.entity_type)}</td>
-            <td>
-              {item.summary.image_count !== undefined
-                ? `${item.summary.image_count} 张图像 / ${item.summary.annotation_count ?? 0} 个标注`
-                : item.summary.model || runStatusLabel(item.summary.status ?? "")}
-            </td>
-            <td>{formatBytes(item.size_bytes)}</td>
-            <td>{formatDate(item.deleted_at)}</td>
-            <td>{daysUntil(item.purge_after)} 天后清理</td>
-            <td>
-              <div className="table-actions">
-                <IconButton label={`恢复 ${item.display_name}`} disabled={busy} onClick={() => void onRestore(item)}>
-                  <RotateCcw size={16} />
-                </IconButton>
-                <IconButton label={`彻底删除 ${item.display_name}`} disabled={busy} onClick={() => onPurge(item)}>
-                  <Trash2 size={16} />
-                </IconButton>
-              </div>
-              <div className="compact-actions">
-                <IconButton
-                  label={`更多操作 ${item.display_name}`}
-                  disabled={busy}
-                  onClick={() => setOpenMenu(openMenu === item.id ? null : item.id)}
-                >
-                  <MoreHorizontal size={16} />
-                </IconButton>
-                {openMenu === item.id && (
-                  <div className="compact-actions-menu" role="menu" aria-label={`${item.display_name} 操作`}>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={busy}
-                      onClick={() => {
-                        setOpenMenu(null);
-                        onRestore(item);
-                      }}
-                    >
-                      <RotateCcw size={16} />
-                      恢复
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={busy}
-                      onClick={() => {
-                        setOpenMenu(null);
-                        onPurge(item);
-                      }}
-                    >
-                      <Trash2 size={16} />
-                      彻底删除
-                    </button>
-                  </div>
+        {items.map((item) => {
+          const status = trashStatus(item);
+          const actionsDisabled = !status.canRestore && !status.canPurge;
+          return (
+            <tr key={item.id} className={`trash-row ${status.className}`}>
+              <th scope="row">{item.display_name}</th>
+              <td>{entityLabel(item.entity_type)}</td>
+              <td>
+                {item.summary.image_count !== undefined
+                  ? `${item.summary.image_count} 张图像 / ${item.summary.annotation_count ?? 0} 个标注`
+                  : item.summary.model || runStatusLabel(item.summary.status ?? "")}
+              </td>
+              <td>{formatBytes(item.size_bytes)}</td>
+              <td>{formatDate(item.deleted_at)}</td>
+              <td>{daysUntil(item.purge_after)} 天后清理</td>
+              <td className="trash-status-cell">
+                <span className={`trash-status-badge ${status.className}`}>{status.label}</span>
+                {status.detail && <small>{status.detail}</small>}
+                {item.status === "error" && (
+                  <small className="purge-risk-text">彻底删除前请确认磁盘数据状态</small>
                 )}
-              </div>
-            </td>
-          </tr>
-        ))}
+              </td>
+              <td>
+                <div className="table-actions">
+                  <IconButton
+                    label={`恢复 ${item.display_name}`}
+                    disabled={busy || !status.canRestore}
+                    onClick={() => void onRestore(item)}
+                  >
+                    <RotateCcw size={16} />
+                  </IconButton>
+                  <IconButton
+                    label={`彻底删除 ${item.display_name}`}
+                    disabled={busy || !status.canPurge}
+                    onClick={() => onPurge(item)}
+                  >
+                    <Trash2 size={16} />
+                  </IconButton>
+                </div>
+                <div className="compact-actions">
+                  <IconButton
+                    label={`更多操作 ${item.display_name}`}
+                    disabled={busy || actionsDisabled}
+                    onClick={() => setOpenMenu(openMenu === item.id ? null : item.id)}
+                  >
+                    <MoreHorizontal size={16} />
+                  </IconButton>
+                  {openMenu === item.id && (
+                    <div className="compact-actions-menu" role="menu" aria-label={`${item.display_name} 操作`}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={busy || !status.canRestore}
+                        onClick={() => {
+                          setOpenMenu(null);
+                          onRestore(item);
+                        }}
+                      >
+                        <RotateCcw size={16} />
+                        恢复
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={busy || !status.canPurge}
+                        onClick={() => {
+                          setOpenMenu(null);
+                          onPurge(item);
+                        }}
+                      >
+                        <Trash2 size={16} />
+                        彻底删除
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
