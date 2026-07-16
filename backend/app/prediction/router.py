@@ -27,6 +27,7 @@ from app.prediction.schemas import (
     PredictionList,
     PredictionRead,
 )
+from app.storage.visibility import StorageEntityNotFoundError, require_active_entity
 
 
 router = APIRouter(prefix="/api", tags=["prediction"])
@@ -87,6 +88,25 @@ def _read_prediction(prediction: Prediction) -> PredictionRead:
     )
 
 
+def _require_active_run(db: Session, run_id: int) -> TrainingRun:
+    try:
+        require_active_entity(db, "training_run", run_id)
+    except StorageEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    run = db.get(TrainingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+    return run
+
+
+def _get_job_for_active_run(db: Session, job_id: int) -> PredictionJob:
+    job = db.get(PredictionJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Prediction job was not found")
+    _require_active_run(db, job.run_id)
+    return job
+
+
 @router.post("/training/runs/{run_id}/prediction-jobs", response_model=PredictionJobRead)
 def create_run_prediction_job(
     run_id: int,
@@ -94,9 +114,7 @@ def create_run_prediction_job(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> PredictionJobRead:
-    run = db.get(TrainingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    run = _require_active_run(db, run_id)
 
     job = create_prediction_job(
         db,
@@ -120,9 +138,7 @@ def create_run_prediction_threshold_scan(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> PredictionThresholdScanRead:
-    run = db.get(TrainingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    run = _require_active_run(db, run_id)
 
     jobs: list[PredictionJobRead] = []
     for threshold in request.thresholds:
@@ -141,8 +157,7 @@ def create_run_prediction_threshold_scan(
 
 @router.get("/training/runs/{run_id}/prediction-jobs", response_model=PredictionJobList)
 def list_run_prediction_jobs(run_id: int, db: Session = Depends(get_db)) -> PredictionJobList:
-    if db.get(TrainingRun, run_id) is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    _require_active_run(db, run_id)
     jobs = db.scalars(
         select(PredictionJob).where(PredictionJob.run_id == run_id).order_by(PredictionJob.id.desc())
     ).all()
@@ -163,8 +178,7 @@ def list_job_predictions(
     timestamp_max: float | None = None,
     db: Session = Depends(get_db),
 ) -> PredictionList:
-    if db.get(PredictionJob, job_id) is None:
-        raise HTTPException(status_code=404, detail="Prediction job was not found")
+    _get_job_for_active_run(db, job_id)
     query = select(Prediction).where(Prediction.job_id == job_id)
     needs_image_join = any(
         value is not None
@@ -203,9 +217,7 @@ def list_job_predictions(
 
 @router.get("/prediction-jobs/{job_id}/logs", response_model=PredictionJobLogs)
 def get_prediction_job_logs(job_id: int, db: Session = Depends(get_db)) -> PredictionJobLogs:
-    job = db.get(PredictionJob, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Prediction job was not found")
+    job = _get_job_for_active_run(db, job_id)
     return PredictionJobLogs(job_id=job.id, text=read_prediction_logs(job))
 
 
@@ -215,8 +227,7 @@ def get_prediction_image_review(
     image_id: int,
     db: Session = Depends(get_db),
 ) -> PredictionImageReview:
-    if db.get(PredictionJob, job_id) is None:
-        raise HTTPException(status_code=404, detail="Prediction job was not found")
+    _get_job_for_active_run(db, job_id)
     image = db.get(Image, image_id)
     if image is None:
         raise HTTPException(status_code=404, detail="Image was not found")

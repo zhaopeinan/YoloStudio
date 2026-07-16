@@ -14,6 +14,7 @@ from app.quality.schemas import (
     QualityTagApplyRequest,
     QualityTagApplySummary,
 )
+from app.storage.visibility import StorageEntityNotFoundError, require_active_entity
 
 
 router = APIRouter(prefix="/api/datasets", tags=["quality"])
@@ -28,6 +29,17 @@ QUALITY_ISSUE_TYPES = {
     "unknown_class_reference",
 }
 ANNOTATION_TAG_ISSUE_TYPES = {"tiny_box", "duplicate_box", "invalid_box"}
+
+
+def _get_active_dataset(db: Session, dataset_id: int) -> Dataset:
+    try:
+        require_active_entity(db, "dataset", dataset_id)
+    except StorageEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset was not found")
+    return dataset
 
 
 def is_invalid_box(annotation: Annotation) -> bool:
@@ -96,9 +108,7 @@ def _import_warnings(dataset: Dataset, warning_type: str | None = None) -> list[
 
 
 def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary:
-    dataset = db.get(Dataset, dataset_id)
-    if dataset is None:
-        raise HTTPException(status_code=404, detail="Dataset was not found")
+    dataset = _get_active_dataset(db, dataset_id)
 
     image_count = (
         db.scalar(select(func.count()).select_from(Image).where(Image.dataset_id == dataset_id))
@@ -277,9 +287,7 @@ def build_quality_issues(
     limit: int = 50,
     offset: int = 0,
 ) -> DatasetQualityIssueList:
-    dataset = db.get(Dataset, dataset_id)
-    if dataset is None:
-        raise HTTPException(status_code=404, detail="Dataset was not found")
+    dataset = _get_active_dataset(db, dataset_id)
     if issue_type != "all" and issue_type not in QUALITY_ISSUE_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported quality issue type")
 

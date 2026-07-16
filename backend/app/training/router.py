@@ -11,6 +11,11 @@ from app.db.models import DatasetVersion, Project, TrainingRun
 from app.db.session import get_db
 from app.experiments.schemas import ProjectExperimentSummary, RunExperimentSummary
 from app.experiments.summary import build_project_experiment_summary, build_run_experiment_summary
+from app.storage.visibility import (
+    StorageEntityNotFoundError,
+    active_entity_predicate,
+    require_active_entity,
+)
 from app.training.runner import (
     cancel_training_run,
     create_queued_run,
@@ -125,6 +130,21 @@ def _read_run(db: Session, run: TrainingRun) -> TrainingRunRead:
     )
 
 
+def _require_active(db: Session, entity_type: str, entity_id: int) -> None:
+    try:
+        require_active_entity(db, entity_type, entity_id)
+    except StorageEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _get_active_run(db: Session, run_id: int) -> TrainingRun:
+    _require_active(db, "training_run", run_id)
+    run = db.get(TrainingRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Training run was not found")
+    return run
+
+
 @router.post("/training/runs", response_model=TrainingRunRead)
 def create_training_run(
     request: TrainingRunCreate,
@@ -132,6 +152,7 @@ def create_training_run(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> TrainingRunRead:
+    _require_active(db, "dataset_version", request.version_id)
     version = db.get(DatasetVersion, request.version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Dataset version was not found")
@@ -150,7 +171,12 @@ def list_project_training_runs(project_id: int, db: Session = Depends(get_db)) -
     if db.get(Project, project_id) is None:
         raise HTTPException(status_code=404, detail="Project was not found")
     runs = db.scalars(
-        select(TrainingRun).where(TrainingRun.project_id == project_id).order_by(TrainingRun.id.desc())
+        select(TrainingRun)
+        .where(
+            TrainingRun.project_id == project_id,
+            active_entity_predicate("training_run", TrainingRun.id),
+        )
+        .order_by(TrainingRun.id.desc())
     ).all()
     return TrainingRunList(items=[_read_run(db, run) for run in runs])
 
@@ -167,9 +193,7 @@ def get_project_training_summary(
 
 @router.get("/training/runs/{run_id}", response_model=TrainingRunRead)
 def get_training_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunRead:
-    run = db.get(TrainingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    run = _get_active_run(db, run_id)
     return _read_run(db, run)
 
 
@@ -178,17 +202,13 @@ def get_training_run_artifacts(
     run_id: int,
     db: Session = Depends(get_db),
 ) -> TrainingRunArtifactSummary:
-    run = db.get(TrainingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    run = _get_active_run(db, run_id)
     return _list_run_artifacts(run)
 
 
 @router.post("/training/runs/{run_id}/cancel", response_model=TrainingRunRead)
 def cancel_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunRead:
-    run = db.get(TrainingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    run = _get_active_run(db, run_id)
     if not cancel_training_run(run_id, bind=db.get_bind()):
         raise HTTPException(status_code=400, detail="Training run is not active")
     db.refresh(run)
@@ -197,9 +217,7 @@ def cancel_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunRead:
 
 @router.get("/training/runs/{run_id}/logs", response_model=TrainingRunLogs)
 def get_training_run_logs(run_id: int, db: Session = Depends(get_db)) -> TrainingRunLogs:
-    run = db.get(TrainingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    run = _get_active_run(db, run_id)
     return TrainingRunLogs(run_id=run.id, text=read_run_logs(run))
 
 
@@ -208,7 +226,5 @@ def get_training_run_summary(
     run_id: int,
     db: Session = Depends(get_db),
 ) -> RunExperimentSummary:
-    run = db.get(TrainingRun, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Training run was not found")
+    run = _get_active_run(db, run_id)
     return build_run_experiment_summary(db, run)

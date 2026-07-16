@@ -25,6 +25,11 @@ from app.datasets.schemas import (
 )
 from app.db.models import Annotation, ClassDef, Dataset, Image, Prediction, Project
 from app.db.session import get_db
+from app.storage.visibility import (
+    StorageEntityNotFoundError,
+    active_entity_predicate,
+    require_active_entity,
+)
 
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
@@ -32,6 +37,17 @@ FAILURE_TYPE_PATTERN = "^(all|matched|false_positive|false_negative|class_confus
 
 
 projects_router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+def _get_active_dataset(db: Session, dataset_id: int) -> Dataset:
+    try:
+        require_active_entity(db, "dataset", dataset_id)
+    except StorageEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset was not found")
+    return dataset
 
 
 def _altitude_band(altitude: float | None) -> str:
@@ -63,7 +79,11 @@ def _coverage_bucket(
 @projects_router.get("", response_model=ProjectList)
 def list_projects(db: Session = Depends(get_db)) -> ProjectList:
     projects = db.scalars(select(Project).order_by(Project.id)).all()
-    datasets = db.scalars(select(Dataset).order_by(Dataset.project_id, Dataset.id)).all()
+    datasets = db.scalars(
+        select(Dataset)
+        .where(active_entity_predicate("dataset", Dataset.id))
+        .order_by(Dataset.project_id, Dataset.id)
+    ).all()
     datasets_by_project: dict[int, list[Dataset]] = {}
     for dataset in datasets:
         datasets_by_project.setdefault(dataset.project_id, []).append(dataset)
@@ -128,9 +148,7 @@ def list_dataset_images(
     altitude_max: float | None = Query(None),
     db: Session = Depends(get_db),
 ) -> DatasetImageList:
-    dataset = db.get(Dataset, dataset_id)
-    if dataset is None:
-        raise HTTPException(status_code=404, detail="Dataset was not found")
+    _get_active_dataset(db, dataset_id)
 
     annotation_counts = (
         select(Annotation.image_id, func.count(Annotation.id).label("annotation_count"))
@@ -167,6 +185,7 @@ def list_dataset_images(
             exists().where(
                 Prediction.image_id == Image.id,
                 Prediction.failure_type == failure_type,
+                active_entity_predicate("training_run", Prediction.run_id),
             )
         )
 
@@ -206,9 +225,7 @@ def get_dataset_coverage(
     dataset_id: int,
     db: Session = Depends(get_db),
 ) -> DatasetCoverageSummary:
-    dataset = db.get(Dataset, dataset_id)
-    if dataset is None:
-        raise HTTPException(status_code=404, detail="Dataset was not found")
+    dataset = _get_active_dataset(db, dataset_id)
 
     images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
     image_ids = {image.id for image in images}
@@ -334,9 +351,7 @@ def refresh_dataset_image_dimensions(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> DatasetDimensionRefreshSummary:
-    dataset = db.get(Dataset, dataset_id)
-    if dataset is None:
-        raise HTTPException(status_code=404, detail="Dataset was not found")
+    dataset = _get_active_dataset(db, dataset_id)
 
     workspace_root = settings.workspace_root.resolve()
     images = db.scalars(
@@ -383,6 +398,7 @@ def get_image_file(
     image = db.get(Image, image_id)
     if image is None:
         raise HTTPException(status_code=404, detail="Image was not found")
+    _get_active_dataset(db, image.dataset_id)
 
     file_path = (settings.workspace_root / image.relative_path).resolve()
     workspace_root = settings.workspace_root.resolve()

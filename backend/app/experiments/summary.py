@@ -18,6 +18,7 @@ from app.experiments.schemas import (
     ThresholdPoint,
     ThresholdRecommendation,
 )
+from app.storage.visibility import active_entity_predicate
 
 
 def build_run_experiment_summary(db: Session, run: TrainingRun) -> RunExperimentSummary:
@@ -37,7 +38,10 @@ def build_run_experiment_summary(db: Session, run: TrainingRun) -> RunExperiment
 def build_project_experiment_summary(db: Session, project_id: int) -> ProjectExperimentSummary:
     runs = db.scalars(
         select(TrainingRun)
-        .where(TrainingRun.project_id == project_id)
+        .where(
+            TrainingRun.project_id == project_id,
+            active_entity_predicate("training_run", TrainingRun.id),
+        )
         .order_by(TrainingRun.id.desc())
         .limit(50)
     ).all()

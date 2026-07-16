@@ -7,9 +7,21 @@ from sqlalchemy.orm import Session
 from app.annotations.schemas import AnnotationList, AnnotationRead, AnnotationReplace
 from app.db.models import Annotation, ClassDef, Dataset, Image
 from app.db.session import get_db
+from app.storage.visibility import StorageEntityNotFoundError, require_active_entity
 
 
 router = APIRouter(prefix="/api/images", tags=["annotations"])
+
+
+def _get_active_image(db: Session, image_id: int) -> Image:
+    image = db.get(Image, image_id)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Image was not found")
+    try:
+        require_active_entity(db, "dataset", image.dataset_id)
+    except StorageEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return image
 
 
 def _image_project_id(db: Session, image: Image) -> int:
@@ -47,8 +59,7 @@ def _list_annotations(db: Session, image_id: int) -> AnnotationList:
 
 @router.get("/{image_id}/annotations", response_model=AnnotationList)
 def list_image_annotations(image_id: int, db: Session = Depends(get_db)) -> AnnotationList:
-    if db.get(Image, image_id) is None:
-        raise HTTPException(status_code=404, detail="Image was not found")
+    _get_active_image(db, image_id)
     return _list_annotations(db, image_id)
 
 
@@ -58,9 +69,7 @@ def replace_image_annotations(
     request: AnnotationReplace,
     db: Session = Depends(get_db),
 ) -> AnnotationList:
-    image = db.get(Image, image_id)
-    if image is None:
-        raise HTTPException(status_code=404, detail="Image was not found")
+    image = _get_active_image(db, image_id)
 
     project_id = _image_project_id(db, image)
     class_ids = {annotation.class_id for annotation in request.annotations}

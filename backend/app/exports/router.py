@@ -17,6 +17,7 @@ from app.exports.schemas import (
     ExportCapabilities,
     ExportCreate,
 )
+from app.storage.visibility import StorageEntityNotFoundError, require_active_entity
 
 
 router = APIRouter(prefix="/api/training/runs", tags=["exports"])
@@ -40,6 +41,10 @@ def _read_export(artifact: ExportArtifact) -> ExportArtifactRead:
 
 
 def _get_run(db: Session, run_id: int) -> TrainingRun:
+    try:
+        require_active_entity(db, "training_run", run_id)
+    except StorageEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     run = db.get(TrainingRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Training run was not found")

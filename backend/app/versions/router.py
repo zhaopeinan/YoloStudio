@@ -9,9 +9,23 @@ from app.db.models import Dataset, DatasetVersion
 from app.db.session import get_db
 from app.versions.exporter import VersionExportError, create_dataset_version
 from app.versions.schemas import DatasetVersionCreate, DatasetVersionList, DatasetVersionRead
+from app.storage.visibility import (
+    StorageEntityNotFoundError,
+    active_entity_predicate,
+    require_active_entity,
+)
 
 
 router = APIRouter(prefix="/api/datasets", tags=["versions"])
+
+
+def _require_active_dataset(db: Session, dataset_id: int) -> None:
+    try:
+        require_active_entity(db, "dataset", dataset_id)
+    except StorageEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if db.get(Dataset, dataset_id) is None:
+        raise HTTPException(status_code=404, detail="Dataset was not found")
 
 
 def _read_version(version: DatasetVersion) -> DatasetVersionRead:
@@ -40,6 +54,7 @@ def create_version(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> DatasetVersionRead:
+    _require_active_dataset(db, dataset_id)
     try:
         version = create_dataset_version(db, settings, dataset_id, request.name, request.class_ids)
     except VersionExportError as exc:
@@ -51,12 +66,14 @@ def create_version(
 
 @router.get("/{dataset_id}/versions", response_model=DatasetVersionList)
 def list_versions(dataset_id: int, db: Session = Depends(get_db)) -> DatasetVersionList:
-    if db.get(Dataset, dataset_id) is None:
-        raise HTTPException(status_code=404, detail="Dataset was not found")
+    _require_active_dataset(db, dataset_id)
 
     versions = db.scalars(
         select(DatasetVersion)
-        .where(DatasetVersion.dataset_id == dataset_id)
+        .where(
+            DatasetVersion.dataset_id == dataset_id,
+            active_entity_predicate("dataset_version", DatasetVersion.id),
+        )
         .order_by(DatasetVersion.id.desc())
     ).all()
     return DatasetVersionList(items=[_read_version(version) for version in versions])
