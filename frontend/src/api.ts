@@ -536,6 +536,136 @@ export type ExportCapabilities = {
   reasons: Record<string, string>;
 };
 
+export type StorageEntityType = "dataset" | "dataset_version" | "training_run";
+
+export type StorageBlocker = {
+  entity_type: StorageEntityType;
+  entity_id: number;
+  display_name: string;
+  status: string | null;
+};
+
+export type StorageSplitCounts = {
+  train: number;
+  val: number;
+  test: number;
+};
+
+export type StorageItem = {
+  entity_type: "dataset" | "dataset_version";
+  entity_id: number;
+  display_name: string;
+  project_id: number;
+  project_name: string;
+  dataset_id: number | null;
+  version_id: number | null;
+  artifact_path: string;
+  size_bytes: number;
+  image_count: number | null;
+  annotation_count: number | null;
+  split_counts: StorageSplitCounts | null;
+  created_at: string;
+  protected: boolean;
+  blockers: StorageBlocker[];
+};
+
+export type StorageItemListResponse = {
+  items: StorageItem[];
+  total_size_bytes: number;
+};
+
+export type StorageRelatedRun = {
+  id: number;
+  status: string;
+  model: string;
+  size_bytes: number;
+  prediction_job_count: number;
+  export_count: number;
+  created_at: string;
+};
+
+export type StorageItemDetail = StorageItem & {
+  class_names: string[];
+  related_runs: StorageRelatedRun[];
+};
+
+export type TrashItemSummary = {
+  name?: string;
+  image_count?: number;
+  annotation_count?: number;
+  split_counts?: StorageSplitCounts;
+  class_names?: string[];
+  status?: string;
+  model?: string;
+  prediction_job_count?: number;
+  export_count?: number;
+};
+
+export type TrashItem = {
+  id: number;
+  entity_type: StorageEntityType;
+  entity_id: number;
+  display_name: string;
+  project_id: number;
+  dataset_id: number | null;
+  version_id: number | null;
+  original_path: string;
+  trash_path: string;
+  size_bytes: number;
+  summary: TrashItemSummary;
+  status: string;
+  error_message: string | null;
+  deleted_at: string;
+  purge_after: string;
+};
+
+export type TrashItemListResponse = {
+  items: TrashItem[];
+  total_size_bytes: number;
+};
+
+export type StorageMutationResponse = {
+  trash_id: number;
+  entity_type: StorageEntityType;
+  entity_id: number;
+  status: string;
+  message: string;
+};
+
+export type StoragePurgeSummary = {
+  purged_count: number;
+  failed_count: number;
+};
+
+function apiErrorMessage(text: string, status: number): string {
+  if (text) {
+    try {
+      const payload = JSON.parse(text) as {
+        detail?: string | { message?: string };
+        message?: string;
+      };
+      if (typeof payload.detail === "string" && payload.detail.trim()) {
+        return payload.detail;
+      }
+      if (
+        payload.detail &&
+        typeof payload.detail === "object" &&
+        typeof payload.detail.message === "string" &&
+        payload.detail.message.trim()
+      ) {
+        return payload.detail.message;
+      }
+      if (typeof payload.message === "string" && payload.message.trim()) {
+        return payload.message;
+      }
+    } catch {
+      return text;
+    }
+    return text;
+  }
+  return `请求失败（${status}）`;
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -544,7 +674,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Request failed with ${response.status}`);
+    throw new Error(apiErrorMessage(text, response.status));
   }
 
   return response.json() as Promise<T>;
@@ -789,5 +919,51 @@ export function createRunExport(runId: number, format: string): Promise<ExportAr
   return requestJson<ExportArtifact>(`/api/training/runs/${runId}/exports`, {
     method: "POST",
     body: JSON.stringify({ format }),
+  });
+}
+
+export function listStorageItems(): Promise<StorageItemListResponse> {
+  return requestJson<StorageItemListResponse>("/api/storage/items");
+}
+
+export function getStorageItem(
+  entityType: StorageItem["entity_type"],
+  entityId: number,
+): Promise<StorageItemDetail> {
+  return requestJson<StorageItemDetail>(`/api/storage/items/${entityType}/${entityId}`);
+}
+
+export function trashStorageItem(
+  entityType: StorageEntityType,
+  entityId: number,
+): Promise<TrashItem> {
+  return requestJson<TrashItem>(`/api/storage/items/${entityType}/${entityId}/trash`, {
+    method: "POST",
+  });
+}
+
+export function listTrashItems(): Promise<TrashItemListResponse> {
+  return requestJson<TrashItemListResponse>("/api/storage/trash");
+}
+
+export function restoreTrashItem(trashId: number): Promise<StorageMutationResponse> {
+  return requestJson<StorageMutationResponse>(`/api/storage/trash/${trashId}/restore`, {
+    method: "POST",
+  });
+}
+
+export function purgeTrashItem(
+  trashId: number,
+  confirmName: string,
+): Promise<StorageMutationResponse> {
+  return requestJson<StorageMutationResponse>(`/api/storage/trash/${trashId}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm_name: confirmName }),
+  });
+}
+
+export function purgeExpiredTrash(): Promise<StoragePurgeSummary> {
+  return requestJson<StoragePurgeSummary>("/api/storage/trash/purge-expired", {
+    method: "POST",
   });
 }
