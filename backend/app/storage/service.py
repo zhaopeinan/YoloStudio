@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
@@ -15,6 +18,7 @@ from app.db.models import (
     Image,
     PredictionJob,
     Project,
+    TrashItem,
     TrainingRun,
 )
 from app.storage.schemas import (
@@ -23,6 +27,7 @@ from app.storage.schemas import (
     StorageItemDetail,
     StorageItemList,
     StorageItemRead,
+    TrashItemRead,
 )
 from app.storage.visibility import (
     StorageEntityNotFoundError,
@@ -34,21 +39,94 @@ from app.storage.visibility import (
 ACTIVE_RUN_STATUSES = {"queued", "preparing", "running"}
 TRASH_RETENTION_DAYS = 30
 CATALOG_ENTITY_TYPES = {"dataset", "dataset_version"}
+TRASH_ENTITY_TYPES = {"dataset", "dataset_version", "training_run"}
 
 
 class StoragePathError(ValueError):
     pass
 
 
-def _workspace_path(settings: Settings, value: str | Path) -> Path:
-    workspace_root = settings.workspace_root.resolve()
-    path = Path(value)
-    if not path.is_absolute():
-        path = workspace_root / path
+class StorageConflictError(RuntimeError):
+    def __init__(self, message: str, blockers: list[StorageBlocker] | None = None):
+        super().__init__(message)
+        self.blockers = [blocker.model_dump() for blocker in blockers or []]
+
+
+class StorageMoveError(RuntimeError):
+    pass
+
+
+def require_workspace_path(path: Path, workspace_root: Path) -> Path:
     resolved = path.resolve()
-    if not resolved.is_relative_to(workspace_root):
-        raise StoragePathError("存储路径不在工作区内")
+    root = workspace_root.resolve()
+    if not resolved.is_relative_to(root):
+        raise StoragePathError("数据路径不在当前工作空间内。")
     return resolved
+
+
+def _canonical_path(workspace_root: Path, *parts: str) -> Path:
+    root = workspace_root.resolve()
+    canonical = root.joinpath(*parts)
+    resolved = require_workspace_path(canonical, root)
+    if resolved != canonical:
+        raise StoragePathError("存储记录路径与规范目录不一致")
+    return canonical
+
+
+def _validate_stored_artifact_path(
+    stored_path: str,
+    expected_path: Path,
+    workspace_root: Path,
+) -> None:
+    stored = Path(stored_path)
+    if ".." in stored.parts:
+        raise StoragePathError("存储路径不能包含目录穿越")
+
+    root = workspace_root.resolve()
+    candidate = stored if stored.is_absolute() else root / stored
+    require_workspace_path(candidate, root)
+    if candidate != expected_path:
+        raise StoragePathError("存储记录路径与规范目录不一致")
+
+
+def expected_entity_path(
+    settings: Settings,
+    entity_type: str,
+    entity: Dataset | DatasetVersion | TrainingRun,
+) -> Path:
+    if entity_type == "dataset" and isinstance(entity, Dataset):
+        return _canonical_path(
+            settings.workspace_root,
+            "projects",
+            str(entity.project_id),
+            "datasets",
+            str(entity.id),
+        )
+    if entity_type == "dataset_version" and isinstance(entity, DatasetVersion):
+        expected = _canonical_path(
+            settings.workspace_root,
+            "projects",
+            str(entity.project_id),
+            "versions",
+            str(entity.id),
+        )
+        _validate_stored_artifact_path(
+            entity.artifact_path, expected, settings.workspace_root
+        )
+        return expected
+    if entity_type == "training_run" and isinstance(entity, TrainingRun):
+        expected = _canonical_path(
+            settings.workspace_root,
+            "projects",
+            str(entity.project_id),
+            "runs",
+            str(entity.id),
+        )
+        _validate_stored_artifact_path(
+            entity.artifact_path, expected, settings.workspace_root
+        )
+        return expected
+    raise StorageEntityNotFoundError("不支持的存储对象类型")
 
 
 def directory_size(path: Path, workspace_root: Path | None = None) -> int:
@@ -74,18 +152,15 @@ def directory_size(path: Path, workspace_root: Path | None = None) -> int:
 
 
 def _dataset_path(settings: Settings, dataset: Dataset) -> Path:
-    return _workspace_path(
-        settings,
-        Path("projects") / str(dataset.project_id) / "datasets" / str(dataset.id),
-    )
+    return expected_entity_path(settings, "dataset", dataset)
 
 
 def _version_path(settings: Settings, version: DatasetVersion) -> Path:
-    return _workspace_path(settings, version.artifact_path)
+    return expected_entity_path(settings, "dataset_version", version)
 
 
 def _run_path(settings: Settings, run: TrainingRun) -> Path:
-    return _workspace_path(settings, run.artifact_path)
+    return expected_entity_path(settings, "training_run", run)
 
 
 def _active_versions(db: Session, dataset_id: int) -> list[DatasetVersion]:
@@ -340,3 +415,208 @@ def get_storage_item_detail(
         class_names=class_names,
         related_runs=related_runs,
     )
+
+
+def _load_trash_entity(
+    db: Session,
+    entity_type: str,
+    entity_id: int,
+) -> Dataset | DatasetVersion | TrainingRun:
+    model_by_type = {
+        "dataset": Dataset,
+        "dataset_version": DatasetVersion,
+        "training_run": TrainingRun,
+    }
+    model = model_by_type.get(entity_type)
+    if model is None:
+        raise StorageEntityNotFoundError("不支持的存储对象类型")
+    entity = db.get(model, entity_id)
+    if entity is None:
+        raise StorageEntityNotFoundError("存储对象不存在")
+    return entity
+
+
+def _trash_context(
+    db: Session,
+    entity_type: str,
+    entity: Dataset | DatasetVersion | TrainingRun,
+) -> tuple[int, int | None, int | None, str, list[StorageBlocker]]:
+    if entity_type == "dataset" and isinstance(entity, Dataset):
+        versions = _active_versions(db, entity.id)
+        blockers = [
+            StorageBlocker(
+                entity_type="dataset_version",
+                entity_id=version.id,
+                display_name=version.name,
+            )
+            for version in versions
+        ]
+        return entity.project_id, entity.id, None, entity.name, blockers
+
+    if entity_type == "dataset_version" and isinstance(entity, DatasetVersion):
+        runs = _active_runs(db, [entity.id])
+        blockers = [
+            StorageBlocker(
+                entity_type="training_run",
+                entity_id=run.id,
+                display_name=f"训练任务 #{run.id}",
+                status=run.status,
+            )
+            for run in runs
+        ]
+        return entity.project_id, entity.dataset_id, entity.id, entity.name, blockers
+
+    if entity_type == "training_run" and isinstance(entity, TrainingRun):
+        version = db.get(DatasetVersion, entity.version_id)
+        if version is None:
+            raise StorageEntityNotFoundError("训练任务关联的标注版本不存在")
+        blockers = []
+        if entity.status in ACTIVE_RUN_STATUSES:
+            blockers.append(
+                StorageBlocker(
+                    entity_type="training_run",
+                    entity_id=entity.id,
+                    display_name=f"训练任务 #{entity.id}",
+                    status=entity.status,
+                )
+            )
+        return (
+            entity.project_id,
+            version.dataset_id,
+            version.id,
+            f"训练任务 #{entity.id}",
+            blockers,
+        )
+
+    raise StorageEntityNotFoundError("不支持的存储对象类型")
+
+
+def _raise_for_blockers(
+    entity_type: str,
+    blockers: list[StorageBlocker],
+) -> None:
+    if not blockers:
+        return
+    messages = {
+        "dataset": "该数据集仍有关联的标注版本，请先将关联版本移入回收站。",
+        "dataset_version": "该标注版本仍有关联的训练任务，请先将关联训练任务移入回收站。",
+        "training_run": "训练任务仍在运行中，无法移入回收站。",
+    }
+    raise StorageConflictError(messages[entity_type], blockers)
+
+
+def _trash_summary(
+    db: Session,
+    entity_type: str,
+    entity: Dataset | DatasetVersion | TrainingRun,
+) -> dict[str, Any]:
+    if entity_type == "dataset" and isinstance(entity, Dataset):
+        image_count, annotation_count = _dataset_counts(db, entity.id)
+        return {
+            "name": entity.name,
+            "image_count": image_count,
+            "annotation_count": annotation_count,
+            "class_names": _class_names_for_dataset(db, entity.id),
+        }
+    if entity_type == "dataset_version" and isinstance(entity, DatasetVersion):
+        image_count, annotation_count, split_counts = _version_counts(entity)
+        return {
+            "name": entity.name,
+            "image_count": image_count,
+            "annotation_count": annotation_count,
+            "split_counts": split_counts,
+            "class_names": _class_names_for_version(db, entity),
+        }
+    if entity_type == "training_run" and isinstance(entity, TrainingRun):
+        prediction_count = db.scalar(
+            select(func.count(PredictionJob.id)).where(PredictionJob.run_id == entity.id)
+        ) or 0
+        export_count = db.scalar(
+            select(func.count(ExportArtifact.id)).where(ExportArtifact.run_id == entity.id)
+        ) or 0
+        return {
+            "status": entity.status,
+            "model": str((entity.config or {}).get("model") or ""),
+            "prediction_job_count": int(prediction_count),
+            "export_count": int(export_count),
+        }
+    raise StorageEntityNotFoundError("不支持的存储对象类型")
+
+
+def move_storage_item_to_trash(
+    db: Session,
+    settings: Settings,
+    entity_type: str,
+    entity_id: int,
+) -> TrashItemRead:
+    if entity_type not in TRASH_ENTITY_TYPES:
+        raise StorageEntityNotFoundError("不支持的存储对象类型")
+
+    duplicate = db.scalar(
+        select(TrashItem).where(
+            TrashItem.entity_type == entity_type,
+            TrashItem.entity_id == entity_id,
+        )
+    )
+    if duplicate is not None:
+        raise StorageConflictError("该对象已在回收站中。")
+
+    entity = _load_trash_entity(db, entity_type, entity_id)
+    project_id, dataset_id, version_id, display_name, blockers = _trash_context(
+        db, entity_type, entity
+    )
+    _raise_for_blockers(entity_type, blockers)
+
+    source_path = expected_entity_path(settings, entity_type, entity)
+    if not source_path.is_dir():
+        raise StoragePathError("数据目录不存在")
+    size_bytes = directory_size(source_path, settings.workspace_root)
+    summary = _trash_summary(db, entity_type, entity)
+    now = datetime.now(UTC)
+
+    trash = TrashItem(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        project_id=project_id,
+        dataset_id=dataset_id,
+        version_id=version_id,
+        display_name=display_name,
+        original_path=str(source_path),
+        trash_path="pending",
+        size_bytes=size_bytes,
+        summary=summary,
+        status="pending_move",
+        deleted_at=now,
+        purge_after=now + timedelta(days=TRASH_RETENTION_DAYS),
+    )
+    db.add(trash)
+    try:
+        db.flush()
+        trash_root = _canonical_path(settings.workspace_root, ".trash")
+        destination = trash_root / f"{trash.id}-{entity_type}-{entity_id}"
+        trash.trash_path = str(destination)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise StorageConflictError("该对象已在回收站中。") from exc
+    db.refresh(trash)
+
+    try:
+        trash_root.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            raise OSError("回收站目标目录已存在")
+        source_path.rename(destination)
+    except OSError as exc:
+        if source_path.exists():
+            db.delete(trash)
+            db.commit()
+        raise StorageMoveError(f"移动数据到回收站失败：{exc}") from exc
+
+    trash.status = "active"
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise StorageMoveError("数据已移动，但回收站状态更新失败") from exc
+    db.refresh(trash)
+    return TrashItemRead.model_validate(trash)

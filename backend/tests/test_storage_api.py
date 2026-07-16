@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import shutil
 
+import pytest
 from sqlalchemy.orm import Session
 
 from test_dataset_import_api import create_import_zip, isolated_client
@@ -283,4 +285,279 @@ def test_storage_catalog_rejects_version_path_outside_workspace(tmp_path: Path):
         response = client.get("/api/storage/items")
 
         assert response.status_code == 400
-        assert response.json()["detail"] == "存储路径不在工作区内"
+        assert response.json()["detail"] == "数据路径不在当前工作空间内。"
+
+
+def _set_run_status(tmp_path: Path, run_id: int, status: str) -> None:
+    from app.core.settings import Settings
+    from app.db.models import TrainingRun
+    from app.db.session import create_engine_for_settings
+
+    settings = Settings(workspace_root=tmp_path / "workspace")
+    bind = create_engine_for_settings(settings)
+    with Session(bind) as db:
+        run = db.get(TrainingRun, run_id)
+        assert run is not None
+        run.status = status
+        db.commit()
+    bind.dispose()
+
+
+def test_storage_trash_enforces_dependencies_and_moves_child_to_parent(
+    tmp_path: Path,
+):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        workspace = (tmp_path / "workspace").resolve()
+
+        dataset_response = client.post(
+            f"/api/storage/items/dataset/{fixture['dataset_id']}/trash"
+        )
+        assert dataset_response.status_code == 409
+        assert dataset_response.json()["detail"] == {
+            "message": "该数据集仍有关联的标注版本，请先将关联版本移入回收站。",
+            "blockers": [
+                {
+                    "entity_type": "dataset_version",
+                    "entity_id": fixture["version_id"],
+                    "display_name": "storage-version",
+                    "status": None,
+                }
+            ],
+        }
+
+        version_response = client.post(
+            f"/api/storage/items/dataset_version/{fixture['version_id']}/trash"
+        )
+        assert version_response.status_code == 409
+        assert version_response.json()["detail"]["message"] == (
+            "该标注版本仍有关联的训练任务，请先将关联训练任务移入回收站。"
+        )
+        assert {
+            (blocker["entity_id"], blocker["status"])
+            for blocker in version_response.json()["detail"]["blockers"]
+        } == {
+            (fixture["completed_run_id"], "completed"),
+            (fixture["running_run_id"], "running"),
+        }
+
+        active_response = client.post(
+            f"/api/storage/items/training_run/{fixture['running_run_id']}/trash"
+        )
+        assert active_response.status_code == 409
+        assert active_response.json()["detail"] == {
+            "message": "训练任务仍在运行中，无法移入回收站。",
+            "blockers": [
+                {
+                    "entity_type": "training_run",
+                    "entity_id": fixture["running_run_id"],
+                    "display_name": f"训练任务 #{fixture['running_run_id']}",
+                    "status": "running",
+                }
+            ],
+        }
+
+        completed_path = (
+            workspace
+            / "projects"
+            / str(fixture["project_id"])
+            / "runs"
+            / str(fixture["completed_run_id"])
+        )
+        completed_response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+        assert completed_response.status_code == 200
+        completed_trash = completed_response.json()
+        assert completed_trash["entity_type"] == "training_run"
+        assert completed_trash["status"] == "active"
+        assert completed_trash["size_bytes"] > 0
+        assert Path(completed_trash["trash_path"]).is_dir()
+        assert Path(completed_trash["trash_path"]).is_relative_to(workspace / ".trash")
+        assert not completed_path.exists()
+
+        duplicate_response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+        assert duplicate_response.status_code == 409
+        assert duplicate_response.json()["detail"] == {
+            "message": "该对象已在回收站中。",
+            "blockers": [],
+        }
+
+        _set_run_status(tmp_path, fixture["running_run_id"], "cancelled")
+        running_response = client.post(
+            f"/api/storage/items/training_run/{fixture['running_run_id']}/trash"
+        )
+        assert running_response.status_code == 200
+
+        version_path = (
+            workspace
+            / "projects"
+            / str(fixture["project_id"])
+            / "versions"
+            / str(fixture["version_id"])
+        )
+        moved_version = client.post(
+            f"/api/storage/items/dataset_version/{fixture['version_id']}/trash"
+        )
+        assert moved_version.status_code == 200
+        assert Path(moved_version.json()["trash_path"]).is_dir()
+        assert not version_path.exists()
+
+        dataset_path = (
+            workspace
+            / "projects"
+            / str(fixture["project_id"])
+            / "datasets"
+            / str(fixture["dataset_id"])
+        )
+        moved_dataset = client.post(
+            f"/api/storage/items/dataset/{fixture['dataset_id']}/trash"
+        )
+        assert moved_dataset.status_code == 200
+        assert Path(moved_dataset.json()["trash_path"]).is_dir()
+        assert not dataset_path.exists()
+
+
+def test_storage_trash_rejects_aliased_run_artifact_path(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+
+        from app.core.settings import Settings
+        from app.db.models import TrainingRun
+        from app.db.session import create_engine_for_settings
+
+        settings = Settings(workspace_root=tmp_path / "workspace")
+        bind = create_engine_for_settings(settings)
+        with Session(bind) as db:
+            run = db.get(TrainingRun, fixture["completed_run_id"])
+            assert run is not None
+            run.artifact_path = str(
+                settings.workspace_root
+                / "projects"
+                / str(fixture["project_id"])
+                / "runs"
+                / str(fixture["running_run_id"])
+            )
+            db.commit()
+        bind.dispose()
+
+        response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "存储记录路径与规范目录不一致"
+
+
+def test_storage_trash_rejects_traversal_in_stored_path(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+
+        from app.core.settings import Settings
+        from app.db.models import TrainingRun
+        from app.db.session import create_engine_for_settings
+
+        settings = Settings(workspace_root=tmp_path / "workspace")
+        bind = create_engine_for_settings(settings)
+        with Session(bind) as db:
+            run = db.get(TrainingRun, fixture["completed_run_id"])
+            assert run is not None
+            run.artifact_path = (
+                f"projects/{fixture['project_id']}/runs/../runs/{run.id}"
+            )
+            db.commit()
+        bind.dispose()
+
+        response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "存储路径不能包含目录穿越"
+
+
+def test_storage_trash_rejects_symlink_escape(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        workspace = (tmp_path / "workspace").resolve()
+        run_path = (
+            workspace
+            / "projects"
+            / str(fixture["project_id"])
+            / "runs"
+            / str(fixture["completed_run_id"])
+        )
+        outside = tmp_path / "outside-run"
+        outside.mkdir()
+        shutil.rmtree(run_path)
+        run_path.symlink_to(outside, target_is_directory=True)
+
+        response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "数据路径不在当前工作空间内。"
+
+
+@pytest.mark.parametrize("status", ["queued", "preparing", "running"])
+def test_storage_trash_rejects_every_active_run_status(
+    tmp_path: Path,
+    status: str,
+):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        _set_run_status(tmp_path, fixture["completed_run_id"], status)
+
+        response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["message"] == (
+            "训练任务仍在运行中，无法移入回收站。"
+        )
+        assert response.json()["detail"]["blockers"][0]["status"] == status
+
+
+def test_storage_trash_removes_pending_record_when_rename_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        original_rename = Path.rename
+
+        def fail_run_rename(path: Path, target: Path) -> Path:
+            if path.name == str(fixture["completed_run_id"]):
+                raise OSError("simulated rename failure")
+            return original_rename(path, target)
+
+        monkeypatch.setattr(Path, "rename", fail_run_rename)
+        response = client.post(
+            f"/api/storage/items/training_run/{fixture['completed_run_id']}/trash"
+        )
+
+        assert response.status_code == 500
+        assert "移动数据到回收站失败" in response.json()["detail"]
+
+        from app.core.settings import Settings
+        from app.db.models import TrashItem
+        from app.db.session import create_engine_for_settings
+
+        settings = Settings(workspace_root=tmp_path / "workspace")
+        bind = create_engine_for_settings(settings)
+        with Session(bind) as db:
+            assert db.query(TrashItem).count() == 0
+        bind.dispose()
+
+        run_path = (
+            settings.workspace_root
+            / "projects"
+            / str(fixture["project_id"])
+            / "runs"
+            / str(fixture["completed_run_id"])
+        )
+        assert run_path.is_dir()
