@@ -13,6 +13,7 @@ from app.db.session import init_db
 from app.exports.router import router as exports_router
 from app.prediction.router import router as prediction_router
 from app.quality.router import router as quality_router
+from app.storage.router import router as storage_router
 from app.training.router import router as training_router
 from app.versions.router import router as versions_router
 
@@ -43,6 +44,7 @@ app.include_router(versions_router)
 app.include_router(training_router)
 app.include_router(prediction_router)
 app.include_router(exports_router)
+app.include_router(storage_router)
 
 
 @app.get("/api/health")
