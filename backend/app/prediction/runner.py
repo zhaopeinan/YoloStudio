@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import exists, select, text
 from sqlalchemy.orm import Session
 
-from app.core.settings import Settings
+from app.core.settings import Settings, get_settings
 from app.db.models import (
     Annotation,
     DatasetVersion,
@@ -213,6 +213,13 @@ def run_uses_tta(run: TrainingRun) -> bool:
     return bool((run.config or {}).get("tta"))
 
 
+def _image_source_path(image: Image) -> Path:
+    source = Path(image.relative_path)
+    if source.is_absolute():
+        return source
+    return get_settings().workspace_root / source
+
+
 def predict_images(
     run: TrainingRun,
     images: list[Image],
@@ -232,7 +239,7 @@ def predict_images(
     results_by_image: dict[int, list[dict]] = {}
     for image in images:
         result = model.predict(
-            source=image.relative_path,
+            source=str(_image_source_path(image)),
             conf=confidence_threshold,
             augment=use_tta,
             verbose=False,

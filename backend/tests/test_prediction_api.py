@@ -656,3 +656,52 @@ def test_predict_images_passes_tta_to_ultralytics(tmp_path: Path, monkeypatch):
             "verbose": False,
         }
     ]
+
+
+def test_predict_images_resolves_workspace_relative_image_paths(tmp_path: Path, monkeypatch):
+    from app.db.models import Image, TrainingRun
+    from app.prediction import runner
+
+    calls = []
+
+    class FakeYOLO:
+        def __init__(self, weights_path):
+            self.weights_path = weights_path
+
+        def predict(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLO=FakeYOLO))
+    monkeypatch.setattr(
+        runner,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=tmp_path / "workspace"),
+    )
+
+    run_root = tmp_path / "run"
+    weights = run_root / "ultralytics" / "weights" / "best.pt"
+    weights.parent.mkdir(parents=True)
+    weights.write_text("fake weights")
+    run = TrainingRun(
+        id=1,
+        project_id=1,
+        version_id=1,
+        status="completed",
+        device="cpu",
+        config={},
+        artifact_path=str(run_root),
+        log_path=str(run_root / "logs.txt"),
+    )
+    image = Image(
+        id=10,
+        dataset_id=1,
+        relative_path="projects/1/datasets/1/images/frame.png",
+    )
+
+    results = runner.predict_images(run, [image], confidence_threshold=0.25)
+
+    assert results == {10: []}
+    assert calls[0]["source"] == str(
+        tmp_path / "workspace" / "projects/1/datasets/1/images/frame.png"
+    )
