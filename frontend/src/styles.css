@@ -1491,7 +1491,7 @@ input[type="color"] {
 
 .class-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px;
+  grid-template-columns: minmax(0, 1fr) 38px 38px;
   gap: 8px;
 }
 
@@ -1523,6 +1523,11 @@ input[type="color"] {
 .class-row-actions button {
   min-height: 34px;
   padding: 0 10px;
+}
+
+.class-delete-button {
+  color: #7c2d12;
+  background: #ffe7dc;
 }
 
 .class-chip span,

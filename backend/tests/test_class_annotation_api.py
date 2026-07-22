@@ -127,6 +127,7 @@ def test_update_class_updates_annotation_read_labels(tmp_path: Path):
             "name": "aircraft",
             "color": "#111827",
             "description": None,
+            "annotation_count": 1,
         }
 
         annotations_response = client.get(f"/api/images/{image_id}/annotations")
@@ -158,6 +159,84 @@ def test_update_class_updates_annotation_read_labels(tmp_path: Path):
             json={"name": "wrong-project"},
         )
         assert missing_project_response.status_code == 404
+
+
+def test_delete_class_requires_confirmation_and_protects_references(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = import_dataset(client, zip_path)
+        project_id = dataset["project_id"]
+        used_class = client.post(
+            f"/api/projects/{project_id}/classes",
+            json={"name": "used"},
+        ).json()
+        version_class = client.post(
+            f"/api/projects/{project_id}/classes",
+            json={"name": "version-only"},
+        ).json()
+        unused_class = client.post(
+            f"/api/projects/{project_id}/classes",
+            json={"name": "unused"},
+        ).json()
+        images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
+
+        for image in images[:2]:
+            annotation_response = client.put(
+                f"/api/images/{image['id']}/annotations",
+                json={
+                    "annotations": [
+                        {
+                            "class_id": used_class["id"],
+                            "x_center": 0.5,
+                            "y_center": 0.5,
+                            "width": 0.25,
+                            "height": 0.25,
+                        }
+                    ]
+                },
+            )
+            assert annotation_response.status_code == 200
+
+        version_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={
+                "name": "class-delete-protection",
+                "class_ids": [used_class["id"], version_class["id"]],
+            },
+        )
+        assert version_response.status_code == 200
+
+        classes = client.get(f"/api/projects/{project_id}/classes").json()["items"]
+        by_name = {item["name"]: item for item in classes}
+        assert by_name["used"]["annotation_count"] == 2
+        assert by_name["used"]["version_count"] == 1
+        assert by_name["version-only"]["annotation_count"] == 0
+        assert by_name["version-only"]["version_count"] == 1
+        assert by_name["unused"]["annotation_count"] == 0
+        assert by_name["unused"]["version_count"] == 0
+
+        delete_unused = client.delete(
+            f"/api/projects/{project_id}/classes/{unused_class['id']}"
+        )
+        assert delete_unused.status_code == 200
+        assert delete_unused.json()["name"] == "unused"
+
+        delete_used = client.delete(
+            f"/api/projects/{project_id}/classes/{used_class['id']}"
+        )
+        assert delete_used.status_code == 409
+        assert "2 条标注" in delete_used.json()["detail"]
+
+        delete_version_class = client.delete(
+            f"/api/projects/{project_id}/classes/{version_class['id']}"
+        )
+        assert delete_version_class.status_code == 409
+        assert "1 个数据集版本" in delete_version_class.json()["detail"]
+
+        assert client.delete(f"/api/projects/{project_id}/classes/999999").status_code == 404
+        assert client.delete(f"/api/projects/999999/classes/{used_class['id']}").status_code == 404
 
 
 def test_annotation_replace_rejects_out_of_bounds_bbox(tmp_path: Path):

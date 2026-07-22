@@ -534,6 +534,8 @@ const apiMock = vi.hoisted(() => {
       color: "#ef4444",
       description: null,
       active: true,
+      annotation_count: 0,
+      version_count: 0,
     },
   ];
   const listClasses = vi.fn(async () => ({
@@ -546,6 +548,8 @@ const apiMock = vi.hoisted(() => {
     color: "#22c55e",
     description: null,
     active: true,
+    annotation_count: 0,
+    version_count: 0,
   }));
   const updateClass = vi.fn(
     async (
@@ -559,6 +563,8 @@ const apiMock = vi.hoisted(() => {
       color: body.color ?? "#ef4444",
       description: body.description ?? null,
       active: true,
+      annotation_count: 0,
+      version_count: 0,
     }),
   );
   const getQuality = vi.fn(async () => defaultQuality());
@@ -831,6 +837,7 @@ const apiMock = vi.hoisted(() => {
     listClasses,
     createClass,
     updateClass,
+    deleteClass: vi.fn(),
     getTrainingRunSummary,
     getProjectTrainingSummary,
     getExportCapabilities,
@@ -895,6 +902,7 @@ vi.mock("./api", () => ({
   listClasses: apiMock.listClasses,
   createClass: apiMock.createClass,
   updateClass: apiMock.updateClass,
+  deleteClass: apiMock.deleteClass,
   getAnnotations: apiMock.getAnnotations,
   replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: apiMock.getQuality,
@@ -1037,6 +1045,7 @@ describe("App", () => {
       items: apiMock.defaultClasses(),
     }));
     apiMock.createClass.mockClear();
+    apiMock.deleteClass.mockReset();
     apiMock.updateClass.mockReset();
     apiMock.updateClass.mockImplementation(
       async (
@@ -1050,6 +1059,8 @@ describe("App", () => {
         color: body.color ?? "#ef4444",
         description: body.description ?? null,
         active: true,
+        annotation_count: 0,
+        version_count: 0,
       }),
     );
     apiMock.createDatasetVersion.mockClear();
@@ -1863,6 +1874,8 @@ describe("App", () => {
       color: body.color,
       description: null,
       active: true,
+      annotation_count: 0,
+      version_count: 0,
     }));
     render(<App />);
 
@@ -1894,6 +1907,8 @@ describe("App", () => {
       color: body.color,
       description: null,
       active: true,
+      annotation_count: 0,
+      version_count: 0,
     }));
     render(<App />);
 
@@ -1931,6 +1946,8 @@ describe("App", () => {
           color: "#e45756",
           description: null,
           active: true,
+          annotation_count: 0,
+          version_count: 0,
         },
       ],
     }));
@@ -1941,6 +1958,8 @@ describe("App", () => {
       color: body.color,
       description: null,
       active: true,
+      annotation_count: 0,
+      version_count: 0,
     }));
     render(<App />);
 
@@ -1956,6 +1975,56 @@ describe("App", () => {
     });
   });
 
+  it("类别删除需要确认，确认后从类别库移除", async () => {
+    const user = userEvent.setup();
+    apiMock.deleteClass.mockResolvedValueOnce(apiMock.defaultClasses()[0]);
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
+    await user.click(screen.getByRole("button", { name: "删除 target" }));
+
+    const dialog = screen.getByRole("dialog", { name: "确认删除类别" });
+    expect(dialog).toHaveTextContent("确定删除类别“target”吗");
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "确认删除类别" })).not.toBeInTheDocument();
+    expect(apiMock.deleteClass).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "删除 target" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: "确认删除类别" })).getByRole("button", {
+        name: "确认删除",
+      }),
+    );
+
+    expect(apiMock.deleteClass).toHaveBeenCalledWith(1, 1);
+    expect(screen.queryByRole("button", { name: "target" })).not.toBeInTheDocument();
+  });
+
+  it("已被标注或数据集版本使用的类别不能删除", async () => {
+    const user = userEvent.setup();
+    apiMock.listClasses.mockImplementation(async () => ({
+      items: [
+        {
+          ...apiMock.defaultClasses()[0],
+          annotation_count: 3,
+          version_count: 1,
+        },
+      ],
+    }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
+
+    const deleteButton = screen.getByRole("button", { name: "删除 target" });
+    expect(deleteButton).toBeDisabled();
+    expect(deleteButton).toHaveAttribute(
+      "title",
+      "已被 3 条标注或 1 个数据集版本使用，不能删除",
+    );
+  });
+
   it("导入数据集后进入类别管理，创建首个类别后进入图像标注", async () => {
     const user = userEvent.setup();
     apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
@@ -1966,6 +2035,8 @@ describe("App", () => {
       color: body.color,
       description: null,
       active: true,
+      annotation_count: 0,
+      version_count: 0,
     }));
     render(<App />);
 
@@ -2097,6 +2168,8 @@ describe("App", () => {
       color: body.color,
       description: null,
       active: true,
+      annotation_count: 0,
+      version_count: 0,
     }));
     for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
       await user.click(screen.getByRole("checkbox", { name }));

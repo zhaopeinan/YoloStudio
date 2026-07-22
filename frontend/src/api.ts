@@ -158,6 +158,8 @@ export type ProjectClass = {
   color: string;
   description: string | null;
   active: boolean;
+  annotation_count: number;
+  version_count: number;
 };
 
 export type ClassListResponse = {
@@ -767,6 +769,12 @@ export function updateClass(
   return requestJson<ProjectClass>(`/api/projects/${projectId}/classes/${classId}`, {
     method: "PATCH",
     body: JSON.stringify(body),
+  });
+}
+
+export function deleteClass(projectId: number, classId: number): Promise<ProjectClass> {
+  return requestJson<ProjectClass>(`/api/projects/${projectId}/classes/${classId}`, {
+    method: "DELETE",
   });
 }
 

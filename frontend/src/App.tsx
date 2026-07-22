@@ -62,6 +62,7 @@ import {
   cancelTrainingRun,
   createClass,
   createDatasetVersion,
+  deleteClass,
   createPredictionJob,
   createPredictionThresholdScan,
   createRunExport,
@@ -287,6 +288,8 @@ export default function App() {
   const [versionClassIds, setVersionClassIds] = useState<number[]>([]);
   const [classError, setClassError] = useState<string | null>(null);
   const [isEnablingFixedClasses, setIsEnablingFixedClasses] = useState(false);
+  const [classDeleteTarget, setClassDeleteTarget] = useState<ProjectClass | null>(null);
+  const [isDeletingClass, setIsDeletingClass] = useState(false);
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
   const [classEditName, setClassEditName] = useState("");
   const [classEditColor, setClassEditColor] = useState(defaultClassColor);
@@ -654,6 +657,8 @@ export default function App() {
     setVersionClassIds([]);
     setClassError(null);
     setIsEnablingFixedClasses(false);
+    setClassDeleteTarget(null);
+    setIsDeletingClass(false);
     setEditingClassId(null);
     setClassEditName("");
     setClassEditColor(defaultClassColor);
@@ -1505,6 +1510,31 @@ export default function App() {
       setClassError(error instanceof Error ? error.message : "类别启用失败");
     } finally {
       setIsEnablingFixedClasses(false);
+    }
+  }
+
+  async function handleDeleteClass() {
+    if (!importedDataset || !classDeleteTarget || isDeletingClass) {
+      return;
+    }
+
+    setIsDeletingClass(true);
+    setClassError(null);
+    const deletedClassId = classDeleteTarget.id;
+    const remainingClasses = classes.filter((classItem) => classItem.id !== deletedClassId);
+
+    try {
+      await deleteClass(importedDataset.project_id, deletedClassId);
+      setClasses(remainingClasses);
+      setVersionClassIds((current) => current.filter((classId) => classId !== deletedClassId));
+      setSelectedClassId((current) => (current === deletedClassId ? remainingClasses[0]?.id ?? null : current));
+      setSelectedFixedClassNames((current) => current.filter((name) => name !== classDeleteTarget.name));
+      setClassDeleteTarget(null);
+      void refreshTrainingPrep();
+    } catch (error) {
+      setClassError(error instanceof Error ? error.message : "类别删除失败");
+    } finally {
+      setIsDeletingClass(false);
     }
   }
 
@@ -3521,12 +3551,57 @@ export default function App() {
                     >
                       <Edit3 size={16} />
                     </button>
+                    <button
+                      type="button"
+                      className="icon-button class-delete-button"
+                      aria-label={`删除 ${classItem.name}`}
+                      title={
+                        (classItem.annotation_count ?? 0) > 0 || (classItem.version_count ?? 0) > 0
+                          ? `已被 ${classItem.annotation_count ?? 0} 条标注或 ${classItem.version_count ?? 0} 个数据集版本使用，不能删除`
+                          : `删除 ${classItem.name}`
+                      }
+                      disabled={(classItem.annotation_count ?? 0) > 0 || (classItem.version_count ?? 0) > 0}
+                      onClick={() => setClassDeleteTarget(classItem)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 ),
               )
             )}
           </div>
       </section> : null}
+
+      {classDeleteTarget ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-dialog" role="dialog" aria-modal="true" aria-label="确认删除类别">
+            <header>
+              <h2>删除类别</h2>
+            </header>
+            <p>
+              确定删除类别“{classDeleteTarget.name}”吗？此操作不可恢复，但不会删除图像或其他类别。
+            </p>
+            <footer>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={isDeletingClass}
+                onClick={() => setClassDeleteTarget(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={isDeletingClass}
+                onClick={() => void handleDeleteClass()}
+              >
+                {isDeletingClass ? "正在删除..." : "确认删除"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
 
       {currentStep === "annotation" ? (
       <section className="annotation-workspace" aria-label="标注工作台">

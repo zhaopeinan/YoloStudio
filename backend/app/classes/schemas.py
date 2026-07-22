@@ -22,6 +22,8 @@ class ClassRead(BaseModel):
     color: str
     description: str | None
     active: bool
+    annotation_count: int = 0
+    version_count: int = 0
 
 
 class ClassList(BaseModel):
