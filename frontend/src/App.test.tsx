@@ -539,7 +539,7 @@ const apiMock = vi.hoisted(() => {
   const listClasses = vi.fn(async () => ({
     items: defaultClasses(),
   }));
-  const createClass = vi.fn(async () => ({
+  const createClass = vi.fn(async (_projectId: number, _body: { name: string; color: string }) => ({
     id: 2,
     project_id: 1,
     name: "vehicle",
@@ -1437,8 +1437,7 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "类别管理");
     apiMock.createClass.mockRejectedValueOnce(new Error("旧类别错误"));
-    await user.type(screen.getByLabelText("类别名称"), "待清理类别");
-    await user.click(screen.getByRole("button", { name: "创建类别" }));
+    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
     expect(await screen.findByText("旧类别错误")).toBeInTheDocument();
 
     await navigateToStep(user, "图像标注");
@@ -1477,7 +1476,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "类别管理");
-    expect(screen.getByLabelText("类别名称")).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: "fire_truck" })).toBeChecked();
     expect(screen.queryByText("旧类别错误")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("编辑类别名称 target")).not.toBeInTheDocument();
 
@@ -1857,34 +1856,127 @@ describe("App", () => {
   it("guides empty class libraries and selects a created class", async () => {
     const user = userEvent.setup();
     apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
+    apiMock.createClass.mockImplementationOnce(async (_projectId, body) => ({
+      id: 2,
+      project_id: 1,
+      name: body.name,
+      color: body.color,
+      description: null,
+      active: true,
+    }));
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(window.location.hash).toBe("#classes");
 
-    await user.type(screen.getByLabelText("类别名称"), "vehicle");
-    await user.click(screen.getByRole("button", { name: "创建类别" }));
+    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+      await user.click(screen.getByRole("checkbox", { name }));
+    }
+    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
 
     expect(apiMock.createClass).toHaveBeenCalledWith(1, {
-      name: "vehicle",
-      color: "#ef4444",
+      name: "fire_truck",
+      color: "#e45756",
     });
     expect(window.location.hash).toBe("#annotation");
     expect(screen.queryByLabelText("标注就绪状态")).not.toBeInTheDocument();
     expect(screen.getByText("在图像上拖动以添加边界框。")).toBeInTheDocument();
   });
 
+  it("固定类别默认全部选择并批量启用", async () => {
+    const user = userEvent.setup();
+    apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
+    let nextClassId = 10;
+    apiMock.createClass.mockImplementation(async (_projectId, body) => ({
+      id: nextClassId++,
+      project_id: 1,
+      name: body.name,
+      color: body.color,
+      description: null,
+      active: true,
+    }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
+
+    for (const name of ["fire_truck", "person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+      expect(screen.getByRole("checkbox", { name })).toBeChecked();
+    }
+
+    await user.click(screen.getByRole("checkbox", { name: "suv_camo" }));
+    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+
+    await waitFor(() => expect(apiMock.createClass).toHaveBeenCalledTimes(5));
+    expect(apiMock.createClass).not.toHaveBeenCalledWith(1, {
+      name: "suv_camo",
+      color: "#1f6f78",
+    });
+    expect(apiMock.createClass).toHaveBeenCalledWith(1, {
+      name: "fire_truck",
+      color: "#e45756",
+    });
+    expect(window.location.hash).toBe("#annotation");
+  });
+
+  it("固定类别不会重复创建项目中已有的类别", async () => {
+    const user = userEvent.setup();
+    let nextClassId = 10;
+    apiMock.listClasses.mockImplementation(async () => ({
+      items: [
+        {
+          id: 8,
+          project_id: 1,
+          name: "fire_truck",
+          color: "#e45756",
+          description: null,
+          active: true,
+        },
+      ],
+    }));
+    apiMock.createClass.mockImplementation(async (_projectId, body) => ({
+      id: nextClassId++,
+      project_id: 1,
+      name: body.name,
+      color: body.color,
+      description: null,
+      active: true,
+    }));
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "加载数据集" }));
+    await navigateToStep(user, "类别管理");
+    expect(screen.getByText("已在类别库")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+
+    await waitFor(() => expect(apiMock.createClass).toHaveBeenCalledTimes(5));
+    expect(apiMock.createClass).not.toHaveBeenCalledWith(1, {
+      name: "fire_truck",
+      color: "#e45756",
+    });
+  });
+
   it("导入数据集后进入类别管理，创建首个类别后进入图像标注", async () => {
     const user = userEvent.setup();
     apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
+    apiMock.createClass.mockImplementationOnce(async (_projectId, body) => ({
+      id: 2,
+      project_id: 1,
+      name: body.name,
+      color: body.color,
+      description: null,
+      active: true,
+    }));
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "导入数据集" }));
     expect(await screen.findByRole("heading", { name: "类别库" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#classes");
 
-    await user.type(screen.getByLabelText("类别名称"), "target");
-    await user.click(screen.getByRole("button", { name: "创建类别" }));
+    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+      await user.click(screen.getByRole("checkbox", { name }));
+    }
+    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
     expect(await screen.findByRole("heading", { name: "标注" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#annotation");
   });
@@ -1998,9 +2090,19 @@ describe("App", () => {
 
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "类别管理");
-    await user.type(screen.getByLabelText("类别名称"), "vehicle");
-    await user.click(screen.getByRole("button", { name: "创建类别" }));
-    expect(await screen.findByRole("button", { name: "vehicle" })).toHaveClass("selected");
+    apiMock.createClass.mockImplementationOnce(async (_projectId, body) => ({
+      id: 2,
+      project_id: 1,
+      name: body.name,
+      color: body.color,
+      description: null,
+      active: true,
+    }));
+    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+      await user.click(screen.getByRole("checkbox", { name }));
+    }
+    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+    expect(await screen.findByRole("button", { name: "fire_truck" })).toBeInTheDocument();
 
     await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
@@ -2010,7 +2112,7 @@ describe("App", () => {
 
     await user.selectOptions(screen.getByLabelText("边界框 1 类别"), "2");
     expect(
-      screen.getByText("vehicle", { selector: ".box-editor-title strong" }),
+      screen.getByText("fire_truck", { selector: ".box-editor-title strong" }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "保存" }));

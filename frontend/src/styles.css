@@ -1329,6 +1329,128 @@ th {
   gap: 10px;
 }
 
+.fixed-class-management {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.fixed-class-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fixed-class-heading h3 {
+  margin: 0;
+  color: #172026;
+  font-size: 15px;
+}
+
+.fixed-class-heading p {
+  margin: 4px 0 0;
+  color: #62727e;
+  font-size: 13px;
+}
+
+.fixed-class-count {
+  flex: 0 0 auto;
+  color: #1f6f78;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.fixed-class-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fixed-class-picker:disabled {
+  opacity: 0.65;
+}
+
+.fixed-class-option {
+  display: grid;
+  grid-template-columns: 16px 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid #d9e3ea;
+  border-radius: 6px;
+  color: #172026;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.fixed-class-option:hover {
+  border-color: #8fb5bb;
+}
+
+.fixed-class-option.selected {
+  border-color: #1f6f78;
+  background: #e6f3f4;
+}
+
+.fixed-class-option input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #1f6f78;
+}
+
+.fixed-class-option-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.fixed-class-option-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fixed-class-option-status {
+  color: #62727e;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.fixed-class-management > button {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .class-form label,
 .version-controls label,
 .image-filter-panel label,
@@ -3017,6 +3139,14 @@ input[type="color"] {
   .filter-actions,
   .class-row-actions {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .fixed-class-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .fixed-class-heading {
+    flex-wrap: wrap;
   }
 
   .threshold-recommendation,

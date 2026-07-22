@@ -124,6 +124,14 @@ const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset
 const defaultProjectName = "YOLO 目标检测项目";
 const defaultDatasetName = "image_dataset";
 const defaultClassColor = "#ef4444";
+const fixedClassPresets = [
+  { name: "fire_truck", color: "#e45756" },
+  { name: "person_white", color: "#2f80ed" },
+  { name: "prius_hybrid", color: "#27ae60" },
+  { name: "car_lexus", color: "#f2994a" },
+  { name: "prius_hybrid_camo", color: "#9b51e0" },
+  { name: "suv_camo", color: "#1f6f78" },
+] as const;
 const compactAnnotationViewportQuery = "(max-width: 820px)";
 
 function usesCompactAnnotationViewport(): boolean {
@@ -272,12 +280,13 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [classes, setClasses] = useState<ProjectClass[]>([]);
-  const [className, setClassName] = useState("");
-  const [classColor, setClassColor] = useState(defaultClassColor);
+  const [selectedFixedClassNames, setSelectedFixedClassNames] = useState<string[]>(
+    fixedClassPresets.map((preset) => preset.name),
+  );
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
   const [versionClassIds, setVersionClassIds] = useState<number[]>([]);
   const [classError, setClassError] = useState<string | null>(null);
-  const [isCreatingClass, setIsCreatingClass] = useState(false);
+  const [isEnablingFixedClasses, setIsEnablingFixedClasses] = useState(false);
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
   const [classEditName, setClassEditName] = useState("");
   const [classEditColor, setClassEditColor] = useState(defaultClassColor);
@@ -640,12 +649,11 @@ export default function App() {
     isSpacePressedRef.current = false;
     setImportedDataset(null);
     setClasses([]);
-    setClassName("");
-    setClassColor(defaultClassColor);
+    setSelectedFixedClassNames(fixedClassPresets.map((preset) => preset.name));
     setSelectedClassId(null);
     setVersionClassIds([]);
     setClassError(null);
-    setIsCreatingClass(false);
+    setIsEnablingFixedClasses(false);
     setEditingClassId(null);
     setClassEditName("");
     setClassEditColor(defaultClassColor);
@@ -1003,6 +1011,7 @@ export default function App() {
     const runResponse = await listTrainingRuns(dataset.project_id);
 
     setClasses(classResponse.items);
+    setSelectedFixedClassNames(fixedClassPresets.map((preset) => preset.name));
     setSelectedClassId(classResponse.items[0]?.id ?? null);
     setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
     setImages(imageResponse.items);
@@ -1457,34 +1466,45 @@ export default function App() {
       .catch((error: Error) => setPredictionError(error.message));
   }
 
-  async function handleCreateClass(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!importedDataset || className.trim().length === 0) {
+  async function handleEnableFixedClasses() {
+    if (
+      !importedDataset
+      || selectedFixedClassNames.length === 0
+      || isEnablingFixedClasses
+    ) {
       return;
     }
 
-    setIsCreatingClass(true);
+    setIsEnablingFixedClasses(true);
     setClassError(null);
     const isFirstClass = classes.length === 0;
+    const existingNames = new Set(classes.map((classItem) => classItem.name));
+    const classesToCreate = fixedClassPresets.filter(
+      (preset) => selectedFixedClassNames.includes(preset.name) && !existingNames.has(preset.name),
+    );
+    const createdClasses: ProjectClass[] = [];
 
     try {
-      const created = await createClass(importedDataset.project_id, {
-        name: className.trim(),
-        color: classColor,
-      });
-      setClasses((current) => [...current, created]);
-      setVersionClassIds((current) => [...current, created.id]);
-      setSelectedClassId(created.id);
-      setClassName("");
+      for (const preset of classesToCreate) {
+        const created = await createClass(importedDataset.project_id, {
+          name: preset.name,
+          color: preset.color,
+        });
+        createdClasses.push(created);
+        setClasses((current) => [...current, created]);
+        setVersionClassIds((current) => [...current, created.id]);
+      }
+
+      const firstAvailableClassId = classes[0]?.id ?? createdClasses[0]?.id ?? null;
+      setSelectedClassId((current) => current ?? firstAvailableClassId);
       void refreshTrainingPrep();
-      if (isFirstClass) {
+      if (isFirstClass && createdClasses.length > 0) {
         commitWorkflowStep("annotation");
       }
     } catch (error) {
-      setClassError(error instanceof Error ? error.message : "类别创建失败");
+      setClassError(error instanceof Error ? error.message : "类别启用失败");
     } finally {
-      setIsCreatingClass(false);
+      setIsEnablingFixedClasses(false);
     }
   }
 
@@ -3388,39 +3408,64 @@ export default function App() {
             <Library size={20} />
           </div>
 
-          <form className="class-form" onSubmit={handleCreateClass}>
-            <label htmlFor="class-name">类别名称</label>
-            <input
-              id="class-name"
-              value={className}
-              disabled={!importedDataset}
-              onChange={(event) => setClassName(event.target.value)}
-              placeholder="target"
-            />
-            <label htmlFor="class-color">类别颜色</label>
-            <div className="color-row">
-              <input
-                id="class-color"
-                type="color"
-                value={classColor}
-                disabled={!importedDataset}
-                onChange={(event) => setClassColor(event.target.value)}
-                aria-label="类别颜色"
-              />
-              <button
-                type="submit"
-                disabled={!importedDataset || isCreatingClass || className.trim().length === 0}
-              >
-                创建类别
-              </button>
+          <div className="fixed-class-management">
+            <div className="fixed-class-heading">
+              <div>
+                <h3>选择本项目要标注的目标类别</h3>
+                <p>勾选需要的类别后，一次启用到项目类别库。</p>
+              </div>
+              <span className="fixed-class-count">已选 {selectedFixedClassNames.length} / {fixedClassPresets.length}</span>
             </div>
-          </form>
+            <fieldset className="fixed-class-picker" disabled={!importedDataset || isEnablingFixedClasses}>
+              <legend className="sr-only">固定目标类别</legend>
+              {fixedClassPresets.map((preset) => {
+                const isSelected = selectedFixedClassNames.includes(preset.name);
+                const isExisting = classes.some((classItem) => classItem.name === preset.name);
+                return (
+                  <label
+                    className={isSelected ? "fixed-class-option selected" : "fixed-class-option"}
+                    key={preset.name}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={preset.name}
+                      checked={isSelected}
+                      onChange={() => {
+                        setSelectedFixedClassNames((current) =>
+                          current.includes(preset.name)
+                            ? current.filter((name) => name !== preset.name)
+                            : [...current, preset.name],
+                        );
+                      }}
+                    />
+                    <span
+                      className="fixed-class-option-color"
+                      style={{ background: preset.color }}
+                      aria-hidden="true"
+                    />
+                    <span className="fixed-class-option-name">{preset.name}</span>
+                    <span className="fixed-class-option-status">
+                      {isExisting ? "已在类别库" : isSelected ? "待启用" : "未选择"}
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
+            <button
+              type="button"
+              onClick={handleEnableFixedClasses}
+              disabled={!importedDataset || isEnablingFixedClasses || selectedFixedClassNames.length === 0}
+            >
+              <CheckCircle2 size={16} />
+              {isEnablingFixedClasses ? "正在启用..." : "启用所选类别"}
+            </button>
+          </div>
 
           {classError ? <div className="error-banner">{classError}</div> : null}
 
           <div className="class-list" aria-label="可用类别">
             {classes.length === 0 ? (
-              <p className="empty-state">请先导入数据集，再创建类别以绘制边界框。</p>
+              <p className="empty-state">请先启用至少一个类别以绘制边界框。</p>
             ) : (
               classes.map((classItem) =>
                 editingClassId === classItem.id ? (
