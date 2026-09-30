@@ -1,35 +1,49 @@
 # YOLO Trainer
 
-Local single-user YOLO training workbench.
+[English](#english) · [中文](#中文)
 
-## Backend
+<a id="english"></a>
+
+## English
+
+YOLO Trainer is a local workbench for object detection. It takes a folder or zip of images through class definition, bounding-box annotation, dataset freeze, Ultralytics training, visual review, and model export. Images, labels, runs, and exports stay in a workspace on the machine that runs the app.
+
+The interface is in Chinese. Two roles share one database: an administrator runs the full workflow, and annotators label images in datasets an administrator has already imported.
+
+This repository ships the application only. Bring your own images. Dataset files, the SQLite database, and trained weights are written under `workspace/` and are not part of the source tree.
+
+### Requirements
+
+- Python 3.11 or newer
+- Node.js 18 or newer
+- A local dataset: a folder of images, or a `.zip` of that folder
+
+Training uses [Ultralytics](https://github.com/ultralytics/ultralytics). The backend install pulls in PyTorch. CUDA is selected when it is available, then Apple MPS, then CPU. The first training run also downloads the chosen pretrained weights, such as `yolov8n.pt`.
+
+### Run it locally
+
+Use two terminals. Start the API first.
+
+**API**
 
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install -U pip
 python -m pip install -e ".[dev]"
-python -m pytest -v
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Health check:
+The first install is large because of PyTorch. When the process is up, the workspace directory and a SQLite database are created beside the repository.
 
 ```bash
 curl http://127.0.0.1:8000/api/health
 ```
 
-Dataset scan check. `source_path` accepts either a `.zip` archive or a local dataset folder:
+A healthy process returns `"status": "ok"` and the device it will train on.
 
-```bash
-curl -X POST http://127.0.0.1:8000/api/datasets/scan \
-  -H "Content-Type: application/json" \
-  -d '{"source_path":"/path/to/dataset.zip"}'
-```
-
-The response includes image counts, collection group names, and whether YOLO labels or `data.yaml` are present.
-
-## Frontend
+**Interface**
 
 ```bash
 cd frontend
@@ -37,305 +51,203 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`, keep the backend running, and scan a zip or folder path on your machine, for example:
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The dev server proxies `/api` to `127.0.0.1:8000`.
 
-```text
-/path/to/dataset.zip
-```
+On a fresh database the sign-in is:
 
-Set `Project name` and `Dataset name` before import. Imports that use the same project name reuse
-the project-level class library, so related datasets can share labels while each dataset keeps its
-own image list, annotations, quality review, and exported versions.
+| | |
+| --- | --- |
+| Username | `admin` |
+| Password | `admin123` |
 
-After a restart or browser refresh, use `Saved dataset` and `Load Dataset` in Dataset Intake to
-reload an already imported dataset without copying the source files again.
+Change that password from **用户管理** before any other person can reach the machine. To choose the initial account yourself, set the variables below before the first launch. They apply only when the user table is still empty.
 
-## Annotation smoke workflow
+### First session
 
-With both servers running:
+1. Sign in as the administrator.
+2. On **项目与数据**, choose a local zip or folder, scan it, then import it. You can also upload a zip from the browser. Set the project name and dataset name before import. Reusing a project name keeps the same class library.
+3. On **类别管理**, confirm the classes. Filename patterns can suggest classes; you still decide what is created.
+4. On **图像标注**, draw boxes, adjust them, and save.
+5. On **质量与版本**, read the quality summary and create a dataset version. The version is a frozen YOLO layout with an 80/10/10 split.
+6. On **模型训练**, start from a preset such as `yolov8n.pt`. The run log updates while training is in progress.
+7. On **效果预览** and **评估与导出**, inspect predictions and export `.pt` or ONNX from a finished run.
 
-1. Open `http://127.0.0.1:5173`.
-2. Click `Scan Dataset` to preview the zip or folder.
-3. Click `Import Dataset` to copy the source images into the managed workspace and create SQLite rows.
-4. In `Class Library`, create a class such as `target`.
-5. Select an image in `Image Browser`.
-6. Drag on the image in `Annotation` to create a bounding box.
-7. Select an existing box on the image to move it, drag a selected corner to resize it, or use the
-   arrow buttons in the box editor to nudge it precisely.
-8. Optionally fill `Track ID` and `Edge tags`.
-9. Click `Save Annotations`.
-10. Reselect or reload the image and confirm the saved box is still listed.
+An annotator account, created under **用户管理**, can load a saved dataset and label it. Training, preview, evaluation, and user administration stay with the administrator.
 
-## Dataset browser filters
+### Single process
 
-After import, `Image Browser` can filter the current dataset by:
-
-- platform, matching a collection folder name in the dataset
-- label status: all, annotated, or unannotated
-- project class
-- edge tag, such as `occluded`
-- altitude range
-
-API smoke:
+After the interface has been built, the API can serve it:
 
 ```bash
-curl "http://127.0.0.1:8000/api/datasets/1/images?platform=group_a&label_status=annotated"
-curl "http://127.0.0.1:8000/api/datasets/1/images?class_id=1&edge_tag=occluded"
-curl "http://127.0.0.1:8000/api/datasets/1/images?altitude_min=20&altitude_max=40"
+cd frontend && npm install && npm run build
+cd ../backend && source .venv/bin/activate
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Quality review and dataset version export
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
-After importing a dataset and saving at least one annotation:
+### Configuration
 
-1. Check `Quality Review` for image, annotated image, class, box, tiny-box, and issue counts.
-2. Use `Quality issue type` to inspect actionable tiny, duplicate, invalid, metadata, and unannotated samples.
-3. Check `Dataset Coverage` to see platform, altitude-band, class, and edge-tag coverage before
-   freezing a version.
-4. Click `Apply Auto Tags` to write annotation-level quality tags such as `tiny_box`,
-   `duplicate_box`, and `invalid_box` into each affected annotation's `edge_tags`.
-5. Use the Image Browser `Edge tag` filter to create follow-up correction queues from those tags.
-6. Confirm the panel says `Ready to export`.
-7. Enter an optional version name in `Version Export`.
-8. Select the class subset to freeze for this version. Leaving all classes selected exports the full
-   active project class library; selecting a subset exports only images and labels that contain those
-   classes.
-9. Click `Create Dataset Version`.
-10. Confirm the new version appears with train/val/test counts and an artifact path.
+Settings use the `YOLO_TRAINER_` prefix.
 
-The backend writes frozen YOLO artifacts under:
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `YOLO_TRAINER_WORKSPACE_ROOT` | `<repo>/workspace` | Database, imported images, versions, runs, exports |
+| `YOLO_TRAINER_JWT_SECRET` | a development placeholder | Signing key for session tokens |
+| `YOLO_TRAINER_DEFAULT_ADMIN_USERNAME` | `admin` | First administrator, created once |
+| `YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD` | `admin123` | Password for that first account |
+| `YOLO_TRAINER_ACCESS_TOKEN_EXPIRE_MINUTES` | 7 days | Session lifetime |
 
-```text
-workspace/projects/<project_id>/versions/<version_id>/
-  images/train|val|test/
-  labels/train|val|test/
-  data.yaml
-  manifest.json
-```
-
-Version export includes only annotated images for the selected classes. It freezes the selected
-project classes into a zero-based YOLO class map sorted by class ID, writes normalized
-`class x_center y_center width height` labels, and uses a deterministic 80/10/10 split with at least
-one validation image when there are two or more annotated images.
-The version `manifest.json` also freezes each exported image's platform, altitude, timestamp,
-dimensions, source metadata, annotation `track_id`, and edge tags so later prediction review or
-situation-map alignment can trace results back to the exact training snapshot.
-
-## Training run lifecycle
-
-After a dataset version exists:
-
-1. Open `Training Setup`.
-2. Choose a model preset such as `yolov8n.pt`, or enter a local `.pt` path.
-3. Set epochs, image size, batch size, device, augmentation strategy, TTA, and threshold scan flags.
-4. Click `Start Training Run`.
-5. Check `Run History` for status, artifact path, latest metrics, generated artifacts, errors,
-   and logs.
-6. While a run is `queued`, `preparing`, or `running`, the frontend shows `Auto refresh on` and
-   refreshes run status plus logs automatically.
-7. Click `Load Config` on a historical run to restore its model, hyperparameters, augmentation,
-   TTA, and threshold-scan settings into Training Setup.
-8. Click `Rerun` to start a new run from that historical config on the latest dataset version.
-9. Click `Cancel Run` on an active run to mark it `cancelled`, write a cancellation log, and allow
-   another run to be queued.
-
-The backend creates persistent run artifacts under:
-
-```text
-workspace/projects/<project_id>/runs/<run_id>/
-  config.json
-  logs.txt
-  metrics.jsonl
-```
-
-The Run History `Run Artifacts` panel and API endpoint list generated configs, logs, metrics,
-weights, plots, prediction outputs, GridMask derivatives, and exports:
+Example:
 
 ```bash
-curl http://127.0.0.1:8000/api/training/runs/1/artifacts
+export YOLO_TRAINER_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD='choose-a-long-password'
 ```
 
-Only one run can be active for a project at a time. Run status can be `queued`, `preparing`,
-`running`, `completed`, `failed`, or `cancelled`.
+### Layout
 
-Real training uses Ultralytics when it is installed in the backend Python environment:
+```text
+backend/     FastAPI service, training jobs, SQLite models
+frontend/    React interface
+workspace/   runtime data, created on startup, ignored by git
+```
+
+Versions land in `workspace/projects/<project_id>/versions/<version_id>/` with `images/`, `labels/`, and `data.yaml`. Runs land in `workspace/projects/<project_id>/runs/<run_id>/`.
+
+### Development
+
+```bash
+cd backend && source .venv/bin/activate && python -m pytest -q
+cd frontend && npm test -- --run && npm run build
+```
+
+### Security
+
+YOLO Trainer is a single-machine tool. The development password and signing key are there so a checkout can boot. Replace both before the port is reachable by anyone else. Do not commit `workspace/`, datasets, or weight files.
+
+---
+
+<a id="中文"></a>
+
+## 中文
+
+YOLO Trainer 是一套本地目标检测工作台。它把图像目录或压缩包一路送到类别定义、边界框标注、数据版本冻结、Ultralytics 训练、结果复查和模型导出。图像、标注、训练记录和导出文件都留在运行这套程序的那台机器上。
+
+界面语言是中文。同一套数据库里有两种角色：管理员走完整流程，标注员只在管理员已经导入的数据集上标注。
+
+本仓库只包含程序。图像请自备。数据集、SQLite 数据库和训练权重写在 `workspace/` 下，不进入源码树。
+
+### 环境
+
+- Python 3.11 或更高版本
+- Node.js 18 或更高版本
+- 一份本地数据：图像文件夹，或该文件夹的 `.zip`
+
+训练走 [Ultralytics](https://github.com/ultralytics/ultralytics)。安装后端时会一并安装 PyTorch。设备按 CUDA、Apple MPS、CPU 的顺序选用。第一次训练还会下载所选的预训练权重，例如 `yolov8n.pt`。
+
+### 本地启动
+
+开两个终端，先启动 API。
+
+**API**
 
 ```bash
 cd backend
-python -m pip install ultralytics
+python3 -m venv .venv
+source .venv/bin/activate          # Windows：.venv\Scripts\activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The training config persists both a strategy name and structured augmentation values:
-
-- `mosaic`, `mixup`, and `copy_paste` for small/dense targets
-- `hsv_h`, `hsv_s`, `hsv_v`, `translate`, `scale`, `fliplr`, and `erasing`
-- `gridmask` to generate a run-local masked training dataset for occlusion robustness
-
-Ultralytics-supported augmentation fields are passed into `model.train()`. When `gridmask` is
-enabled, the backend derives `runs/<run_id>/gridmask_dataset/`, applies deterministic masks to the
-copied images, preserves YOLO label files, rewrites that dataset's `data.yaml`, and trains from the
-derived path. The frozen dataset version stays unchanged.
-
-If Ultralytics is not installed, the run is still persisted and moves to `failed` with a clear log
-message. This lets the UI and run history be tested without downloading model weights.
-
-Enable `Auto threshold scan` in Training Setup to run the default thresholds
-`0.15, 0.25, 0.35, 0.5, 0.65` after a successful training run. Each threshold creates a
-normal prediction job, so the Prediction Analysis list, logs, and Experiment Dashboard threshold
-table use the same review workflow as manual prediction jobs.
-
-Enable `TTA` to pass Ultralytics `augment=True` into prediction jobs. This affects manual
-prediction analysis, manual threshold scans, and automatic post-training threshold scans for the run.
-
-API smoke after creating a dataset version:
+首次安装会比较久，时间主要花在 PyTorch。进程起来之后，会在仓库旁边创建 `workspace/` 和 SQLite 数据库。
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/training/runs \
-  -H "Content-Type: application/json" \
-  -d '{"version_id":1,"model":"yolov8n.pt","epochs":1,"image_size":320,"batch_size":1}'
-
-curl http://127.0.0.1:8000/api/projects/1/training/runs
-curl http://127.0.0.1:8000/api/training/runs/1/logs
+curl http://127.0.0.1:8000/api/health
 ```
 
-## Prediction analysis and failure samples
+正常时返回 `"status": "ok"`，并带上即将用于训练的设备。
 
-After a training run exists:
-
-1. Open `Prediction Analysis`.
-2. Choose an image scope: `all`, `train`, `val`, or `test`.
-3. Set a confidence threshold.
-4. Optionally set Image Browser filters, then enable `Use image filters` to run only that filtered
-   subset inside the selected scope.
-5. Click `Run Prediction Analysis`.
-6. Review matched, false-positive, false-negative, and class-confusion counts.
-7. Filter prediction/failure samples by failure type, class, confidence, platform, altitude, or timestamp.
-8. Inspect the prediction/failure sample list; each row keeps the source image ID for annotator follow-up.
-9. Click `Open Image` on a sample to jump to that image in the annotator.
-10. Use the `GT` and `Pred` layer toggles to isolate saved boxes or model outputs.
-11. Prediction boxes show failure type, class, and confidence on the image overlay.
-12. Use `Add as annotation` to promote a false-positive prediction into an editable annotation draft.
-13. Use `Mark reviewed` on false-negative rows to tag the matched ground-truth box for follow-up.
-14. Click `Save Annotations` when the correction draft looks right.
-
-Prediction jobs automatically add the `false_negative` edge tag to missed ground-truth boxes and
-`class_confusion` to ground-truth boxes that were localized with high IoU but assigned the wrong
-class. Use the Image Browser `Edge tag` filter with either tag to build follow-up annotation queues.
-The manual `reviewed_prediction` tag is still only added when an operator clicks `Mark reviewed` and
-saves the annotation changes.
-
-For threshold tuning, enter comma-separated confidence values in `Scan thresholds`, such as
-`0.15, 0.25, 0.35, 0.5, 0.65`, then click `Run Threshold Scan`. The backend creates one
-prediction job for each value and the Experiment Dashboard automatically refreshes the
-`Threshold Scan` table with precision and recall for each point.
-
-Prediction jobs also show `Auto refresh on` while queued or running. The UI refreshes the latest job,
-its prediction rows, and active job logs until the job reaches a terminal state.
-
-API smoke for threshold scans:
+**界面**
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/training/runs/1/prediction-threshold-scan \
-  -H "Content-Type: application/json" \
-  -d '{"image_scope":"all","thresholds":[0.15,0.25,0.35,0.5,0.65]}'
-
-curl "http://127.0.0.1:8000/api/prediction-jobs/1/predictions?failure_type=false_positive&class_id=1&confidence_min=0.5&platform=group_a"
+cd frontend
+npm install
+npm run dev
 ```
 
-Prediction artifacts are written under:
+打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。开发服务器把 `/api` 转发到 `127.0.0.1:8000`。
+
+空数据库的初始登录是：
+
+| | |
+| --- | --- |
+| 用户名 | `admin` |
+| 密码 | `admin123` |
+
+只要还有别人能访问这台机器，就先到 **用户管理** 里改掉这个密码。如果想自己指定初始账号，在第一次启动前设置下面的环境变量。用户表里已经有人之后，这些变量不会再创建账号。
+
+### 第一次使用
+
+1. 用管理员账号登录。
+2. 在 **项目与数据** 里选择本地 zip 或文件夹，先扫描再导入。也可以直接在浏览器里上传 zip。导入前写好项目名和数据集名。项目名相同，类别库就沿用同一套。
+3. 在 **类别管理** 里确认类别。文件名可以给出建议，最终是否创建由你决定。
+4. 在 **图像标注** 里画框、调整并保存。
+5. 在 **质量与版本** 里查看质量摘要，再生成数据版本。版本是一份冻结的 YOLO 目录，划分比例为 80/10/10。
+6. 在 **模型训练** 里从一个预设权重开始，例如 `yolov8n.pt`。训练过程中日志会持续更新。
+7. 在 **效果预览** 和 **评估与导出** 里查看预测，并从已完成的训练导出 `.pt` 或 ONNX。
+
+在 **用户管理** 里创建的标注员可以加载已保存的数据集并标注。训练、预览、评估和用户管理仍由管理员操作。
+
+### 单进程运行
+
+界面构建完成后，可以由 API 直接提供页面：
+
+```bash
+cd frontend && npm install && npm run build
+cd ../backend && source .venv/bin/activate
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)。
+
+### 配置
+
+配置项使用 `YOLO_TRAINER_` 前缀。
+
+| 变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `YOLO_TRAINER_WORKSPACE_ROOT` | `<仓库>/workspace` | 数据库、导入图像、版本、训练和导出 |
+| `YOLO_TRAINER_JWT_SECRET` | 开发用占位密钥 | 登录令牌的签名密钥 |
+| `YOLO_TRAINER_DEFAULT_ADMIN_USERNAME` | `admin` | 首次创建的管理员，只创建一次 |
+| `YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD` | `admin123` | 该账号的初始密码 |
+| `YOLO_TRAINER_ACCESS_TOKEN_EXPIRE_MINUTES` | 7 天 | 登录有效期 |
+
+示例：
+
+```bash
+export YOLO_TRAINER_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD='choose-a-long-password'
+```
+
+### 目录
 
 ```text
-workspace/projects/<project_id>/runs/<run_id>/predictions/<job_id>/
-  logs.txt
-  predictions.json
+backend/     FastAPI 服务、训练任务、SQLite 模型
+frontend/    React 界面
+workspace/   运行时数据，启动时创建，已被 git 忽略
 ```
 
-`predictions.json` records the selected image scope, normalized image filters, image IDs, and
-prediction rows so filtered experiments can be reproduced later.
+数据版本写在 `workspace/projects/<project_id>/versions/<version_id>/`，其中包含 `images/`、`labels/` 和 `data.yaml`。训练记录写在 `workspace/projects/<project_id>/runs/<run_id>/`。
 
-Real prediction uses `workspace/projects/<project_id>/runs/<run_id>/ultralytics/weights/best.pt`.
-If weights or Ultralytics are missing, the prediction job is persisted as `failed` with a clear log
-message.
-
-API smoke after a run exists:
+### 开发
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/training/runs/1/prediction-jobs \
-  -H "Content-Type: application/json" \
-  -d '{"image_scope":"all","confidence_threshold":0.25}'
-
-curl http://127.0.0.1:8000/api/training/runs/1/prediction-jobs
-curl http://127.0.0.1:8000/api/prediction-jobs/1/predictions
-curl http://127.0.0.1:8000/api/prediction-jobs/1/images/1/review
-curl http://127.0.0.1:8000/api/prediction-jobs/1/logs
+cd backend && source .venv/bin/activate && python -m pytest -q
+cd frontend && npm test -- --run && npm run build
 ```
 
-## Experiment dashboard
+### 安全
 
-`Run History` includes an `Experiment Dashboard` for the latest run. It summarizes:
-
-1. Training metric series stored in `run_metrics`.
-2. Per-class matched, false-positive, false-negative, and class-confusion counts from the latest completed prediction job.
-3. A class-level confusion matrix for matched and class-confusion predictions.
-4. Threshold scan rows across completed prediction jobs at different confidence thresholds.
-5. A `Run Comparison` table across recent project runs with status, model, epochs, mAP50, box loss,
-   latest prediction counts, best threshold/F1, and artifact path.
-
-The dashboard is populated through:
-
-```bash
-curl http://127.0.0.1:8000/api/training/runs/1/summary
-curl http://127.0.0.1:8000/api/projects/1/training/summary
-```
-
-## Model export
-
-After a completed training run exists:
-
-1. Open `Model Export`.
-2. Check whether the latest run has `ultralytics/weights/best.pt`.
-3. Use `Export PT` to copy/register the trained `.pt` weights under the run export folder.
-4. Use `Export ONNX` when Ultralytics is installed and the weights file exists.
-5. TensorRT is shown only when backend capability detection finds TensorRT support; otherwise the UI shows
-   the unsupported reason.
-
-Export artifacts are persisted in SQLite and written under:
-
-```text
-workspace/projects/<project_id>/runs/<run_id>/exports/
-  run-<run_id>.pt
-  run-<run_id>.onnx
-  run-<run_id>.engine
-```
-
-API smoke:
-
-```bash
-curl http://127.0.0.1:8000/api/training/runs/1/exports/capabilities
-curl -X POST http://127.0.0.1:8000/api/training/runs/1/exports \
-  -H "Content-Type: application/json" \
-  -d '{"format":"pt"}'
-curl http://127.0.0.1:8000/api/training/runs/1/exports
-```
-
-## Model effect preview
-
-After at least one training run exists, open the `效果预览` workflow step. Image mode lets you
-choose the built-in `yolov8n.pt` or a completed run's `best.pt`, select a managed dataset, and step
-through images one by one. Orange solid boxes are model predictions; green dashed boxes are saved
-human annotations. Changing the confidence threshold only changes the preview request and never
-writes annotations or formal prediction jobs.
-
-Video mode accepts `mp4`, `mov`, `avi`, `mkv`, and `webm` uploads. Frames are inferred in the
-background and streamed from the local API while processing. Completed results are saved under:
-
-```text
-workspace/projects/<project_id>/previews/<preview_id>/
-  source.<ext>
-  frames/
-  result.mp4
-```
-
-The result video can be downloaded from the page or deleted as a whole. Deleting a preview removes
-only this preview directory and its database row; the original upload, dataset images, annotations,
-and training artifacts are not changed. Video uploads are limited to 500 MB.
+YOLO Trainer 面向单机使用。开发用的密码和签名密钥是为了让一份新检出的代码能够直接启动。端口对其他人可达之前，请换掉这两项。不要把 `workspace/`、数据集或权重文件提交进仓库。
