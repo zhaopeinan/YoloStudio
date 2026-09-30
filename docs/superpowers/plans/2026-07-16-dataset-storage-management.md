@@ -893,7 +893,7 @@ Expected: all frontend tests pass and production build succeeds.
 - [ ] **Step 3: Check patch cleanliness**
 
 ```bash
-cd /Users/peinan/DevProjects/YOLO_Trainer
+cd ~/DevProjects/YOLO_Trainer
 git diff --check
 git status --short
 ```
@@ -905,11 +905,11 @@ Expected: no whitespace errors. Preserve unrelated untracked files.
 ```bash
 launchctl remove com.codex.yolo-trainer.backend || true
 launchctl submit -l com.codex.yolo-trainer.backend -- /bin/zsh -lc \
-  'cd /Users/peinan/DevProjects/YOLO_Trainer/backend && exec .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >>/tmp/yolo-trainer-backend.log 2>&1'
+  'cd ~/DevProjects/YOLO_Trainer/backend && exec .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >>/tmp/yolo-trainer-backend.log 2>&1'
 
 launchctl remove com.codex.yolo-trainer.frontend || true
 launchctl submit -l com.codex.yolo-trainer.frontend -- /bin/zsh -lc \
-  'cd /Users/peinan/DevProjects/YOLO_Trainer/frontend && exec npm run dev -- --host 127.0.0.1 --port 5173 >>/tmp/yolo-trainer-frontend.log 2>&1'
+  'cd ~/DevProjects/YOLO_Trainer/frontend && exec npm run dev -- --host 127.0.0.1 --port 5173 >>/tmp/yolo-trainer-frontend.log 2>&1'
 ```
 
 Verify `/api/health` and `http://127.0.0.1:5173/` return successfully.

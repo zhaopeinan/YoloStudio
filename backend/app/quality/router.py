@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.auth.deps import get_current_user, require_admin
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.annotations.status import get_annotation_status
 from app.db.models import Annotation, ClassDef, Dataset, Image
 from app.db.session import get_db
 from app.prediction.matching import annotation_box, iou
@@ -17,7 +20,11 @@ from app.quality.schemas import (
 from app.storage.visibility import StorageEntityNotFoundError, require_active_entity
 
 
-router = APIRouter(prefix="/api/datasets", tags=["quality"])
+router = APIRouter(
+    prefix="/api/datasets",
+    tags=["quality"],
+    dependencies=[Depends(get_current_user)],
+)
 duplicate_iou_threshold = 0.95
 QUALITY_ISSUE_TYPES = {
     "unannotated_image",
@@ -82,7 +89,12 @@ def _duplicate_box_count(annotations: list[Annotation]) -> int:
 
 def missing_metadata_fields(image: Image) -> list[str]:
     fields: list[str] = []
-    if not image.metadata_:
+    source_metadata = {
+        key: value
+        for key, value in (image.metadata_ or {}).items()
+        if key != "annotation_status"
+    }
+    if not source_metadata:
         fields.append("source metadata row")
     if not image.platform:
         fields.append("platform")
@@ -152,7 +164,11 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
     missing_metadata_count = sum(1 for image in images if missing_metadata_fields(image))
     missing_image_dimensions_count = sum(1 for image in images if has_missing_image_dimensions(image))
-    unannotated_image_count = image_count - annotated_image_count
+    unannotated_image_count = sum(
+        1
+        for image in images
+        if not image.annotations and get_annotation_status(image) == "unreviewed"
+    )
     unknown_class_reference_count = sum(
         int(warning.get("count") or 0)
         for warning in _import_warnings(dataset, "unknown_class_reference")
@@ -293,20 +309,7 @@ def build_quality_issues(
 
     issues: list[DatasetQualityIssue] = []
     if issue_type in {"all", "unannotated_image"}:
-        annotation_counts = (
-            select(Annotation.image_id, func.count(Annotation.id).label("annotation_count"))
-            .group_by(Annotation.image_id)
-            .subquery()
-        )
-        images = db.scalars(
-            select(Image)
-            .outerjoin(annotation_counts, Image.id == annotation_counts.c.image_id)
-            .where(
-                Image.dataset_id == dataset_id,
-                func.coalesce(annotation_counts.c.annotation_count, 0) == 0,
-            )
-            .order_by(Image.id)
-        ).all()
+        images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
         issues.extend(
             DatasetQualityIssue(
                 issue_type="unannotated_image",
@@ -317,6 +320,7 @@ def build_quality_issues(
                 image_url=f"/api/images/{image.id}/file",
             )
             for image in images
+            if not image.annotations and get_annotation_status(image) == "unreviewed"
         )
 
     rows = db.execute(
@@ -493,5 +497,6 @@ def apply_dataset_quality_tags(
     dataset_id: int,
     request: QualityTagApplyRequest,
     db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
 ) -> QualityTagApplySummary:
     return apply_quality_tags(db, dataset_id, request.issue_type)

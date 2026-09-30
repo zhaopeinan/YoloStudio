@@ -24,6 +24,7 @@ describe("工作流步骤", () => {
       ["annotation", "locked", "not_started"],
       ["quality", "locked", "not_started"],
       ["training", "locked", "not_started"],
+      ["preview", "locked", "not_started"],
       ["evaluation", "locked", "not_started"],
     ]);
     expect(steps[1].lockedReason).toBe("请先导入或加载数据集");
@@ -45,6 +46,7 @@ describe("工作流步骤", () => {
       "completed",
       "completed",
       "completed",
+      "in_progress",
       "completed",
     ]);
     expect(steps.every((step) => step.availability === "available")).toBe(true);

@@ -185,6 +185,126 @@ def test_permanent_purge_requires_exact_name_and_deletes_run_children(tmp_path: 
             assert db.scalar(select(func.count(ClassDef.id))) == 1
 
 
+def test_cascade_purge_deletes_dataset_family_in_one_operation(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        _set_run_status(tmp_path, fixture["running_run_id"], "cancelled")
+        trash_by_type = {}
+        for entity_type, entity_id in (
+            ("training_run", fixture["completed_run_id"]),
+            ("training_run", fixture["running_run_id"]),
+            ("dataset_version", fixture["version_id"]),
+            ("dataset", fixture["dataset_id"]),
+        ):
+            response = client.post(
+                f"/api/storage/items/{entity_type}/{entity_id}/trash"
+            )
+            assert response.status_code == 200
+            trash_by_type[entity_type, entity_id] = response.json()
+
+        parent = trash_by_type["dataset", fixture["dataset_id"]]
+        response = client.post(
+            f"/api/storage/trash/{parent['id']}/cascade-purge",
+            json={"confirm_name": parent["display_name"]},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["message"] == "数据集及其全部关联数据已彻底删除。"
+        with _db(tmp_path) as db:
+            assert db.get(Dataset, fixture["dataset_id"]) is None
+            assert db.get(DatasetVersion, fixture["version_id"]) is None
+            assert db.get(TrainingRun, fixture["completed_run_id"]) is None
+            assert db.get(TrainingRun, fixture["running_run_id"]) is None
+            assert db.scalar(select(func.count(TrashItem.id))) == 0
+            assert db.scalar(select(func.count(Image.id))) == 0
+            assert db.scalar(select(func.count(Annotation.id))) == 0
+            assert db.scalar(select(func.count(PredictionJob.id))) == 0
+            assert db.scalar(select(func.count(ExportArtifact.id))) == 0
+            assert db.scalar(select(func.count(RunMetric.id))) == 0
+            assert db.scalar(select(func.count(Prediction.id))) == 0
+        assert not Path(parent["trash_path"]).exists()
+        assert not (
+            _settings(tmp_path).workspace_root / ".trash" / ".purging" / str(parent["id"])
+        ).exists()
+
+
+def test_cascade_purge_blocks_active_related_tasks_without_changes(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        _set_run_status(tmp_path, fixture["running_run_id"], "cancelled")
+        parent = None
+        for entity_type, entity_id in (
+            ("training_run", fixture["completed_run_id"]),
+            ("training_run", fixture["running_run_id"]),
+            ("dataset_version", fixture["version_id"]),
+            ("dataset", fixture["dataset_id"]),
+        ):
+            response = client.post(
+                f"/api/storage/items/{entity_type}/{entity_id}/trash"
+            )
+            assert response.status_code == 200
+            if entity_type == "dataset":
+                parent = response.json()
+        assert parent is not None
+        _set_run_status(tmp_path, fixture["running_run_id"], "running")
+
+        response = client.post(
+            f"/api/storage/trash/{parent['id']}/cascade-purge",
+            json={"confirm_name": parent["display_name"]},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["message"] == (
+            "数据集仍有关联任务正在处理，无法级联彻底删除。"
+        )
+        assert any(
+            blocker["entity_id"] == fixture["running_run_id"]
+            for blocker in response.json()["detail"]["blockers"]
+        )
+        with _db(tmp_path) as db:
+            assert db.get(Dataset, fixture["dataset_id"]) is not None
+            assert db.get(DatasetVersion, fixture["version_id"]) is not None
+            assert db.get(TrainingRun, fixture["running_run_id"]) is not None
+            assert db.get(TrashItem, parent["id"]) is not None
+        assert Path(parent["trash_path"]).is_dir()
+
+
+def test_cascade_purge_requires_dataset_record_and_exact_name(tmp_path: Path):
+    with isolated_client(tmp_path) as client:
+        fixture = _create_storage_fixture(client, tmp_path)
+        _set_run_status(tmp_path, fixture["running_run_id"], "cancelled")
+        for entity_type, entity_id in (
+            ("training_run", fixture["completed_run_id"]),
+            ("training_run", fixture["running_run_id"]),
+            ("dataset_version", fixture["version_id"]),
+            ("dataset", fixture["dataset_id"]),
+        ):
+            response = client.post(
+                f"/api/storage/items/{entity_type}/{entity_id}/trash"
+            )
+            assert response.status_code == 200
+            if entity_type == "dataset":
+                parent = response.json()
+
+        wrong_name = client.post(
+            f"/api/storage/trash/{parent['id']}/cascade-purge",
+            json={"confirm_name": "wrong"},
+        )
+        assert wrong_name.status_code == 400
+        assert Path(parent["trash_path"]).is_dir()
+
+        version_item = next(
+            item
+            for item in client.get("/api/storage/trash").json()["items"]
+            if item["entity_type"] == "dataset_version"
+        )
+        non_dataset = client.post(
+            f"/api/storage/trash/{version_item['id']}/cascade-purge",
+            json={"confirm_name": version_item["display_name"]},
+        )
+        assert non_dataset.status_code == 409
+
+
 def test_expired_purge_runs_child_first_and_preserves_project_classes(tmp_path: Path):
     with isolated_client(tmp_path) as client:
         fixture, _ = _trash_family(client, tmp_path)
@@ -590,7 +710,8 @@ def test_startup_maintenance_uses_overridden_workspace_only(tmp_path: Path, monk
         with TestClient(app):
             pass
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_settings, None)
         engine.dispose()
 
     assert seen == [settings.workspace_root.resolve()]

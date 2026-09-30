@@ -5,6 +5,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { DatasetQualityIssueListResponse, DatasetQualitySummary } from "./api";
 
+vi.mock("./auth", () => ({
+  useAuth: () => ({
+    user: {
+      id: 1,
+      username: "admin",
+      role: "admin",
+      is_active: true,
+      created_at: "2026-06-30T00:00:00",
+      updated_at: "2026-06-30T00:00:00",
+    },
+    token: "test-token",
+    loading: false,
+    isAdmin: true,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshMe: vi.fn(),
+  }),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => children,
+  roleLabel: (role: string) => (role === "admin" ? "管理员" : "标注员"),
+}));
+
 function pointerEvent(type: string, clientX: number, clientY: number, button = 0) {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperties(event, {
@@ -75,6 +96,7 @@ const apiMock = vi.hoisted(() => {
     id: 1,
     run_id: 1,
     project_id: 1,
+    version_id: 1,
     status: "completed",
     image_scope: "all",
     confidence_threshold: 0.25,
@@ -117,6 +139,52 @@ const apiMock = vi.hoisted(() => {
   const listTrainingRuns = vi.fn(async () => {
     return trainingRunsResponseQueue.shift() ?? { items: [completedRun] };
   });
+  const listTrainingModels = vi.fn(async () => ({
+    items: [
+      {
+        model_ref: "base:yolov8n.pt",
+        label: "内置模型 · YOLOv8n",
+        kind: "base",
+        run_id: null,
+        weight_id: null,
+        status: "可用",
+      },
+      {
+        model_ref: "base:yolov8s.pt",
+        label: "内置模型 · YOLOv8s",
+        kind: "base",
+        run_id: null,
+        weight_id: null,
+        status: "可用",
+      },
+      {
+        model_ref: "base:yolov8m.pt",
+        label: "内置模型 · YOLOv8m",
+        kind: "base",
+        run_id: null,
+        weight_id: null,
+        status: "可用",
+      },
+      {
+        model_ref: "run:1",
+        label: "训练任务 #1 · best.pt",
+        kind: "trained",
+        run_id: 1,
+        weight_id: null,
+        status: "completed",
+      },
+    ],
+  }));
+  const listModelWeights = vi.fn(async () => ({ items: [] }));
+  const uploadModelWeight = vi.fn(async () => ({
+    id: 9,
+    project_id: 1,
+    original_filename: "uploaded.pt",
+    size_bytes: 12,
+    created_at: "2026-06-30T00:05:00",
+    updated_at: "2026-06-30T00:05:00",
+  }));
+  const deleteModelWeight = vi.fn(async () => undefined);
   const listPredictionJobs = vi.fn(async () => {
     return predictionJobsResponseQueue.shift() ?? { items: [completedPredictionJob] };
   });
@@ -141,11 +209,50 @@ const apiMock = vi.hoisted(() => {
             source_type: "zip",
             import_status: "imported",
             image_count: 2,
+            annotated_image_count: 1,
+            annotation_count: 3,
           },
         ],
       },
     ],
   }));
+  const listDatasetSources = vi.fn(async () => ({
+    items: [
+      {
+        source_ref: "server:/tmp/image_dataset.zip",
+        label: "服务器文件 · image_dataset.zip",
+        kind: "server",
+        source_path: "/tmp/image_dataset.zip",
+        original_filename: "image_dataset.zip",
+        size_bytes: 1024,
+        source_id: null,
+      },
+    ],
+  }));
+  const listDetectedClasses = vi.fn(async () => ({
+    dataset_id: 1,
+    total_images: 8,
+    method: "filename_prefix_h_a",
+    items: [
+      { name: "fire_truck", image_count: 1, color: "#e45756", sample_filenames: ["fire_truck_h20_a045.jpg"] },
+      { name: "person_white", image_count: 1, color: "#2f80ed", sample_filenames: ["person_white_h20_a000.jpg"] },
+      { name: "prius_hybrid", image_count: 1, color: "#27ae60", sample_filenames: ["prius_hybrid_h20_a000.jpg"] },
+      { name: "car_lexus", image_count: 1, color: "#f2994a", sample_filenames: ["car_lexus_h20_a000.jpg"] },
+      { name: "prius_hybrid_camo", image_count: 1, color: "#9b51e0", sample_filenames: ["prius_hybrid_camo_h20_a000.jpg"] },
+      { name: "suv_camo", image_count: 1, color: "#1f6f78", sample_filenames: ["suv_camo_h20_a000.jpg"] },
+      { name: "car_opel", image_count: 1, color: "#d97706", sample_filenames: ["car_opel_h20_a000.jpg"] },
+      { name: "person_red", image_count: 1, color: "#dc2626", sample_filenames: ["person_red_h20_a000.jpg"] },
+    ],
+  }));
+  const uploadDatasetSource = vi.fn(async () => ({
+    id: 1,
+    original_filename: "uploaded.zip",
+    size_bytes: 2048,
+    source_path: "/tmp/uploaded.zip",
+    created_at: "2026-06-30T00:00:00",
+    updated_at: "2026-06-30T00:00:00",
+  }));
+  const deleteDatasetSource = vi.fn(async () => undefined);
   const datasetImages = [
     {
       id: 10,
@@ -207,18 +314,39 @@ const apiMock = vi.hoisted(() => {
       };
     },
   );
-  const createDatasetVersion = vi.fn(async (_datasetId: number, name?: string, classIds?: number[]) => ({
+  const createDatasetVersion = vi.fn(async (
+    _datasetId: number,
+    name?: string,
+    classIds?: number[],
+    imageScope: "annotated" | "all" = "annotated",
+  ) => ({
     id: 2,
     project_id: 1,
     dataset_id: 1,
     name: name || "mvp-quality-pass",
     class_mapping: Object.fromEntries((classIds ?? [1]).map((classId, index) => [String(classId), index])),
+    image_scope: imageScope,
     split_counts: { train: 1, val: 0, test: 0 },
     artifact_path: "/tmp/workspace/projects/1/versions/2",
     frozen: true,
     created_at: "2026-06-30T00:01:00",
   }));
   const listDatasetVersions = vi.fn(async () => ({
+    items: [
+      {
+        id: 1,
+        project_id: 1,
+        dataset_id: 1,
+        name: "smoke-export",
+        class_mapping: { "1": 0 },
+        split_counts: { train: 1, val: 0, test: 0 },
+        artifact_path: "/tmp/workspace/projects/1/versions/1",
+        frozen: true,
+        created_at: "2026-06-30T00:00:00",
+      },
+    ],
+  }));
+  const listProjectVersions = vi.fn(async () => ({
     items: [
       {
         id: 1,
@@ -351,6 +479,7 @@ const apiMock = vi.hoisted(() => {
       body: {
         image_scope: string;
         confidence_threshold: number;
+        version_id?: number;
         image_filters?: {
           platform?: string;
           label_status?: "all" | "annotated" | "unannotated";
@@ -365,6 +494,7 @@ const apiMock = vi.hoisted(() => {
       id: 2,
       run_id: 1,
       project_id: 1,
+      version_id: body.version_id ?? 1,
       status: "failed",
       image_scope: body.image_scope,
       confidence_threshold: body.confidence_threshold,
@@ -718,6 +848,7 @@ const apiMock = vi.hoisted(() => {
       format,
       status: "completed",
       artifact_path: `/tmp/workspace/projects/1/runs/${runId}/exports/run-${runId}.${format}`,
+      download_url: `/api/training/runs/${runId}/exports/${exportArtifacts.length + 1}/file`,
       error_message: null,
       metadata: { format },
       started_at: "2026-06-30T00:06:00",
@@ -808,13 +939,22 @@ const apiMock = vi.hoisted(() => {
     trainingRunsResponseQueue,
     predictionJobsResponseQueue,
     listTrainingRuns,
+    listTrainingModels,
+    listModelWeights,
+    uploadModelWeight,
+    deleteModelWeight,
     listPredictionJobs,
     importDataset,
     listProjects,
+    listDatasetSources,
+    listDetectedClasses,
+    uploadDatasetSource,
+    deleteDatasetSource,
     datasetImages,
     listImages,
     createDatasetVersion,
     listDatasetVersions,
+    listProjectVersions,
     createTrainingRun,
     cancelTrainingRun,
     getAnnotations,
@@ -863,7 +1003,17 @@ vi.mock("./api", () => ({
     database_path: "/tmp/workspace/app.db",
     devices: { selected: "cpu", available: ["cpu"], details: {} },
   }),
+  setUnauthorizedHandler: vi.fn(),
+  setAuthToken: vi.fn(),
+  authedMediaUrl: (url: string) => url,
+  getRunBestWeightsUrl: (runId: number) => `/api/training/runs/${runId}/weights/best`,
+  getExportDownloadUrl: (runId: number, exportId: number) =>
+    `/api/training/runs/${runId}/exports/${exportId}/file`,
   listProjects: apiMock.listProjects,
+  listDatasetSources: apiMock.listDatasetSources,
+  listDetectedClasses: apiMock.listDetectedClasses,
+  uploadDatasetSource: apiMock.uploadDatasetSource,
+  deleteDatasetSource: apiMock.deleteDatasetSource,
   scanDataset: async () => ({
     source_path: "/tmp/image_dataset.zip",
     archive_name: "image_dataset.zip",
@@ -911,8 +1061,13 @@ vi.mock("./api", () => ({
   applyQualityTags: apiMock.applyQualityTags,
   refreshImageDimensions: apiMock.refreshImageDimensions,
   listDatasetVersions: apiMock.listDatasetVersions,
+  listProjectVersions: apiMock.listProjectVersions,
   createDatasetVersion: apiMock.createDatasetVersion,
   listTrainingRuns: apiMock.listTrainingRuns,
+  listTrainingModels: apiMock.listTrainingModels,
+  listModelWeights: apiMock.listModelWeights,
+  uploadModelWeight: apiMock.uploadModelWeight,
+  deleteModelWeight: apiMock.deleteModelWeight,
   createTrainingRun: apiMock.createTrainingRun,
   cancelTrainingRun: apiMock.cancelTrainingRun,
   getTrainingRunLogs: apiMock.getTrainingRunLogs,
@@ -1039,6 +1194,7 @@ describe("App", () => {
     apiMock.predictionJobsResponseQueue.length = 0;
     apiMock.importDataset.mockClear();
     apiMock.listProjects.mockClear();
+    apiMock.listDetectedClasses.mockClear();
     apiMock.listImages.mockClear();
     apiMock.listClasses.mockReset();
     apiMock.listClasses.mockImplementation(async () => ({
@@ -1080,11 +1236,31 @@ describe("App", () => {
         },
       ],
     }));
+    apiMock.listProjectVersions.mockReset();
+    apiMock.listProjectVersions.mockImplementation(async () => ({
+      items: [
+        {
+          id: 1,
+          project_id: 1,
+          dataset_id: 1,
+          name: "smoke-export",
+          class_mapping: { "1": 0 },
+          split_counts: { train: 1, val: 0, test: 0 },
+          artifact_path: "/tmp/workspace/projects/1/versions/1",
+          frozen: true,
+          created_at: "2026-06-30T00:00:00",
+        },
+      ],
+    }));
     apiMock.createTrainingRun.mockClear();
     apiMock.cancelTrainingRun.mockClear();
     apiMock.getAnnotations.mockClear();
     apiMock.replaceAnnotations.mockClear();
     apiMock.listTrainingRuns.mockClear();
+    apiMock.listTrainingModels.mockClear();
+    apiMock.listModelWeights.mockClear();
+    apiMock.uploadModelWeight.mockClear();
+    apiMock.deleteModelWeight.mockClear();
     apiMock.listPredictionJobs.mockClear();
     apiMock.getTrainingRunLogs.mockClear();
     apiMock.getTrainingRunArtifacts.mockClear();
@@ -1144,10 +1320,15 @@ describe("App", () => {
     expect(screen.getByTitle("/tmp/workspace/app.db")).toHaveTextContent(
       "/tmp/workspace/app.db",
     );
-    expect(screen.getByLabelText("数据集路径")).toBeInTheDocument();
+    expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
     expect(screen.getByLabelText("项目名称")).toHaveValue("YOLO 目标检测项目");
     expect(screen.getByLabelText("数据集名称")).toBeInTheDocument();
     expect(await screen.findByLabelText("已保存数据集")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("已保存数据集")).getByRole("option", {
+        name: "Drone QA Project / camouflage-set（2 张图像 · 已标注 1 张 · 3 个边界框）",
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "加载数据集" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "扫描数据集" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入数据集" })).toBeInTheDocument();
@@ -1162,7 +1343,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "导入数据集" }));
 
     expect(apiMock.importDataset).toHaveBeenCalledWith(
-      "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip",
+      expect.stringMatching(/image_dataset\.zip$/),
       "Drone QA Project",
       "camouflage-set",
     );
@@ -1263,7 +1444,7 @@ describe("App", () => {
     await user.click(screen.getByRole("checkbox", { name: "target" }));
     await user.click(screen.getByRole("checkbox", { name: "target" }));
     await user.click(screen.getByRole("button", { name: "创建数据集版本" }));
-    expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1]);
+    expect(apiMock.createDatasetVersion).toHaveBeenCalledWith(1, undefined, [1], "annotated", [1]);
 
     await navigateToStep(user, "模型训练");
     expect(await screen.findByText("训练任务 #1")).toBeInTheDocument();
@@ -1292,6 +1473,15 @@ describe("App", () => {
     );
     expect(screen.queryByText("实验看板")).not.toBeInTheDocument();
     await navigateToStep(user, "评估与导出");
+    expect(await screen.findByLabelText("评估权重")).toBeInTheDocument();
+    expect(screen.getByLabelText("评估数据版本")).toBeInTheDocument();
+    expect(screen.getByLabelText("图像范围")).toBeInTheDocument();
+    expect(screen.queryByText("执行阈值扫描")).not.toBeInTheDocument();
+    expect(screen.queryByText("使用图像筛选条件")).not.toBeInTheDocument();
+    expect(screen.queryByText("ONNX")).not.toBeInTheDocument();
+    expect(screen.queryByText("TensorRT")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开高级：实验看板" }));
     expect(await screen.findByText("实验看板")).toBeInTheDocument();
     expect(apiMock.getProjectTrainingSummary).toHaveBeenCalledWith(1);
     const comparisonPanel = (await screen.findByText("任务对比")).closest(
@@ -1320,74 +1510,57 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("结果类型"), "class_confusion");
     await user.selectOptions(screen.getByLabelText("预测类别"), "1");
     fireEvent.change(screen.getByLabelText("最低置信度"), { target: { value: "0.5" } });
-    fireEvent.change(screen.getByLabelText("预测平台"), { target: { value: "iris" } });
     await user.click(screen.getByRole("button", { name: "应用样本筛选" }));
     expect(apiMock.listPredictions).toHaveBeenLastCalledWith(1, {
       failure_type: "class_confusion",
       class_id: 1,
       confidence_min: 0.5,
       confidence_max: undefined,
-      platform: "iris",
-      altitude_min: undefined,
-      altitude_max: undefined,
-      timestamp_min: undefined,
-      timestamp_max: undefined,
     });
-    await user.click(screen.getByRole("checkbox", { name: "使用图像筛选条件" }));
-    expect(
-      await screen.findByText(
-        "图像筛选：已标注 | 标签 遮挡 | 漏报",
-      ),
-    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "开始预测分析" }));
     expect(apiMock.createPredictionJob).toHaveBeenCalledWith(1, {
       image_scope: "all",
       confidence_threshold: 0.25,
-      image_filters: {
-        platform: undefined,
-        label_status: "annotated",
-        class_id: undefined,
-        edge_tag: "occluded",
-        failure_type: "false_negative",
-        altitude_min: undefined,
-        altitude_max: undefined,
-      },
+      version_id: 1,
     });
     expect(await screen.findByText("预测任务 #2")).toBeInTheDocument();
-    const thresholdInput = screen.getByLabelText("扫描阈值");
-    fireEvent.change(thresholdInput, { target: { value: "0.1, 0.25, 0.55" } });
-    await user.click(screen.getByRole("button", { name: "执行阈值扫描" }));
-    expect(apiMock.createPredictionThresholdScan).toHaveBeenCalledWith(1, {
-      image_scope: "all",
-      thresholds: [0.1, 0.25, 0.55],
-      image_filters: {
-        platform: undefined,
-        label_status: "annotated",
-        class_id: undefined,
-        edge_tag: "occluded",
-        failure_type: "false_negative",
-        altitude_min: undefined,
-        altitude_max: undefined,
-      },
-    });
-    expect(await screen.findByText("预测任务 #12")).toBeInTheDocument();
     expect(await screen.findByText("模型导出")).toBeInTheDocument();
     expect(await screen.findByText(".pt 权重")).toBeInTheDocument();
-    expect(await screen.findByText("未安装 Ultralytics")).toBeInTheDocument();
+    expect(screen.queryByText("ONNX")).not.toBeInTheDocument();
+    expect(screen.queryByText("TensorRT")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "导出 PT" }));
 
     expect(apiMock.createRunExport).toHaveBeenCalledWith(1, "pt");
     expect(await screen.findByText("PT 导出任务 #1")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /下载训练权重 best\.pt/ })).toHaveAttribute(
+      "href",
+      "/api/training/runs/1/weights/best",
+    );
+    expect(
+      within(screen.getByLabelText("导出产物")).getByRole("link", { name: /下载/ }),
+    ).toHaveAttribute("href", "/api/training/runs/1/exports/1/file");
 
-    await user.click(screen.getAllByRole("button", { name: "打开图像" })[0]);
+    await user.click(within(screen.getByLabelText("预测样本")).getAllByRole("button")[0]);
+
+    expect(window.location.hash).toBe("#evaluation");
+    expect(await screen.findByText("筛选样本查看")).toBeInTheDocument();
+    expect(screen.getByLabelText("问题样本查看器")).toBeInTheDocument();
+    expect(screen.getByLabelText("评估审查图层")).toBeInTheDocument();
+    const predictionLegend = screen.getByLabelText("预测结果图例");
+    expect(within(predictionLegend).getByText("误报")).toBeInTheDocument();
+    expect(within(predictionLegend).getByText("漏报")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上一张" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一张" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "下一张" }));
+    expect(await screen.findByText(/2 \/ 3/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "去标注页修正" }));
 
     expect(window.location.hash).toBe("#annotation");
     expect(await screen.findByText("预测结果叠加")).toBeInTheDocument();
     expect(screen.getByLabelText("标注审查图层")).toBeInTheDocument();
-    const predictionLegend = screen.getByLabelText("预测结果图例");
-    expect(within(predictionLegend).getByText("误报")).toBeInTheDocument();
-    expect(within(predictionLegend).getByText("漏报")).toBeInTheDocument();
     expect(
       within(screen.getByLabelText("预测修正操作")).getByText("类别混淆"),
     ).toBeInTheDocument();
@@ -1431,13 +1604,13 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("tab", { name: "导入数据" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("数据集路径")).toBeInTheDocument();
+    expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "数据管理" }));
 
     expect(screen.getByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("table", { name: "现有数据" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("数据集路径")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("数据集来源")).not.toBeInTheDocument();
     expect(window.location.hash).toBe("#dataset");
   });
 
@@ -1448,7 +1621,7 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "类别管理");
     apiMock.createClass.mockRejectedValueOnce(new Error("旧类别错误"));
-    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+    await user.click(screen.getByRole("button", { name: "确认启用所选类别" }));
     expect(await screen.findByText("旧类别错误")).toBeInTheDocument();
 
     await navigateToStep(user, "图像标注");
@@ -1504,7 +1677,7 @@ describe("App", () => {
 
     await navigateToStep(user, "模型训练");
     expect(screen.queryByText("已加载训练任务 #1 的配置")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("模型预设或本地权重")).toHaveValue("yolov8n.pt");
+    expect(screen.getByLabelText("起始模型")).toHaveValue("base:yolov8n.pt");
   });
 
   it("删除其他存储对象时完整重新加载当前数据集工作区", async () => {
@@ -1563,7 +1736,7 @@ describe("App", () => {
     expect(await screen.findByText("YOLO Trainer")).toBeInTheDocument();
     await navigateToStep(user, "图像标注");
     expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
-    expect(screen.getByLabelText("数据集路径")).toBeInTheDocument();
+    expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
     expect(screen.queryByLabelText("标注就绪状态")).not.toBeInTheDocument();
   });
 
@@ -1704,9 +1877,11 @@ describe("App", () => {
     await navigateToStep(user, "图像标注");
     expect(await screen.findByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
 
+    apiMock.listProjects.mockClear();
     await user.click(screen.getByRole("button", { name: "保存并下一张" }));
 
     expect(apiMock.replaceAnnotations).toHaveBeenLastCalledWith(10, []);
+    expect(apiMock.listProjects).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("img", { name: "iris/frame002.jpg" })).toBeInTheDocument();
     expect(apiMock.getAnnotations).toHaveBeenLastCalledWith(11);
   });
@@ -1882,10 +2057,10 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(window.location.hash).toBe("#classes");
 
-    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo", "car_opel", "person_red"]) {
       await user.click(screen.getByRole("checkbox", { name }));
     }
-    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+    await user.click(screen.getByRole("button", { name: "确认确认启用所选类别" }));
 
     expect(apiMock.createClass).toHaveBeenCalledWith(1, {
       name: "fire_truck",
@@ -1896,7 +2071,7 @@ describe("App", () => {
     expect(screen.getByText("在图像上拖动以添加边界框。")).toBeInTheDocument();
   });
 
-  it("固定类别默认全部选择并批量启用", async () => {
+  it("扫描类别默认全部选择并批量启用", async () => {
     const user = userEvent.setup();
     apiMock.listClasses.mockImplementation(async () => ({ items: [] }));
     let nextClassId = 10;
@@ -1915,14 +2090,15 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "类别管理");
 
-    for (const name of ["fire_truck", "person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+    expect(apiMock.listDetectedClasses).toHaveBeenCalledWith(1);
+    for (const name of ["fire_truck", "person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo", "car_opel", "person_red"]) {
       expect(screen.getByRole("checkbox", { name })).toBeChecked();
     }
 
     await user.click(screen.getByRole("checkbox", { name: "suv_camo" }));
-    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+    await user.click(screen.getByRole("button", { name: "确认确认启用所选类别" }));
 
-    await waitFor(() => expect(apiMock.createClass).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(apiMock.createClass).toHaveBeenCalledTimes(7));
     expect(apiMock.createClass).not.toHaveBeenCalledWith(1, {
       name: "suv_camo",
       color: "#1f6f78",
@@ -1934,7 +2110,7 @@ describe("App", () => {
     expect(window.location.hash).toBe("#annotation");
   });
 
-  it("固定类别不会重复创建项目中已有的类别", async () => {
+  it("扫描类别不会重复创建项目中已有的类别", async () => {
     const user = userEvent.setup();
     let nextClassId = 10;
     apiMock.listClasses.mockImplementation(async () => ({
@@ -1966,9 +2142,9 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "类别管理");
     expect(screen.getByText("已在类别库")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+    await user.click(screen.getByRole("button", { name: "确认启用所选类别" }));
 
-    await waitFor(() => expect(apiMock.createClass).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(apiMock.createClass).toHaveBeenCalledTimes(7));
     expect(apiMock.createClass).not.toHaveBeenCalledWith(1, {
       name: "fire_truck",
       color: "#e45756",
@@ -2044,10 +2220,10 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "类别库" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#classes");
 
-    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo", "car_opel", "person_red"]) {
       await user.click(screen.getByRole("checkbox", { name }));
     }
-    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+    await user.click(screen.getByRole("button", { name: "确认启用所选类别" }));
     expect(await screen.findByRole("heading", { name: "标注" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#annotation");
   });
@@ -2073,7 +2249,7 @@ describe("App", () => {
 
     window.location.hash = "#unknown";
     fireEvent(window, new Event("hashchange"));
-    expect(await screen.findByLabelText("数据集路径")).toBeInTheDocument();
+    expect(await screen.findByLabelText("数据集来源")).toBeInTheDocument();
     expect(window.location.hash).toBe("#dataset");
   });
 
@@ -2112,7 +2288,7 @@ describe("App", () => {
     window.history.replaceState(null, "", "#annotation");
     render(<App />);
 
-    expect(await screen.findByLabelText("数据集路径")).toBeInTheDocument();
+    expect(await screen.findByLabelText("数据集来源")).toBeInTheDocument();
     expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
     expect(window.location.hash).toBe("#dataset");
   });
@@ -2171,10 +2347,10 @@ describe("App", () => {
       annotation_count: 0,
       version_count: 0,
     }));
-    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo"]) {
+    for (const name of ["person_white", "prius_hybrid", "car_lexus", "prius_hybrid_camo", "suv_camo", "car_opel", "person_red"]) {
       await user.click(screen.getByRole("checkbox", { name }));
     }
-    await user.click(screen.getByRole("button", { name: "启用所选类别" }));
+    await user.click(screen.getByRole("button", { name: "确认启用所选类别" }));
     expect(await screen.findByRole("button", { name: "fire_truck" })).toBeInTheDocument();
 
     await navigateToStep(user, "图像标注");
@@ -2439,7 +2615,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "加载配置" }));
 
-    expect(screen.getByLabelText("模型预设或本地权重")).toHaveValue("custom-drone.pt");
+    expect(screen.getByLabelText("起始模型")).toHaveValue("custom-drone.pt");
     expect(screen.getByLabelText("训练轮数")).toHaveValue(12);
     expect(screen.getByLabelText("图像尺寸")).toHaveValue(512);
     expect(screen.getByLabelText("批大小")).toHaveValue(4);

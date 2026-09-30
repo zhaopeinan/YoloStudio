@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Database,
   Eye,
+  FolderOpen,
+  FolderX,
   HardDrive,
   Info,
   MoreHorizontal,
@@ -11,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   getStorageItem,
+  cascadePurgeTrashItem,
   listStorageItems,
   listTrashItems,
   purgeExpiredTrash,
@@ -24,8 +27,18 @@ import {
   type TrashItem,
 } from "./api";
 
+export type OpenableDatasetRef = {
+  project_id: number;
+  project_name: string;
+  dataset_id: number;
+  dataset_name: string;
+  image_count: number;
+};
+
 type Props = {
   loadedDatasetId: number | null;
+  openingDatasetId?: number | null;
+  onOpenDataset: (dataset: OpenableDatasetRef) => void | Promise<void>;
   onDatasetTrashed: (datasetId: number) => void;
   onStorageChanged: () => void | Promise<void>;
 };
@@ -80,6 +93,26 @@ function runStatusLabel(status: string): string {
 
 function contentSummary(item: StorageItem): string {
   return `${item.image_count ?? 0} 张图像 / ${item.annotation_count ?? 0} 个标注`;
+}
+
+function resolveOpenableDataset(item: StorageItem, siblingItems: StorageItem[] = []): OpenableDatasetRef | null {
+  const datasetId = item.entity_type === "dataset" ? item.entity_id : item.dataset_id;
+  if (!datasetId) {
+    return null;
+  }
+  const parentName =
+    item.entity_type === "dataset"
+      ? item.display_name
+      : siblingItems.find(
+          (candidate) => candidate.entity_type === "dataset" && candidate.entity_id === datasetId,
+        )?.display_name ?? item.display_name;
+  return {
+    project_id: item.project_id,
+    project_name: item.project_name,
+    dataset_id: datasetId,
+    dataset_name: parentName,
+    image_count: item.image_count ?? 0,
+  };
 }
 
 function splitSummary(split: { train: number; val: number; test: number } | null | undefined) {
@@ -159,6 +192,8 @@ function IconButton({
 
 export function StorageManagementView({
   loadedDatasetId,
+  openingDatasetId = null,
+  onOpenDataset,
   onDatasetTrashed,
   onStorageChanged,
 }: Props) {
@@ -174,7 +209,7 @@ export function StorageManagementView({
   const [detailOpen, setDetailOpen] = useState(false);
   const [trashTarget, setTrashTarget] = useState<TrashTarget | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<TrashItem | null>(null);
-  const [purgeName, setPurgeName] = useState("");
+  const [cascadePurgeTarget, setCascadePurgeTarget] = useState<TrashItem | null>(null);
 
   const loadActive = useCallback(async () => {
     const response = await listStorageItems();
@@ -268,14 +303,35 @@ export function StorageManagementView({
   };
 
   const purge = async () => {
-    if (!purgeTarget || purgeName !== purgeTarget.display_name) return;
+    if (!purgeTarget) return;
     setBusy(true);
     setMessage(null);
     setNotice(null);
     try {
-      await purgeTrashItem(purgeTarget.id, purgeName);
+      await purgeTrashItem(purgeTarget.id, purgeTarget.display_name);
       setPurgeTarget(null);
-      setPurgeName("");
+      await refreshAfterMutation();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cascadePurge = async () => {
+    if (!cascadePurgeTarget) return;
+    setBusy(true);
+    setMessage(null);
+    setNotice(null);
+    try {
+      await cascadePurgeTrashItem(
+        cascadePurgeTarget.id,
+        cascadePurgeTarget.display_name,
+      );
+      if (cascadePurgeTarget.entity_id === loadedDatasetId) {
+        onDatasetTrashed(cascadePurgeTarget.entity_id);
+      }
+      setCascadePurgeTarget(null);
       await refreshAfterMutation();
     } catch (error) {
       setMessage(errorMessage(error));
@@ -327,6 +383,11 @@ export function StorageManagementView({
           <HardDrive size={16} />
           {formatBytes(totalSize)}
         </div>
+        {tab === "active" && (
+          <p className="storage-open-hint muted">
+            可对原始数据集或标注版本点击「打开并标注」，在已有标注基础上继续标注。
+          </p>
+        )}
         {tab === "trash" && (
           <button type="button" disabled={busy} onClick={() => void purgeExpired()}>
             清理到期项目
@@ -341,15 +402,31 @@ export function StorageManagementView({
       ) : (
         <div className="storage-table-scroll">
           {tab === "active" ? (
-            <ActiveTable items={items} onDetail={openDetail} onTrash={setTrashTarget} />
+            <ActiveTable
+              items={items}
+              loadedDatasetId={loadedDatasetId}
+              openingDatasetId={openingDatasetId}
+              onDetail={openDetail}
+              onOpen={(item) => {
+                const target = resolveOpenableDataset(item, items);
+                if (!target) {
+                  setMessage("无法解析该条目对应的原始数据集");
+                  return;
+                }
+                void onOpenDataset(target);
+              }}
+              onTrash={setTrashTarget}
+            />
           ) : (
             <TrashTable
               items={trashItems}
               busy={busy}
               onRestore={restore}
               onPurge={(item) => {
-                setPurgeName("");
                 setPurgeTarget(item);
+              }}
+              onCascadePurge={(item) => {
+                setCascadePurgeTarget(item);
               }}
             />
           )}
@@ -359,9 +436,22 @@ export function StorageManagementView({
       {detailOpen && (
         <DetailDrawer
           detail={detail}
+          opening={
+            detail != null &&
+            resolveOpenableDataset(detail, items)?.dataset_id === openingDatasetId
+          }
           onClose={() => {
             setDetailOpen(false);
             setDetail(null);
+          }}
+          onOpen={() => {
+            if (!detail) return;
+            const target = resolveOpenableDataset(detail, items);
+            if (!target) {
+              setMessage("无法解析该条目对应的原始数据集");
+              return;
+            }
+            void onOpenDataset(target);
           }}
           onTrashRun={(run) =>
             setTrashTarget({
@@ -402,28 +492,67 @@ export function StorageManagementView({
                 <X size={18} />
               </IconButton>
             </header>
-            <p>此操作不可恢复。请输入“{purgeTarget.display_name}”确认。</p>
+            <p>此操作不可恢复。确定要彻底删除“{purgeTarget.display_name}”吗？</p>
             {purgeTarget.status === "error" && (
               <p className="purge-risk-warning">
                 该记录处于异常状态。彻底删除前请确认磁盘数据状态，避免遗漏或误删文件。
               </p>
             )}
-            <label>
-              输入名称确认
-              <input
-                autoFocus
-                value={purgeName}
-                onChange={(event) => setPurgeName(event.target.value)}
-              />
-            </label>
             <footer>
               <button type="button" onClick={() => setPurgeTarget(null)}>取消</button>
               <button
                 type="button"
-                disabled={busy || purgeName !== purgeTarget.display_name}
+                disabled={busy}
                 onClick={() => void purge()}
               >
                 永久删除
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {cascadePurgeTarget && (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className="modal-dialog cascade-purge-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="级联彻底删除"
+          >
+            <header>
+              <h2>级联彻底删除</h2>
+              <IconButton
+                label="关闭级联彻底删除弹窗"
+                onClick={() => setCascadePurgeTarget(null)}
+              >
+                <X size={18} />
+              </IconButton>
+            </header>
+            <p>此操作不可恢复，将一并删除以下内容：</p>
+            <ul className="cascade-purge-list">
+              <li>原始数据集、图像与标注</li>
+              <li>该数据集的全部标注版本</li>
+              <li>关联训练任务、预测结果与模型导出产物</li>
+            </ul>
+            <p>
+              确定要删除“{cascadePurgeTarget.display_name}”及其全部关联数据吗？
+            </p>
+            {cascadePurgeTarget.status === "error" && (
+              <p className="purge-risk-warning">
+                该记录处于异常状态。执行前请确认磁盘数据状态，避免遗漏或误删文件。
+              </p>
+            )}
+            <footer>
+              <button type="button" onClick={() => setCascadePurgeTarget(null)}>
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void cascadePurge()}
+              >
+                确认级联删除
               </button>
             </footer>
           </div>
@@ -435,11 +564,17 @@ export function StorageManagementView({
 
 function ActiveTable({
   items,
+  loadedDatasetId,
+  openingDatasetId,
   onDetail,
+  onOpen,
   onTrash,
 }: {
   items: StorageItem[];
+  loadedDatasetId: number | null;
+  openingDatasetId: number | null;
   onDetail: (item: StorageItem) => void;
+  onOpen: (item: StorageItem) => void;
   onTrash: (target: TrashTarget) => void;
 }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -467,9 +602,21 @@ function ActiveTable({
         {items.map((item) => {
           const rowKey = `${item.entity_type}-${item.entity_id}`;
           const blockerText = item.blockers.map((blocker) => blocker.display_name).join("、");
+          const openable = resolveOpenableDataset(item, items);
+          const isLoaded = openable != null && openable.dataset_id === loadedDatasetId;
+          const isOpening = openable != null && openable.dataset_id === openingDatasetId;
+          const openLabel =
+            item.entity_type === "dataset"
+              ? isLoaded
+                ? `继续标注 ${item.display_name}`
+                : `打开并标注 ${item.display_name}`
+              : `打开原始数据集并标注 ${item.display_name}`;
           return (
-            <tr key={rowKey}>
-              <th scope="row">{item.display_name}</th>
+            <tr key={rowKey} className={isLoaded ? "storage-row-loaded" : undefined}>
+              <th scope="row">
+                {item.display_name}
+                {isLoaded ? <span className="loaded-chip">已加载</span> : null}
+              </th>
               <td>{entityLabel(item.entity_type)}</td>
               <td>{item.project_name}</td>
               <td>
@@ -491,6 +638,13 @@ function ActiveTable({
               </td>
               <td>
                 <div className="table-actions">
+                  <IconButton
+                    label={openLabel}
+                    disabled={!openable || isOpening}
+                    onClick={() => onOpen(item)}
+                  >
+                    <FolderOpen size={16} />
+                  </IconButton>
                   <IconButton label={`查看 ${item.display_name}`} onClick={() => void onDetail(item)}>
                     <Eye size={16} />
                   </IconButton>
@@ -517,6 +671,22 @@ function ActiveTable({
                   </IconButton>
                   {openMenu === rowKey && (
                     <div className="compact-actions-menu" role="menu" aria-label={`${item.display_name} 操作`}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={!openable || isOpening}
+                        onClick={() => {
+                          setOpenMenu(null);
+                          onOpen(item);
+                        }}
+                      >
+                        <FolderOpen size={16} />
+                        {item.entity_type === "dataset"
+                          ? isLoaded
+                            ? "继续标注"
+                            : "打开并标注"
+                          : "打开原始数据集并标注"}
+                      </button>
                       <button
                         type="button"
                         role="menuitem"
@@ -562,11 +732,13 @@ function TrashTable({
   busy,
   onRestore,
   onPurge,
+  onCascadePurge,
 }: {
   items: TrashItem[];
   busy: boolean;
   onRestore: (item: TrashItem) => void;
   onPurge: (item: TrashItem) => void;
+  onCascadePurge: (item: TrashItem) => void;
 }) {
   const [openMenu, setOpenMenu] = useState<number | null>(null);
 
@@ -592,7 +764,8 @@ function TrashTable({
         )}
         {items.map((item) => {
           const status = trashStatus(item);
-          const actionsDisabled = !status.canRestore && !status.canPurge;
+          const canCascade = item.entity_type === "dataset" && status.canPurge;
+          const actionsDisabled = !status.canRestore && !status.canPurge && !canCascade;
           return (
             <tr key={item.id} className={`trash-row ${status.className}`}>
               <th scope="row">{item.display_name}</th>
@@ -628,6 +801,15 @@ function TrashTable({
                   >
                     <Trash2 size={16} />
                   </IconButton>
+                  {canCascade && (
+                    <IconButton
+                      label={`级联彻底删除 ${item.display_name}`}
+                      disabled={busy}
+                      onClick={() => onCascadePurge(item)}
+                    >
+                      <FolderX size={16} />
+                    </IconButton>
+                  )}
                 </div>
                 <div className="compact-actions">
                   <IconButton
@@ -663,6 +845,20 @@ function TrashTable({
                         <Trash2 size={16} />
                         彻底删除
                       </button>
+                      {canCascade && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={busy}
+                          onClick={() => {
+                            setOpenMenu(null);
+                            onCascadePurge(item);
+                          }}
+                        >
+                          <FolderX size={16} />
+                          级联彻底删除
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -677,13 +873,18 @@ function TrashTable({
 
 function DetailDrawer({
   detail,
+  opening,
   onClose,
+  onOpen,
   onTrashRun,
 }: {
   detail: StorageItemDetail | null;
+  opening: boolean;
   onClose: () => void;
+  onOpen: () => void;
   onTrashRun: (run: StorageRelatedRun) => void;
 }) {
+  const canOpen = detail != null && resolveOpenableDataset(detail) != null;
   return (
     <div className="drawer-backdrop">
       <aside className="storage-detail-drawer" role="dialog" aria-modal="true" aria-label="数据详情">
@@ -698,6 +899,12 @@ function DetailDrawer({
         </header>
         {detail && (
           <div className="storage-detail-content">
+            <div className="storage-detail-actions">
+              <button type="button" disabled={!canOpen || opening} onClick={onOpen}>
+                <FolderOpen size={16} />
+                {detail.entity_type === "dataset" ? "打开并标注" : "打开原始数据集并标注"}
+              </button>
+            </div>
             <dl>
               <dt>所属项目</dt><dd>{detail.project_name}</dd>
               <dt>图像与标注</dt><dd>{contentSummary(detail)}</dd>

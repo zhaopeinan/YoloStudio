@@ -24,15 +24,10 @@ Dataset scan check. `source_path` accepts either a `.zip` archive or a local dat
 ```bash
 curl -X POST http://127.0.0.1:8000/api/datasets/scan \
   -H "Content-Type: application/json" \
-  -d '{"source_path":"/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip"}'
+  -d '{"source_path":"/path/to/dataset.zip"}'
 ```
 
-Expected scan facts for the provided archive:
-
-- `total_images` is `1099`.
-- `groups` contains `iris` and `vtol`.
-- `has_yolo_labels` is `false`.
-- `has_data_yaml` is `false`.
+The response includes image counts, collection group names, and whether YOLO labels or `data.yaml` are present.
 
 ## Frontend
 
@@ -42,10 +37,10 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`, keep the backend running, and scan a zip or folder path:
+Open `http://127.0.0.1:5173`, keep the backend running, and scan a zip or folder path on your machine, for example:
 
 ```text
-/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip
+/path/to/dataset.zip
 ```
 
 Set `Project name` and `Dataset name` before import. Imports that use the same project name reuse
@@ -75,7 +70,7 @@ With both servers running:
 
 After import, `Image Browser` can filter the current dataset by:
 
-- platform, such as `iris` or `vtol`
+- platform, matching a collection folder name in the dataset
 - label status: all, annotated, or unannotated
 - project class
 - edge tag, such as `occluded`
@@ -84,7 +79,7 @@ After import, `Image Browser` can filter the current dataset by:
 API smoke:
 
 ```bash
-curl "http://127.0.0.1:8000/api/datasets/1/images?platform=iris&label_status=annotated"
+curl "http://127.0.0.1:8000/api/datasets/1/images?platform=group_a&label_status=annotated"
 curl "http://127.0.0.1:8000/api/datasets/1/images?class_id=1&edge_tag=occluded"
 curl "http://127.0.0.1:8000/api/datasets/1/images?altitude_min=20&altitude_max=40"
 ```
@@ -244,7 +239,7 @@ curl -X POST http://127.0.0.1:8000/api/training/runs/1/prediction-threshold-scan
   -H "Content-Type: application/json" \
   -d '{"image_scope":"all","thresholds":[0.15,0.25,0.35,0.5,0.65]}'
 
-curl "http://127.0.0.1:8000/api/prediction-jobs/1/predictions?failure_type=false_positive&class_id=1&confidence_min=0.5&platform=iris"
+curl "http://127.0.0.1:8000/api/prediction-jobs/1/predictions?failure_type=false_positive&class_id=1&confidence_min=0.5&platform=group_a"
 ```
 
 Prediction artifacts are written under:
@@ -322,3 +317,25 @@ curl -X POST http://127.0.0.1:8000/api/training/runs/1/exports \
   -d '{"format":"pt"}'
 curl http://127.0.0.1:8000/api/training/runs/1/exports
 ```
+
+## Model effect preview
+
+After at least one training run exists, open the `效果预览` workflow step. Image mode lets you
+choose the built-in `yolov8n.pt` or a completed run's `best.pt`, select a managed dataset, and step
+through images one by one. Orange solid boxes are model predictions; green dashed boxes are saved
+human annotations. Changing the confidence threshold only changes the preview request and never
+writes annotations or formal prediction jobs.
+
+Video mode accepts `mp4`, `mov`, `avi`, `mkv`, and `webm` uploads. Frames are inferred in the
+background and streamed from the local API while processing. Completed results are saved under:
+
+```text
+workspace/projects/<project_id>/previews/<preview_id>/
+  source.<ext>
+  frames/
+  result.mp4
+```
+
+The result video can be downloaded from the page or deleted as a whole. Deleting a preview removes
+only this preview directory and its database row; the original upload, dataset images, annotations,
+and training artifacts are not changed. Video uploads are limited to 500 MB.

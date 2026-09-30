@@ -11,6 +11,23 @@ from app.datasets.schemas import DatasetGroupSummary, DatasetScanSummary
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 YAML_NAMES = {"data.yaml", "dataset.yaml"}
+IGNORED_BASENAMES = {".ds_store", "thumbs.db", "desktop.ini"}
+
+
+def is_ignored_dataset_member(name: str) -> bool:
+    """Skip macOS AppleDouble / Finder junk and similar OS metadata files."""
+    parts = [part for part in Path(name).parts if part not in {"", ".", ".."}]
+    if not parts:
+        return True
+    for part in parts:
+        lowered = part.lower()
+        if lowered == "__macosx":
+            return True
+        if part.startswith("._"):
+            return True
+        if lowered in IGNORED_BASENAMES:
+            return True
+    return False
 
 
 def _collection_name(zip_name: str) -> str:
@@ -62,6 +79,8 @@ def _build_scan_summary(
     names: list[str],
     load_metadata_rows: Callable[[str], list[dict]],
 ) -> DatasetScanSummary:
+    ignored_count = sum(1 for name in names if is_ignored_dataset_member(name))
+    names = [name for name in names if not is_ignored_dataset_member(name)]
     image_names = [name for name in names if Path(name).suffix.lower() in IMAGE_EXTENSIONS]
     label_names = [name for name in names if Path(name).suffix.lower() == ".txt"]
     yaml_names = [name for name in names if Path(name).name.lower() in YAML_NAMES]
@@ -73,6 +92,8 @@ def _build_scan_summary(
         image_counts[_collection_name(image_name)] += 1
 
     warnings: list[str] = []
+    if ignored_count:
+        warnings.append(f"已忽略 {ignored_count} 个系统隐藏/元数据文件（如 ._ 与 __MACOSX）")
     for json_name in json_names:
         if Path(json_name).name != "meta.jsonl":
             continue

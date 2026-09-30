@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, MoreHorizontal, Save } from "lucide-react";
 import { useState } from "react";
 import type { ProjectClass } from "./api";
+import type { FilenameSuggestion } from "./annotation-suggestions";
 
 type AnnotationToolbarProps = {
   classes: ProjectClass[];
@@ -26,6 +27,11 @@ type AnnotationToolbarProps = {
   onCopyNext: () => void;
   onGroundTruthChange: (checked: boolean) => void;
   onPredictionChange: (checked: boolean) => void;
+  annotationStatus: "unreviewed" | "annotated" | "negative";
+  filenameSuggestion: FilenameSuggestion;
+  onApplySuggestion: () => void;
+  onConfirmNegative: () => void;
+  canConfirmNegative: boolean;
 };
 
 export function AnnotationToolbar({
@@ -52,6 +58,11 @@ export function AnnotationToolbar({
   onCopyNext,
   onGroundTruthChange,
   onPredictionChange,
+  annotationStatus,
+  filenameSuggestion,
+  onApplySuggestion,
+  onConfirmNegative,
+  canConfirmNegative,
 }: AnnotationToolbarProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const saveStatus = error
@@ -79,6 +90,25 @@ export function AnnotationToolbar({
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="annotation-toolbar-suggestion" aria-label="文件名类别建议">
+        <span>文件名建议</span>
+        {filenameSuggestion.selected ? (
+          <strong>{filenameSuggestion.selected.name}</strong>
+        ) : filenameSuggestion.candidates.length > 1 ? (
+          <strong>候选：{filenameSuggestion.candidates.map((item) => item.name).join("、")}</strong>
+        ) : (
+          <strong className="muted">未识别</strong>
+        )}
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={!filenameSuggestion.selected || filenameSuggestion.selected.id === selectedClassId}
+          onClick={onApplySuggestion}
+        >
+          采用建议
+        </button>
       </div>
 
       <div className="annotation-toolbar-navigation">
@@ -126,6 +156,7 @@ export function AnnotationToolbar({
         </div>
       ) : null}
 
+      <span className="annotation-status-label">{annotationStatusLabel(annotationStatus)}</span>
       <span className={error ? "annotation-save-status error" : "annotation-save-status"}>
         {saveStatus}
       </span>
@@ -134,6 +165,14 @@ export function AnnotationToolbar({
         <button type="button" className="secondary-button" disabled={isSaving || selectedImageIndex < 0} onClick={onSave}>
           <Save size={16} />
           保存
+        </button>
+        <button
+          type="button"
+          className="secondary-button negative-button"
+          disabled={isSaving || selectedImageIndex < 0 || !canConfirmNegative}
+          onClick={onConfirmNegative}
+        >
+          确认无目标
         </button>
         <button type="button" disabled={isSaving || selectedImageIndex < 0} onClick={onSaveAndNext}>
           保存并下一张
@@ -162,4 +201,12 @@ export function AnnotationToolbar({
       </div>
     </section>
   );
+}
+
+function annotationStatusLabel(status: "unreviewed" | "annotated" | "negative") {
+  return {
+    unreviewed: "待标注",
+    annotated: "已标注",
+    negative: "已确认无目标",
+  }[status];
 }

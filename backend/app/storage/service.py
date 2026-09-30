@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -786,6 +786,106 @@ def _purging_path(settings: Settings, trash_id: int) -> Path:
     return _trash_root(settings) / ".purging" / str(trash_id)
 
 
+def _cascade_entity_model(entity_type: str):
+    return {
+        "dataset": Dataset,
+        "dataset_version": DatasetVersion,
+        "training_run": TrainingRun,
+    }.get(entity_type)
+
+
+def _reconcile_abandoned_cascade(
+    db: Session,
+    settings: Settings,
+    staged: Path,
+    payload: dict[str, Any],
+) -> tuple[int, int]:
+    parent_trash_id = payload.get("parent_trash_id")
+    entries = payload.get("entries")
+    if not isinstance(parent_trash_id, int) or not isinstance(entries, list):
+        return 0, 0
+
+    parent_item = db.get(TrashItem, parent_trash_id)
+    if parent_item is None:
+        database_rows_missing = True
+        for entry in entries:
+            if not isinstance(entry, dict):
+                database_rows_missing = False
+                break
+            entity_type = entry.get("entity_type")
+            entity_id = entry.get("entity_id")
+            model = (
+                _cascade_entity_model(entity_type)
+                if isinstance(entity_type, str)
+                else None
+            )
+            if model is None or not isinstance(entity_id, int):
+                database_rows_missing = False
+                break
+            if db.get(model, entity_id) is not None:
+                database_rows_missing = False
+                break
+            trash_id = entry.get("trash_id")
+            if isinstance(trash_id, int) and db.get(TrashItem, trash_id) is not None:
+                database_rows_missing = False
+                break
+        if database_rows_missing:
+            shutil.rmtree(staged, ignore_errors=True)
+            return 1, 0
+        return 0, 1
+
+    try:
+        if parent_item.entity_type != "dataset":
+            raise StoragePathError("级联删除暂存标记不是数据集记录")
+        dataset = db.get(Dataset, parent_item.entity_id)
+        if dataset is None:
+            raise StoragePathError("级联删除数据库状态不完整，需要人工检查")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise StoragePathError("级联删除暂存标记格式无效")
+            entity_type = entry.get("entity_type")
+            entity_id = entry.get("entity_id")
+            if not isinstance(entity_type, str) or not isinstance(entity_id, int):
+                raise StoragePathError("级联删除暂存标记格式无效")
+            model = _cascade_entity_model(entity_type)
+            if model is None or db.get(model, entity_id) is None:
+                raise StoragePathError("级联删除数据库状态不完整，需要人工检查")
+            trash_id = entry.get("trash_id")
+            item = db.get(TrashItem, trash_id) if isinstance(trash_id, int) else None
+            if isinstance(trash_id, int) and item is None:
+                raise StoragePathError("级联删除关联回收站记录缺失，需要人工检查")
+            if item is not None and (
+                item.entity_type != entity_type or item.entity_id != entity_id
+            ):
+                raise StoragePathError("级联删除回收站记录不匹配，需要人工检查")
+            target = Path(str(entry.get("source_path")))
+            expected = (
+                _expected_trash_path(settings, item)
+                if item is not None
+                else expected_entity_path(settings, entity_type, db.get(model, entity_id))
+            )
+            _validate_stored_artifact_path(
+                str(target), expected, settings.workspace_root
+            )
+            staged_path = Path(str(entry.get("staged_path")))
+            require_workspace_path(staged_path, settings.workspace_root)
+            if staged_path.resolve().parent != staged.resolve():
+                raise StoragePathError("级联删除暂存目录不在规范目录内")
+            if target.exists():
+                raise StoragePathError(f"级联删除恢复目标已存在：{target}")
+        _restore_cascade_staged(staged, entries)
+        return 1, 0
+    except Exception as exc:
+        db.rollback()
+        current = db.get(TrashItem, parent_trash_id)
+        if current is not None:
+            try:
+                _mark_reconcile_error(db, current, str(exc))
+            except SQLAlchemyError:
+                db.rollback()
+        return 0, 1
+
+
 def _delete_training_run_rows(db: Session, run_id: int) -> None:
     db.execute(delete(Prediction).where(Prediction.run_id == run_id))
     db.execute(delete(PredictionJob).where(PredictionJob.run_id == run_id))
@@ -815,13 +915,280 @@ def _delete_entity_rows(db: Session, item: TrashItem) -> None:
             )
         ) or 0
         if version_count:
-            raise StorageConflictError("该数据集仍有关联标注版本，无法彻底删除。")
+            raise StorageConflictError(
+                "该数据集仍有关联标注版本，无法单独彻底删除，请使用“级联彻底删除”。"
+            )
         image_ids = select(Image.id).where(Image.dataset_id == item.entity_id)
         db.execute(delete(Annotation).where(Annotation.image_id.in_(image_ids)))
         db.execute(delete(Image).where(Image.dataset_id == item.entity_id))
         db.execute(delete(Dataset).where(Dataset.id == item.entity_id))
         return
     raise StorageEntityNotFoundError("不支持的存储对象类型")
+
+
+def _cascade_entities(
+    db: Session,
+    dataset_id: int,
+) -> tuple[Dataset, list[DatasetVersion], list[TrainingRun]]:
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise StorageEntityNotFoundError("数据集记录不存在")
+    versions = list(
+        db.scalars(
+            select(DatasetVersion)
+            .where(DatasetVersion.dataset_id == dataset_id)
+            .order_by(DatasetVersion.id)
+        ).all()
+    )
+    version_ids = [version.id for version in versions]
+    runs = list(
+        db.scalars(
+            select(TrainingRun)
+            .where(TrainingRun.version_id.in_(version_ids))
+            .order_by(TrainingRun.id)
+        ).all()
+    ) if version_ids else []
+    return dataset, versions, runs
+
+
+def _cascade_trash_items(
+    db: Session,
+    dataset: Dataset,
+    versions: list[DatasetVersion],
+    runs: list[TrainingRun],
+) -> dict[tuple[str, int], TrashItem]:
+    keys = [("dataset", dataset.id)]
+    keys.extend(("dataset_version", version.id) for version in versions)
+    keys.extend(("training_run", run.id) for run in runs)
+    if not keys:
+        return {}
+    predicates = [
+        (TrashItem.entity_type == entity_type) & (TrashItem.entity_id == entity_id)
+        for entity_type, entity_id in keys
+    ]
+    items = list(db.scalars(select(TrashItem).where(or_(*predicates))).all())
+    return {(item.entity_type, item.entity_id): item for item in items}
+
+
+def _validate_cascade_state(
+    db: Session,
+    settings: Settings,
+    dataset: Dataset,
+    versions: list[DatasetVersion],
+    runs: list[TrainingRun],
+    trash_items: dict[tuple[str, int], TrashItem],
+) -> list[tuple[str, int, Path, TrashItem | None]]:
+    parent_item = trash_items.get(("dataset", dataset.id))
+    if parent_item is None:
+        raise StorageConflictError("该数据集不在回收站中，请先移入回收站。")
+    if parent_item.status not in {"active", "error"}:
+        raise StorageConflictError("该数据集回收站记录正在处理中，暂时无法级联删除。")
+
+    active_runs = [run for run in runs if run.status not in ENDED_RUN_STATUSES]
+    active_jobs = list(
+        db.scalars(
+            select(PredictionJob).where(
+                PredictionJob.run_id.in_([run.id for run in runs]),
+                PredictionJob.status.not_in(ENDED_CHILD_JOB_STATUSES),
+            )
+        ).all()
+    ) if runs else []
+    active_exports = list(
+        db.scalars(
+            select(ExportArtifact).where(
+                ExportArtifact.run_id.in_([run.id for run in runs]),
+                ExportArtifact.status.not_in(ENDED_CHILD_JOB_STATUSES),
+            )
+        ).all()
+    ) if runs else []
+    blockers = [
+        StorageBlocker(
+            entity_type="training_run",
+            entity_id=run.id,
+            display_name=f"训练任务 #{run.id}",
+            status=run.status,
+        )
+        for run in active_runs
+    ]
+    blockers.extend(
+        StorageBlocker(
+            entity_type="prediction_job",
+            entity_id=job.id,
+            display_name=f"预测任务 #{job.id}",
+            status=job.status,
+        )
+        for job in active_jobs
+    )
+    blockers.extend(
+        StorageBlocker(
+            entity_type="export_artifact",
+            entity_id=artifact.id,
+            display_name=f"模型导出 #{artifact.id}",
+            status=artifact.status,
+        )
+        for artifact in active_exports
+    )
+    if blockers:
+        raise StorageConflictError(
+            "数据集仍有关联任务正在处理，无法级联彻底删除。",
+            blockers,
+        )
+
+    entities: list[tuple[str, int, Dataset | DatasetVersion | TrainingRun]] = [
+        ("dataset", dataset.id, dataset)
+    ]
+    entities.extend(
+        ("dataset_version", version.id, version) for version in versions
+    )
+    entities.extend(("training_run", run.id, run) for run in runs)
+    paths: list[tuple[str, int, Path, TrashItem | None]] = []
+    for entity_type, entity_id, entity in entities:
+        item = trash_items.get((entity_type, entity_id))
+        if item is not None:
+            if item.status not in {"active", "error"}:
+                raise StorageConflictError(
+                    f"{item.display_name} 的回收站记录正在处理中，暂时无法级联删除。"
+                )
+            source, trash = _validate_trash_item_paths(db, settings, item)
+            if source.exists():
+                raise StorageConflictError(f"{item.display_name} 的原目录仍然存在。")
+            if not trash.is_dir():
+                raise StoragePathError(f"{item.display_name} 的回收站数据目录不存在。")
+            paths.append((entity_type, entity_id, trash, item))
+            continue
+
+        source = expected_entity_path(settings, entity_type, entity)
+        if not source.is_dir():
+            raise StoragePathError(f"{entity_type} #{entity_id} 的数据目录不存在。")
+        paths.append((entity_type, entity_id, source, None))
+    return paths
+
+
+def _cascade_marker_payload(
+    parent_trash_id: int,
+    entries: list[tuple[str, int, Path, TrashItem | None]],
+    staged: Path,
+) -> dict[str, Any]:
+    return {
+        "kind": "cascade",
+        "parent_trash_id": parent_trash_id,
+        "entries": [
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "trash_id": item.id if item is not None else None,
+                "source_path": str(path),
+                "staged_path": str(staged / f"{entity_type}-{entity_id}"),
+            }
+            for entity_type, entity_id, path, item in entries
+        ],
+    }
+
+
+def _restore_cascade_staged(
+    staged: Path,
+    entries: list[dict[str, Any]],
+) -> None:
+    restored: list[tuple[Path, Path]] = []
+    try:
+        for entry in reversed(entries):
+            current = Path(str(entry["staged_path"]))
+            target = Path(str(entry["source_path"]))
+            if not current.exists():
+                continue
+            if target.exists():
+                raise OSError(f"恢复目标已存在：{target}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            current.rename(target)
+            restored.append((target, current))
+    except OSError:
+        for target, current in reversed(restored):
+            if target.exists() and not current.exists():
+                target.rename(current)
+        raise
+    shutil.rmtree(staged, ignore_errors=True)
+
+
+def cascade_purge_trash_item(
+    db: Session,
+    settings: Settings,
+    trash_id: int,
+    confirm_name: str,
+) -> StorageMutationResponse:
+    parent_item = db.get(TrashItem, trash_id)
+    if parent_item is None:
+        raise StorageEntityNotFoundError("回收站记录不存在")
+    if parent_item.entity_type != "dataset":
+        raise StorageConflictError("级联彻底删除只能用于原始数据集。")
+    if confirm_name != parent_item.display_name:
+        raise StorageConfirmationError("确认名称不匹配，未执行级联彻底删除。")
+    if parent_item.status not in {"active", "error"}:
+        raise StorageConflictError("该回收站记录正在处理中，暂时无法级联彻底删除。")
+
+    dataset, versions, runs = _cascade_entities(db, parent_item.entity_id)
+    trash_items = _cascade_trash_items(db, dataset, versions, runs)
+    entries = _validate_cascade_state(
+        db, settings, dataset, versions, runs, trash_items
+    )
+    staged = _purging_path(settings, parent_item.id)
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    if staged.exists():
+        raise StorageConflictError("该数据集已有未完成的级联删除暂存目录。")
+
+    marker_payload = _cascade_marker_payload(parent_item.id, entries, staged)
+    try:
+        staged.mkdir()
+        (staged / ".purge.json").write_text(
+            json.dumps(marker_payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        for entity_type, entity_id, path, _ in entries:
+            destination = staged / f"{entity_type}-{entity_id}"
+            if destination.exists():
+                raise OSError(f"级联删除暂存目标已存在：{destination}")
+            path.rename(destination)
+    except OSError as exc:
+        try:
+            _restore_cascade_staged(staged, marker_payload["entries"])
+        except OSError as restore_exc:
+            raise StorageMoveError(
+                f"级联删除暂存失败，且原目录恢复失败：{restore_exc}"
+            ) from exc
+        raise StorageMoveError(f"暂存级联删除数据失败：{exc}") from exc
+
+    response = StorageMutationResponse(
+        trash_id=parent_item.id,
+        entity_type="dataset",
+        entity_id=dataset.id,
+        status="purged",
+        message="数据集及其全部关联数据已彻底删除。",
+    )
+    try:
+        for run in runs:
+            _delete_training_run_rows(db, run.id)
+        for version in versions:
+            db.execute(delete(DatasetVersion).where(DatasetVersion.id == version.id))
+        image_ids = select(Image.id).where(Image.dataset_id == dataset.id)
+        db.execute(delete(Annotation).where(Annotation.image_id.in_(image_ids)))
+        db.execute(delete(Image).where(Image.dataset_id == dataset.id))
+        db.execute(delete(Dataset).where(Dataset.id == dataset.id))
+        for item in trash_items.values():
+            db.delete(item)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        try:
+            _restore_cascade_staged(staged, marker_payload["entries"])
+        except OSError as restore_exc:
+            raise StorageMoveError(
+                f"级联删除数据库失败，且暂存目录恢复失败：{restore_exc}"
+            ) from exc
+        if isinstance(exc, StorageConflictError):
+            raise
+        raise StorageMoveError("级联删除数据库失败，数据已恢复到原回收站目录。") from exc
+
+    shutil.rmtree(staged, ignore_errors=True)
+    return response
 
 
 def purge_trash_item(
@@ -948,6 +1315,13 @@ def _cleanup_abandoned_purging(
         try:
             payload = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
+            continue
+        if payload.get("kind") == "cascade":
+            cascade_reconciled, cascade_errors = _reconcile_abandoned_cascade(
+                db, settings, staged, payload
+            )
+            reconciled += cascade_reconciled
+            errors += cascade_errors
             continue
         model = {
             "training_run": TrainingRun,

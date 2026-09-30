@@ -39,11 +39,23 @@ def test_pt_export_registers_best_weights(tmp_path: Path, monkeypatch):
         assert artifact["status"] == "completed"
         assert Path(artifact["artifact_path"]).exists()
         assert artifact["metadata"]["source"] == str(weights)
+        assert artifact["download_url"] == f"/api/training/runs/{run['id']}/exports/{artifact['id']}/file"
 
         list_response = client.get(f"/api/training/runs/{run['id']}/exports")
 
         assert list_response.status_code == 200
-        assert list_response.json()["items"][0]["id"] == artifact["id"]
+        listed = list_response.json()["items"][0]
+        assert listed["id"] == artifact["id"]
+        assert listed["download_url"] == artifact["download_url"]
+
+        download_response = client.get(artifact["download_url"])
+        assert download_response.status_code == 200
+        assert download_response.content == weights.read_bytes()
+
+        best_response = client.get(f"/api/training/runs/{run['id']}/weights/best")
+        assert best_response.status_code == 200
+        assert best_response.content == weights.read_bytes()
+        assert "run-" in best_response.headers.get("content-disposition", "")
 
 
 def test_onnx_export_failure_is_persisted_when_ultralytics_missing(tmp_path: Path, monkeypatch):

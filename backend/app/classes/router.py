@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth.deps import get_current_user, require_admin
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -10,7 +12,11 @@ from app.db.models import Annotation, ClassDef, DatasetVersion, Project
 from app.db.session import get_db
 
 
-router = APIRouter(prefix="/api/projects", tags=["classes"])
+router = APIRouter(
+    prefix="/api/projects",
+    tags=["classes"],
+    dependencies=[Depends(get_current_user)],
+)
 
 DEFAULT_COLORS = [
     "#2f80ed",
@@ -93,6 +99,7 @@ def create_project_class(
     project_id: int,
     request: ClassCreate,
     db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
 ) -> ClassRead:
     if db.get(Project, project_id) is None:
         raise HTTPException(status_code=404, detail="Project was not found")
@@ -129,6 +136,7 @@ def update_project_class(
     class_id: int,
     request: ClassUpdate,
     db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
 ) -> ClassRead:
     if db.get(Project, project_id) is None:
         raise HTTPException(status_code=404, detail="Project was not found")
@@ -166,6 +174,7 @@ def delete_project_class(
     project_id: int,
     class_id: int,
     db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
 ) -> ClassRead:
     if db.get(Project, project_id) is None:
         raise HTTPException(status_code=404, detail="Project was not found")

@@ -200,7 +200,7 @@ Use Pillow to draw red numbered circles, 3-pixel arrows, and translucent red hig
 Run with the bundled Python runtime:
 
 ```bash
-/Users/peinan/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 artifacts/annotator-manual/annotate_screenshots.py
+~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 artifacts/annotator-manual/annotate_screenshots.py
 ```
 
 Expected: every screenshot listed in the manifest has a corresponding annotated output.
@@ -236,7 +236,7 @@ Define bounding box, class, GT, Pred, confidence, false positive, false negative
 Run:
 
 ```bash
-/Users/peinan/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 artifacts/annotator-manual/build_manual.py
+~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 artifacts/annotator-manual/build_manual.py
 ```
 
 Expected: `artifacts/YOLO_Trainer_零基础标注员操作手册.docx` exists and all screenshots are embedded.
@@ -253,8 +253,8 @@ Expected: `artifacts/YOLO_Trainer_零基础标注员操作手册.docx` exists an
 Run:
 
 ```bash
-/Users/peinan/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 \
-  /Users/peinan/.codex/plugins/cache/openai-primary-runtime/documents/26.715.12143/skills/documents/render_docx.py \
+~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 \
+  ~/.codex/plugins/cache/openai-primary-runtime/documents/26.715.12143/skills/documents/render_docx.py \
   artifacts/YOLO_Trainer_零基础标注员操作手册.docx \
   --output_dir artifacts/annotator-manual/rendered \
   --emit_pdf
@@ -267,11 +267,11 @@ Expected: one PNG per page plus a QA PDF.
 Run:
 
 ```bash
-/Users/peinan/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 \
-  /Users/peinan/.codex/plugins/cache/openai-primary-runtime/documents/26.715.12143/skills/documents/scripts/style_lint.py \
+~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 \
+  ~/.codex/plugins/cache/openai-primary-runtime/documents/26.715.12143/skills/documents/scripts/style_lint.py \
   artifacts/YOLO_Trainer_零基础标注员操作手册.docx
-/Users/peinan/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 \
-  /Users/peinan/.codex/plugins/cache/openai-primary-runtime/documents/26.715.12143/skills/documents/scripts/images_audit.py \
+~/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 \
+  ~/.codex/plugins/cache/openai-primary-runtime/documents/26.715.12143/skills/documents/scripts/images_audit.py \
   artifacts/YOLO_Trainer_零基础标注员操作手册.docx
 ```
 

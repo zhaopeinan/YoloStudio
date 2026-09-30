@@ -57,7 +57,7 @@ Request:
 
 ```json
 {
-  "source_path": "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip",
+  "source_path": "~/DevProjects/YOLO_Trainer/image_dataset.zip",
   "project_name": "YOLO Trainer Project",
   "dataset_name": "image_dataset"
 }

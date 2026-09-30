@@ -42,6 +42,7 @@ def test_create_class_and_replace_image_annotations(tmp_path: Path):
 
         images = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"]
         image_id = images[0]["id"]
+        assert images[0]["annotation_status"] == "unreviewed"
 
         replace_response = client.put(
             f"/api/images/{image_id}/annotations",
@@ -63,6 +64,7 @@ def test_create_class_and_replace_image_annotations(tmp_path: Path):
         assert replace_response.status_code == 200
         annotations = replace_response.json()["items"]
         assert len(annotations) == 1
+        assert replace_response.json()["annotation_status"] == "annotated"
         assert annotations[0]["class_name"] == "drone"
         assert annotations[0]["class_color"] == "#2f80ed"
         assert annotations[0]["edge_tags"] == ["occluded", "small"]
@@ -79,6 +81,37 @@ def test_create_class_and_replace_image_annotations(tmp_path: Path):
 
         assert empty_replace.status_code == 200
         assert empty_replace.json()["items"] == []
+        assert empty_replace.json()["annotation_status"] == "unreviewed"
+
+        negative_replace = client.put(
+            f"/api/images/{image_id}/annotations",
+            json={"annotations": [], "annotation_status": "negative"},
+        )
+        assert negative_replace.status_code == 200
+        assert negative_replace.json()["annotation_status"] == "negative"
+        assert client.get(f"/api/images/{image_id}/annotations").json()["annotation_status"] == "negative"
+
+        images_after_negative = client.get(
+            f"/api/datasets/{dataset['dataset_id']}/images"
+        ).json()["items"]
+        assert images_after_negative[0]["annotation_status"] == "negative"
+
+        invalid_negative = client.put(
+            f"/api/images/{image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.5,
+                        "height": 0.5,
+                    }
+                ],
+                "annotation_status": "negative",
+            },
+        )
+        assert invalid_negative.status_code == 400
 
 
 def test_update_class_updates_annotation_read_labels(tmp_path: Path):
@@ -269,3 +302,39 @@ def test_annotation_replace_rejects_out_of_bounds_bbox(tmp_path: Path):
         )
 
         assert response.status_code in {400, 422}
+
+
+def test_annotation_replace_accepts_edge_box_rounding_overshoot(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = import_dataset(client, zip_path)
+        class_payload = client.post(
+            f"/api/projects/{dataset['project_id']}/classes",
+            json={"name": "person_red"},
+        ).json()
+        image_id = client.get(f"/api/datasets/{dataset['dataset_id']}/images").json()["items"][0][
+            "id"
+        ]
+
+        # Mirrors frontend 6-digit rounding of a left-edge box.
+        response = client.put(
+            f"/api/images/{image_id}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_payload["id"],
+                        "x_center": 0.005233,
+                        "y_center": 0.606034,
+                        "width": 0.010467,
+                        "height": 0.02959,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        saved = response.json()["items"][0]
+        assert saved["x_center"] - saved["width"] / 2 >= -1e-9
+        assert saved["x_center"] + saved["width"] / 2 <= 1 + 1e-9

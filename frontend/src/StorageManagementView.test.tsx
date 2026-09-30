@@ -8,6 +8,7 @@ const apiMock = vi.hoisted(() => ({
   getStorageItem: vi.fn(),
   listStorageItems: vi.fn(),
   listTrashItems: vi.fn(),
+  cascadePurgeTrashItem: vi.fn(),
   purgeExpiredTrash: vi.fn(),
   purgeTrashItem: vi.fn(),
   restoreTrashItem: vi.fn(),
@@ -124,6 +125,23 @@ const errorTrashItem = {
   error_message: "回收站目录与数据库记录不一致，请检查磁盘目录。",
 };
 
+const datasetTrashItem = {
+  ...trashItem,
+  id: 25,
+  entity_type: "dataset" as const,
+  entity_id: 1,
+  display_name: "camouflage-set",
+  dataset_id: 1,
+  version_id: null,
+  trash_path: "/workspace/.trash/25-dataset-1",
+  summary: {
+    name: "camouflage-set",
+    image_count: 2,
+    annotation_count: 2,
+    class_names: ["伪装无人机"],
+  },
+};
+
 const pendingMoveTrashItem = {
   ...trashItem,
   id: 23,
@@ -164,6 +182,13 @@ function arrangeApi() {
     status: "purged",
     message: "已彻底删除",
   });
+  apiMock.cascadePurgeTrashItem.mockResolvedValue({
+    trash_id: 25,
+    entity_type: "dataset",
+    entity_id: 1,
+    status: "purged",
+    message: "数据集及其全部关联数据已彻底删除。",
+  });
   apiMock.purgeExpiredTrash.mockResolvedValue({ purged_count: 0, failed_count: 0 });
 }
 
@@ -178,6 +203,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={1}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,
@@ -189,6 +215,8 @@ describe("StorageManagementView", () => {
     expect(within(table).getAllByText("受保护")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "移入回收站 camouflage-set" })).toBeDisabled();
     expect(screen.getAllByText("标注版本 4")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "继续标注 camouflage-set" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开原始数据集并标注 标注版本 4" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "查看 标注版本 4" }));
     const drawer = await screen.findByRole("dialog", { name: "数据详情" });
@@ -196,6 +224,39 @@ describe("StorageManagementView", () => {
     expect(within(drawer).getByText("训练 1 / 验证 1 / 测试 0")).toBeInTheDocument();
     expect(within(drawer).getByTitle(version.artifact_path)).toHaveTextContent(version.artifact_path);
     expect(within(drawer).getByRole("button", { name: "移入回收站 训练任务 #10" })).toBeDisabled();
+    expect(within(drawer).getByRole("button", { name: "打开原始数据集并标注" })).toBeInTheDocument();
+  });
+
+  it("可通过打开并标注回调进入原始数据集", async () => {
+    const user = userEvent.setup();
+    const onOpenDataset = vi.fn();
+    render(
+      <StorageManagementView
+        loadedDatasetId={null}
+        onOpenDataset={onOpenDataset}
+        onDatasetTrashed={vi.fn()}
+        onStorageChanged={vi.fn()}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "打开并标注 camouflage-set" }));
+    expect(onOpenDataset).toHaveBeenCalledWith({
+      project_id: 1,
+      project_name: "无人机项目",
+      dataset_id: 1,
+      dataset_name: "camouflage-set",
+      image_count: 2,
+    });
+
+    onOpenDataset.mockClear();
+    await user.click(screen.getByRole("button", { name: "打开原始数据集并标注 标注版本 4" }));
+    expect(onOpenDataset).toHaveBeenCalledWith({
+      project_id: 1,
+      project_name: "无人机项目",
+      dataset_id: 1,
+      dataset_name: "camouflage-set",
+      image_count: 2,
+    });
   });
 
   it("可以从详情抽屉清理已结束训练任务", async () => {
@@ -204,6 +265,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={1}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={onStorageChanged}
       />,
@@ -218,11 +280,12 @@ describe("StorageManagementView", () => {
     expect(onStorageChanged).toHaveBeenCalledOnce();
   });
 
-  it("支持恢复与精确名称确认后彻底删除", async () => {
+  it("支持在确认弹窗中直接彻底删除", async () => {
     const user = userEvent.setup();
     render(
       <StorageManagementView
         loadedDatasetId={null}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,
@@ -238,12 +301,41 @@ describe("StorageManagementView", () => {
     await user.click(screen.getByRole("button", { name: "彻底删除 旧标注版本" }));
     const purgeDialog = screen.getByRole("dialog", { name: "彻底删除" });
     const purgeButton = within(purgeDialog).getByRole("button", { name: "永久删除" });
-    expect(purgeButton).toBeDisabled();
-    await user.type(within(purgeDialog).getByLabelText("输入名称确认"), "旧标注版本");
     expect(purgeButton).toBeEnabled();
     await user.click(purgeButton);
 
     expect(apiMock.purgeTrashItem).toHaveBeenCalledWith(21, "旧标注版本");
+  });
+
+  it("数据集支持确认后级联彻底删除全部关联数据", async () => {
+    const user = userEvent.setup();
+    const onDatasetTrashed = vi.fn();
+    apiMock.listTrashItems.mockResolvedValue({
+      items: [datasetTrashItem],
+      total_size_bytes: datasetTrashItem.size_bytes,
+    });
+    render(
+      <StorageManagementView
+        loadedDatasetId={1}
+        onOpenDataset={vi.fn()}
+        onDatasetTrashed={onDatasetTrashed}
+        onStorageChanged={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "回收站" }));
+    await screen.findByRole("table", { name: "回收站数据" });
+    await user.click(
+      screen.getByRole("button", { name: "级联彻底删除 camouflage-set" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "级联彻底删除" });
+    expect(within(dialog).getByText("该数据集的全部标注版本")).toBeInTheDocument();
+    const confirm = within(dialog).getByRole("button", { name: "确认级联删除" });
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    expect(apiMock.cascadePurgeTrashItem).toHaveBeenCalledWith(25, "camouflage-set");
+    expect(onDatasetTrashed).toHaveBeenCalledWith(1);
   });
 
   it("按回收站状态展示诊断信息并限制操作", async () => {
@@ -255,6 +347,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={null}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,
@@ -294,6 +387,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={1}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={onDatasetTrashed}
         onStorageChanged={vi.fn()}
       />,
@@ -310,6 +404,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={1}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,
@@ -324,12 +419,13 @@ describe("StorageManagementView", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("该版本仍有关联训练任务");
   });
 
-  it("彻底删除失败时保留精确名称确认弹窗", async () => {
+  it("彻底删除失败时保留确认弹窗", async () => {
     const user = userEvent.setup();
     apiMock.purgeTrashItem.mockRejectedValue(new Error("恢复父级对象后才能删除"));
     render(
       <StorageManagementView
         loadedDatasetId={null}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,
@@ -338,7 +434,6 @@ describe("StorageManagementView", () => {
     await user.click(screen.getByRole("tab", { name: "回收站" }));
     await user.click(await screen.findByRole("button", { name: "彻底删除 旧标注版本" }));
     const dialog = screen.getByRole("dialog", { name: "彻底删除" });
-    await user.type(within(dialog).getByLabelText("输入名称确认"), "旧标注版本");
     await user.click(within(dialog).getByRole("button", { name: "永久删除" }));
 
     expect(screen.getByRole("dialog", { name: "彻底删除" })).toBeInTheDocument();
@@ -351,6 +446,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={null}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,
@@ -371,6 +467,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={null}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,
@@ -390,6 +487,7 @@ describe("StorageManagementView", () => {
     render(
       <StorageManagementView
         loadedDatasetId={null}
+        onOpenDataset={vi.fn()}
         onDatasetTrashed={vi.fn()}
         onStorageChanged={vi.fn()}
       />,

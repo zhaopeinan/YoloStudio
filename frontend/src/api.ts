@@ -4,6 +4,47 @@ export type DeviceInfo = {
   details: Record<string, string>;
 };
 
+export type UserRole = "admin" | "annotator";
+
+export type AuthUser = {
+  id: number;
+  username: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type LoginResponse = {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+};
+
+export type UserListResponse = {
+  items: AuthUser[];
+};
+
+let authToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+}
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+/** Attach JWT for <img>/<video> tags that cannot send Authorization headers. */
+export function authedMediaUrl(url: string): string {
+  if (!authToken || !url.startsWith("/api/")) {
+    return url;
+  }
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}access_token=${encodeURIComponent(authToken)}`;
+}
+
 export type HealthResponse = {
   status: string;
   app: string;
@@ -37,6 +78,25 @@ export type DatasetScanSummary = {
   warnings: string[];
 };
 
+export type DatasetSourceOption = {
+  source_ref: string;
+  label: string;
+  kind: "server" | "upload";
+  source_path: string;
+  original_filename: string;
+  size_bytes: number;
+  source_id: number | null;
+};
+
+export type DatasetSource = {
+  id: number;
+  original_filename: string;
+  size_bytes: number;
+  source_path: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DatasetImportGroup = {
   name: string;
   image_count: number;
@@ -59,6 +119,8 @@ export type ProjectDatasetSummary = {
   source_type: string;
   import_status: string;
   image_count: number;
+  annotated_image_count?: number;
+  annotation_count?: number;
 };
 
 export type ProjectSummary = {
@@ -80,6 +142,7 @@ export type DatasetImage = {
   altitude: number | null;
   timestamp: number | null;
   annotation_count: number;
+  annotation_status: "unreviewed" | "annotated" | "negative";
   image_url: string;
 };
 
@@ -192,6 +255,7 @@ export type AnnotationWrite = {
 
 export type AnnotationListResponse = {
   items: Annotation[];
+  annotation_status: "unreviewed" | "annotated" | "negative";
 };
 
 export type DatasetQualitySummary = {
@@ -259,11 +323,14 @@ export type DatasetVersion = {
   dataset_id: number;
   name: string;
   class_mapping: Record<string, number>;
+  image_scope?: "annotated" | "all";
   split_counts: {
     train: number;
     val: number;
     test: number;
   };
+  source_dataset_ids?: number[];
+  merged?: boolean;
   artifact_path: string;
   frozen: boolean;
   created_at: string;
@@ -292,6 +359,150 @@ export type TrainingRun = {
 
 export type TrainingRunListResponse = {
   items: TrainingRun[];
+};
+
+export type GpuProcessInfo = {
+  pid: number | null;
+  name: string;
+  memory_mb: number | null;
+};
+
+export type GpuDeviceInfo = {
+  index: number;
+  name: string;
+  utilization_gpu: number | null;
+  memory_used_mb: number | null;
+  memory_total_mb: number | null;
+  temperature_c: number | null;
+  power_w: number | null;
+  power_limit_w: number | null;
+  processes: GpuProcessInfo[];
+};
+
+export type GpuStatus = {
+  available: boolean;
+  gpus: GpuDeviceInfo[];
+  error: string | null;
+  queried_at: string;
+};
+
+export type TrainingLiveProgress = {
+  epoch: number | null;
+  total_epochs: number | null;
+  percent: number | null;
+  elapsed_sec: number | null;
+  eta_sec: number | null;
+  phase: string;
+};
+
+export type TrainingLiveSnapshot = {
+  run_id: number;
+  project_id: number;
+  status: string;
+  status_label: string;
+  device: string;
+  config: Record<string, unknown>;
+  progress: TrainingLiveProgress;
+  latest: Record<string, number>;
+  series: Record<string, Array<number | null>>;
+  log_tail: string[];
+  error_message: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  updated_at: string;
+  gpu: GpuStatus | null;
+};
+
+export type TrainingModelOption = {
+  model_ref: string;
+  label: string;
+  kind: "base" | "trained" | "upload";
+  run_id: number | null;
+  weight_id: number | null;
+  status: string;
+};
+
+export type ModelWeight = {
+  id: number;
+  project_id: number;
+  original_filename: string;
+  size_bytes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModelWeightListResponse = {
+  items: ModelWeight[];
+};
+
+export type PreviewModelOption = {
+  model_ref: string;
+  label: string;
+  kind: "base" | "trained";
+  run_id: number | null;
+  status: string | null;
+};
+
+export type PreviewBox = {
+  class_id: number;
+  class_name: string;
+  color: string;
+  x_center: number;
+  y_center: number;
+  width: number;
+  height: number;
+  confidence: number | null;
+};
+
+export type ImagePreviewResponse = {
+  image_id: number;
+  filename: string;
+  image_url: string;
+  width: number;
+  height: number;
+  model_ref: string;
+  confidence_threshold: number;
+  annotations: PreviewBox[];
+  predictions: PreviewBox[];
+};
+
+export type PreviewJob = {
+  id: number;
+  project_id: number;
+  dataset_id: number | null;
+  run_id: number | null;
+  video_id: number | null;
+  model_ref: string;
+  kind: string;
+  source_filename: string;
+  status: string;
+  confidence_threshold: number;
+  frame_step: number;
+  fps: number | null;
+  total_frames: number;
+  processed_frames: number;
+  error_message: string | null;
+  result_url: string | null;
+  stream_url: string | null;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+};
+
+export type PreviewJobListResponse = {
+  items: PreviewJob[];
+};
+
+export type PreviewVideo = {
+  id: number;
+  project_id: number;
+  original_filename: string;
+  size_bytes: number;
+  created_at: string;
+};
+
+export type PreviewVideoListResponse = {
+  items: PreviewVideo[];
 };
 
 export type TrainingRunLogsResponse = {
@@ -425,6 +636,7 @@ export type PredictionJob = {
   id: number;
   run_id: number;
   project_id: number;
+  version_id: number | null;
   status: string;
   image_scope: string;
   confidence_threshold: number;
@@ -518,6 +730,7 @@ export type ExportArtifact = {
   format: string;
   status: string;
   artifact_path: string;
+  download_url: string | null;
   error_message: string | null;
   metadata: Record<string, unknown>;
   started_at: string | null;
@@ -674,17 +887,73 @@ function apiErrorMessage(text: string, status: number): string {
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!(init?.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
   const response = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
+    headers,
   });
+
+  if (response.status === 401 && onUnauthorized) {
+    onUnauthorized();
+  }
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(apiErrorMessage(text, response.status));
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json() as Promise<T>;
+}
+
+export function login(username: string, password: string): Promise<LoginResponse> {
+  return requestJson<LoginResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function getMe(): Promise<AuthUser> {
+  return requestJson<AuthUser>("/api/auth/me");
+}
+
+export function listUsers(): Promise<UserListResponse> {
+  return requestJson<UserListResponse>("/api/users");
+}
+
+export function createUser(payload: {
+  username: string;
+  password: string;
+  role: UserRole;
+  is_active?: boolean;
+}): Promise<AuthUser> {
+  return requestJson<AuthUser>("/api/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUser(
+  userId: number,
+  payload: { password?: string; role?: UserRole; is_active?: boolean },
+): Promise<AuthUser> {
+  return requestJson<AuthUser>(`/api/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteUser(userId: number): Promise<void> {
+  return requestJson<void>(`/api/users/${userId}`, { method: "DELETE" });
 }
 
 export function getHealth(): Promise<HealthResponse> {
@@ -695,10 +964,45 @@ export function listProjects(): Promise<ProjectListResponse> {
   return requestJson<ProjectListResponse>("/api/projects");
 }
 
+export type DetectedClassSuggestion = {
+  name: string;
+  image_count: number;
+  color: string;
+  sample_filenames: string[];
+};
+
+export type DetectedClassListResponse = {
+  dataset_id: number;
+  total_images: number;
+  method: string;
+  items: DetectedClassSuggestion[];
+};
+
+export function listDetectedClasses(datasetId: number): Promise<DetectedClassListResponse> {
+  return requestJson<DetectedClassListResponse>(`/api/datasets/${datasetId}/detected-classes`);
+}
+
 export function scanDataset(sourcePath: string): Promise<DatasetScanSummary> {
   return requestJson<DatasetScanSummary>("/api/datasets/scan", {
     method: "POST",
     body: JSON.stringify({ source_path: sourcePath }),
+  });
+}
+
+export function listDatasetSources(): Promise<{ items: DatasetSourceOption[] }> {
+  return requestJson<{ items: DatasetSourceOption[] }>("/api/datasets/sources");
+}
+
+export function uploadDatasetSource(body: FormData): Promise<DatasetSource> {
+  return requestJson<DatasetSource>("/api/datasets/sources", {
+    method: "POST",
+    body,
+  });
+}
+
+export function deleteDatasetSource(sourceId: number): Promise<void> {
+  return requestJson<void>(`/api/datasets/sources/${sourceId}`, {
+    method: "DELETE",
   });
 }
 
@@ -732,6 +1036,27 @@ export function listImages(
     }
   });
   return requestJson<DatasetImageListResponse>(`/api/datasets/${datasetId}/images?${params}`);
+}
+
+/** Fetch every image in a dataset by paging through the list API. */
+export async function listAllImages(
+  datasetId: number,
+  filters: DatasetImageFilters = {},
+  pageSize = 500,
+): Promise<DatasetImage[]> {
+  const first = await listImages(datasetId, filters, { limit: pageSize, offset: 0 });
+  const items = [...first.items];
+  while (items.length < first.total) {
+    const page = await listImages(datasetId, filters, {
+      limit: pageSize,
+      offset: items.length,
+    });
+    if (page.items.length === 0) {
+      break;
+    }
+    items.push(...page.items);
+  }
+  return items;
 }
 
 export function refreshImageDimensions(
@@ -785,10 +1110,11 @@ export function getAnnotations(imageId: number): Promise<AnnotationListResponse>
 export function replaceAnnotations(
   imageId: number,
   annotations: AnnotationWrite[],
+  annotationStatus?: "unreviewed" | "annotated" | "negative",
 ): Promise<AnnotationListResponse> {
   return requestJson<AnnotationListResponse>(`/api/images/${imageId}/annotations`, {
     method: "PUT",
-    body: JSON.stringify({ annotations }),
+    body: JSON.stringify({ annotations, annotation_status: annotationStatus }),
   });
 }
 
@@ -820,10 +1146,17 @@ export function createDatasetVersion(
   datasetId: number,
   name?: string,
   classIds?: number[],
+  imageScope: "annotated" | "all" = "annotated",
+  datasetIds?: number[],
 ): Promise<DatasetVersion> {
   return requestJson<DatasetVersion>(`/api/datasets/${datasetId}/versions`, {
     method: "POST",
-    body: JSON.stringify({ name, class_ids: classIds && classIds.length > 0 ? classIds : undefined }),
+    body: JSON.stringify({
+      name,
+      class_ids: classIds && classIds.length > 0 ? classIds : undefined,
+      image_scope: imageScope,
+      dataset_ids: datasetIds && datasetIds.length > 0 ? datasetIds : undefined,
+    }),
   });
 }
 
@@ -831,8 +1164,96 @@ export function listDatasetVersions(datasetId: number): Promise<DatasetVersionLi
   return requestJson<DatasetVersionListResponse>(`/api/datasets/${datasetId}/versions`);
 }
 
+export function listProjectVersions(projectId: number): Promise<DatasetVersionListResponse> {
+  return requestJson<DatasetVersionListResponse>(`/api/projects/${projectId}/versions`);
+}
+
 export function listTrainingRuns(projectId: number): Promise<TrainingRunListResponse> {
   return requestJson<TrainingRunListResponse>(`/api/projects/${projectId}/training/runs`);
+}
+
+export function listTrainingModels(projectId: number): Promise<{ items: TrainingModelOption[] }> {
+  return requestJson<{ items: TrainingModelOption[] }>(
+    `/api/training/models?project_id=${projectId}`,
+  );
+}
+
+export function listModelWeights(projectId: number): Promise<ModelWeightListResponse> {
+  return requestJson<ModelWeightListResponse>(`/api/training/weights?project_id=${projectId}`);
+}
+
+export function uploadModelWeight(body: FormData): Promise<ModelWeight> {
+  return requestJson<ModelWeight>("/api/training/weights", {
+    method: "POST",
+    body,
+  });
+}
+
+export function deleteModelWeight(weightId: number): Promise<void> {
+  return requestJson<void>(`/api/training/weights/${weightId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listPreviewModels(projectId?: number): Promise<{ items: PreviewModelOption[] }> {
+  const query = projectId ? `?project_id=${projectId}` : "";
+  return requestJson<{ items: PreviewModelOption[] }>(`/api/preview/models${query}`);
+}
+
+export function previewImage(
+  imageId: number,
+  body: { model_ref: string; confidence_threshold: number },
+): Promise<ImagePreviewResponse> {
+  return requestJson<ImagePreviewResponse>(`/api/preview/images/${imageId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function createVideoPreview(body: FormData): Promise<PreviewJob> {
+  return requestJson<PreviewJob>("/api/preview/video-jobs", {
+    method: "POST",
+    body,
+  });
+}
+
+export function listPreviewVideos(projectId: number): Promise<PreviewVideoListResponse> {
+  return requestJson<PreviewVideoListResponse>(`/api/preview/videos?project_id=${projectId}`);
+}
+
+export function uploadPreviewVideo(body: FormData): Promise<PreviewVideo> {
+  return requestJson<PreviewVideo>("/api/preview/videos", {
+    method: "POST",
+    body,
+  });
+}
+
+export function deletePreviewVideo(videoId: number): Promise<void> {
+  return requestJson<void>(`/api/preview/videos/${videoId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listVideoPreviewJobs(projectId: number): Promise<PreviewJobListResponse> {
+  return requestJson<PreviewJobListResponse>(`/api/preview/video-jobs?project_id=${projectId}`);
+}
+
+export function getVideoPreviewStatus(previewId: number): Promise<PreviewJob> {
+  return requestJson<PreviewJob>(`/api/preview/video-jobs/${previewId}`);
+}
+
+export function getVideoPreviewStreamUrl(previewId: number): string {
+  return `/api/preview/video-jobs/${previewId}/stream`;
+}
+
+export function getVideoPreviewResultUrl(previewId: number): string {
+  return `/api/preview/video-jobs/${previewId}/result`;
+}
+
+export function deleteVideoPreview(previewId: number): Promise<void> {
+  return requestJson<void>(`/api/preview/video-jobs/${previewId}`, {
+    method: "DELETE",
+  });
 }
 
 export function createTrainingRun(body: TrainingRunCreate): Promise<TrainingRun> {
@@ -852,6 +1273,18 @@ export function getTrainingRunLogs(runId: number): Promise<TrainingRunLogsRespon
   return requestJson<TrainingRunLogsResponse>(`/api/training/runs/${runId}/logs`);
 }
 
+export function getTrainingRunLive(
+  runId: number,
+  includeGpu = true,
+): Promise<TrainingLiveSnapshot> {
+  const query = includeGpu ? "" : "?include_gpu=false";
+  return requestJson<TrainingLiveSnapshot>(`/api/training/runs/${runId}/live${query}`);
+}
+
+export function getSystemGpu(): Promise<GpuStatus> {
+  return requestJson<GpuStatus>("/api/system/gpu");
+}
+
 export function getTrainingRunArtifacts(runId: number): Promise<TrainingRunArtifactSummary> {
   return requestJson<TrainingRunArtifactSummary>(`/api/training/runs/${runId}/artifacts`);
 }
@@ -866,7 +1299,12 @@ export function getProjectTrainingSummary(projectId: number): Promise<ProjectExp
 
 export function createPredictionJob(
   runId: number,
-  body: { image_scope: string; confidence_threshold: number; image_filters?: DatasetImageFilters },
+  body: {
+    image_scope: string;
+    confidence_threshold: number;
+    version_id?: number;
+    image_filters?: DatasetImageFilters;
+  },
 ): Promise<PredictionJob> {
   return requestJson<PredictionJob>(`/api/training/runs/${runId}/prediction-jobs`, {
     method: "POST",
@@ -876,7 +1314,12 @@ export function createPredictionJob(
 
 export function createPredictionThresholdScan(
   runId: number,
-  body: { image_scope: string; thresholds: number[]; image_filters?: DatasetImageFilters },
+  body: {
+    image_scope: string;
+    thresholds: number[];
+    version_id?: number;
+    image_filters?: DatasetImageFilters;
+  },
 ): Promise<PredictionThresholdScanResponse> {
   return requestJson<PredictionThresholdScanResponse>(
     `/api/training/runs/${runId}/prediction-threshold-scan`,
@@ -935,6 +1378,14 @@ export function createRunExport(runId: number, format: string): Promise<ExportAr
   });
 }
 
+export function getRunBestWeightsUrl(runId: number): string {
+  return `/api/training/runs/${runId}/weights/best`;
+}
+
+export function getExportDownloadUrl(runId: number, exportId: number): string {
+  return `/api/training/runs/${runId}/exports/${exportId}/file`;
+}
+
 export function listStorageItems(): Promise<StorageItemListResponse> {
   return requestJson<StorageItemListResponse>("/api/storage/items");
 }
@@ -973,6 +1424,19 @@ export function purgeTrashItem(
     method: "DELETE",
     body: JSON.stringify({ confirm_name: confirmName }),
   });
+}
+
+export function cascadePurgeTrashItem(
+  trashId: number,
+  confirmName: string,
+): Promise<StorageMutationResponse> {
+  return requestJson<StorageMutationResponse>(
+    `/api/storage/trash/${trashId}/cascade-purge`,
+    {
+      method: "POST",
+      body: JSON.stringify({ confirm_name: confirmName }),
+    },
+  );
 }
 
 export function purgeExpiredTrash(): Promise<StoragePurgeSummary> {

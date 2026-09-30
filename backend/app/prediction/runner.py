@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.settings import Settings, get_settings
 from app.db.models import (
     Annotation,
+    ClassDef,
     DatasetVersion,
     Image,
     Prediction,
@@ -39,17 +40,34 @@ def prediction_artifact_root(settings: Settings, run: TrainingRun, job_id: int) 
     return Path(run.artifact_path) / "predictions" / str(job_id)
 
 
+def resolve_evaluation_version(
+    db: Session,
+    run: TrainingRun,
+    version_id: int | None,
+) -> DatasetVersion:
+    target_id = version_id if version_id is not None else run.version_id
+    version = db.get(DatasetVersion, target_id)
+    if version is None:
+        raise ValueError("评估数据版本不存在")
+    if version.project_id != run.project_id:
+        raise ValueError("评估数据版本与训练任务不属于同一项目")
+    return version
+
+
 def create_prediction_job(
     db: Session,
     settings: Settings,
     run: TrainingRun,
     image_scope: str,
     confidence_threshold: float,
+    version_id: int | None = None,
     image_filters: PredictionImageFilters | None = None,
 ) -> PredictionJob:
+    evaluation_version = resolve_evaluation_version(db, run, version_id)
     job = PredictionJob(
         run_id=run.id,
         project_id=run.project_id,
+        version_id=evaluation_version.id,
         status="queued",
         image_scope=image_scope,
         confidence_threshold=confidence_threshold,
@@ -68,6 +86,11 @@ def create_prediction_job(
     db.refresh(job)
     return job
 
+
+def job_evaluation_version_id(job: PredictionJob, run: TrainingRun) -> int:
+    if job.version_id is not None:
+        return job.version_id
+    return run.version_id
 
 def _manifest_image_ids(version: DatasetVersion, image_scope: str) -> list[int]:
     images = version.split_manifest.get("images", [])
@@ -196,10 +219,9 @@ def list_job_images(
     run: TrainingRun,
     image_scope: str,
     image_filters: PredictionImageFilters | dict | None = None,
+    version_id: int | None = None,
 ) -> list[Image]:
-    version = db.get(DatasetVersion, run.version_id)
-    if version is None:
-        return []
+    version = resolve_evaluation_version(db, run, version_id)
     image_ids = _manifest_image_ids(version, image_scope)
     if not image_ids:
         return []
@@ -283,15 +305,60 @@ def _merge_tags(existing_tags: list[str] | None, new_tags: list[str]) -> list[st
     return merged
 
 
-def _class_id_for_prediction(raw_class_id: int, version: DatasetVersion | None) -> int:
-    if version is None:
-        return raw_class_id
+def _training_class_lookup(
+    db: Session,
+    training_version: DatasetVersion | None,
+) -> tuple[dict[int, int], set[int], dict[str, int]]:
+    """Return (yolo_index→class_id, known_class_ids, class_name→class_id) for the training version."""
+    reverse_mapping: dict[int, int] = {}
+    known_class_ids: set[int] = set()
+    if training_version is not None:
+        for class_id_raw, yolo_index in (training_version.class_mapping or {}).items():
+            class_id = int(class_id_raw)
+            reverse_mapping[int(yolo_index)] = class_id
+            known_class_ids.add(class_id)
 
-    class_mapping = version.class_mapping or {}
-    reverse_mapping = {int(yolo_index): int(class_id) for class_id, yolo_index in class_mapping.items()}
+    class_name_to_id: dict[str, int] = {}
+    if known_class_ids:
+        rows = db.scalars(select(ClassDef).where(ClassDef.id.in_(known_class_ids))).all()
+        class_name_to_id = {row.name: row.id for row in rows}
+    elif training_version is not None:
+        rows = db.scalars(
+            select(ClassDef).where(
+                ClassDef.project_id == training_version.project_id,
+                ClassDef.active == 1,
+            )
+        ).all()
+        class_name_to_id = {row.name: row.id for row in rows}
+        known_class_ids = set(class_name_to_id.values())
+    return reverse_mapping, known_class_ids, class_name_to_id
+
+
+def _resolve_prediction_class_id(
+    raw_class_id: int,
+    reverse_mapping: dict[int, int],
+    known_class_ids: set[int],
+    class_name_to_id: dict[str, int],
+    model_names: dict[int, str] | None = None,
+) -> int | None:
+    """Map YOLO class index to project ClassDef id using training mapping / model names.
+
+    Returns None when the prediction cannot be aligned safely.
+    """
+    if model_names is not None:
+        name = model_names.get(raw_class_id)
+        if name is not None:
+            mapped = class_name_to_id.get(name)
+            if mapped is not None:
+                return mapped
+            return None
+
     if raw_class_id in reverse_mapping:
         return reverse_mapping[raw_class_id]
-    return raw_class_id
+    # Compatibility for test fakes that already emit project class ids.
+    if raw_class_id in known_class_ids:
+        return raw_class_id
+    return None
 
 
 def _best_annotation_match(
@@ -325,6 +392,7 @@ def persist_predictions(
     predictions_by_image: dict[int, list[dict]],
     image_filters: PredictionImageFilters | dict | None = None,
     iou_threshold: float = 0.5,
+    model_names: dict[int, str] | None = None,
 ) -> None:
     image_ids = [image.id for image in images]
     annotations = db.scalars(
@@ -334,14 +402,27 @@ def persist_predictions(
     for annotation in annotations:
         annotations_by_image.setdefault(annotation.image_id, []).append(annotation)
 
-    version = db.get(DatasetVersion, run.version_id)
+    training_version = db.get(DatasetVersion, run.version_id)
+    reverse_mapping, known_class_ids, class_name_to_id = _training_class_lookup(
+        db, training_version
+    )
+    skipped_unaligned = 0
     rows: list[Prediction] = []
     matched_annotations: set[int] = set()
     for image in images:
         image_annotations = annotations_by_image.get(image.id, [])
         for prediction in predictions_by_image.get(image.id, []):
             raw_class_id = int(prediction["class_id"])
-            class_id = _class_id_for_prediction(raw_class_id, version)
+            class_id = _resolve_prediction_class_id(
+                raw_class_id,
+                reverse_mapping,
+                known_class_ids,
+                class_name_to_id,
+                model_names=model_names,
+            )
+            if class_id is None:
+                skipped_unaligned += 1
+                continue
             prediction_box = _prediction_box(prediction)
             best_annotation, best_iou = _best_annotation_match(
                 prediction_box,
@@ -418,12 +499,20 @@ def persist_predictions(
     job.matched_count = sum(1 for row in rows if row.failure_type == "matched")
     job.false_positive_count = sum(1 for row in rows if row.failure_type == "false_positive")
     job.false_negative_count = sum(1 for row in rows if row.failure_type == "false_negative")
+    if skipped_unaligned:
+        append_prediction_log(
+            job,
+            f"skipped {skipped_unaligned} predictions that could not be aligned to training classes",
+        )
     (Path(job.artifact_path) / "predictions.json").write_text(
         json.dumps(
             {
                 "image_scope": job.image_scope,
+                "version_id": job_evaluation_version_id(job, run),
+                "training_version_id": run.version_id,
                 "image_filters": _normalize_image_filters(image_filters),
                 "uses_image_filters": _has_active_image_filters(image_filters),
+                "skipped_unaligned": skipped_unaligned,
                 "image_ids": image_ids,
                 "predictions": [
                     {
@@ -455,7 +544,18 @@ def execute_prediction_job(db: Session, job: PredictionJob, run: TrainingRun, pr
     append_prediction_log(job, "prediction running")
 
     image_filters = read_prediction_job_filters(job)
-    images = list_job_images(db, run, job.image_scope, image_filters)
+    eval_version_id = job_evaluation_version_id(job, run)
+    append_prediction_log(
+        job,
+        f"prediction weights from run #{run.id}; evaluation version #{eval_version_id}",
+    )
+    images = list_job_images(
+        db,
+        run,
+        job.image_scope,
+        image_filters,
+        version_id=eval_version_id,
+    )
     if image_filters is not None:
         append_prediction_log(
             job,

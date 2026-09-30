@@ -4,6 +4,7 @@ export type WorkflowStep =
   | "annotation"
   | "quality"
   | "training"
+  | "preview"
   | "evaluation";
 
 export type WorkflowStepStatus = "not_started" | "in_progress" | "completed";
@@ -35,6 +36,7 @@ export const workflowStepOrder: WorkflowStep[] = [
   "annotation",
   "quality",
   "training",
+  "preview",
   "evaluation",
 ];
 
@@ -44,6 +46,7 @@ const stepCopy: Record<WorkflowStep, Pick<WorkflowStepItem, "label" | "descripti
   annotation: { label: "图像标注", description: "绘制、修正并保存边界框" },
   quality: { label: "质量与版本", description: "审查数据并冻结训练版本" },
   training: { label: "模型训练", description: "配置、启动和监控训练" },
+  preview: { label: "效果预览", description: "逐图或逐帧检查模型识别效果" },
   evaluation: { label: "评估与导出", description: "分析预测并导出模型" },
 };
 
@@ -57,14 +60,18 @@ function item(
   return { id, number, ...stepCopy[id], availability, status, lockedReason };
 }
 
-export function buildWorkflowSteps(progress: WorkflowProgress): WorkflowStepItem[] {
+export function buildWorkflowSteps(
+  progress: WorkflowProgress,
+  options?: { isAdmin?: boolean },
+): WorkflowStepItem[] {
+  const isAdmin = options?.isAdmin ?? true;
   const hasClasses = progress.classCount > 0;
   const hasAnnotations = progress.annotatedImageCount > 0;
   const hasVersions = progress.versionCount > 0;
   const hasRuns = progress.runCount > 0;
   const hasEvaluation = progress.predictionJobCount > 0 || progress.exportCount > 0;
 
-  return [
+  const steps = [
     item("dataset", 1, "available", progress.hasDataset ? "completed" : "in_progress"),
     item(
       "classes",
@@ -99,13 +106,29 @@ export function buildWorkflowSteps(progress: WorkflowProgress): WorkflowStepItem
       hasVersions ? undefined : "请先创建冻结数据集版本",
     ),
     item(
-      "evaluation",
+      "preview",
       6,
       hasRuns ? "available" : "locked",
+      hasRuns ? "in_progress" : "not_started",
+      hasRuns ? undefined : "请先完成训练任务",
+    ),
+    item(
+      "evaluation",
+      7,
+      hasRuns ? "available" : "locked",
       hasEvaluation ? "completed" : hasRuns ? "in_progress" : "not_started",
-      hasRuns ? undefined : "请先创建训练任务",
+      hasRuns ? undefined : "请先完成训练任务",
     ),
   ];
+
+  if (isAdmin) {
+    return steps;
+  }
+
+  const annotatorAllowed = new Set<WorkflowStep>(["dataset", "classes", "annotation", "quality"]);
+  return steps
+    .filter((step) => annotatorAllowed.has(step.id))
+    .map((step, index) => ({ ...step, number: index + 1 }));
 }
 
 export function parseWorkflowHash(hash: string): WorkflowStep {

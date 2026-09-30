@@ -118,13 +118,24 @@ def isolated_client(tmp_path: Path) -> Generator[TestClient, None, None]:
         finally:
             db.close()
 
+    from app.auth.deps import get_current_user
+    from types import SimpleNamespace
+
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=1,
+        username="test-admin",
+        role="admin",
+        is_active=True,
+        password_hash="unused",
+    )
     try:
         with TestClient(app) as client:
             yield client
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_settings, None)
         engine.dispose()
 
 
@@ -168,6 +179,41 @@ def test_import_dataset_persists_images_and_serves_files(tmp_path: Path):
         assert file_response.content == PNG_1X1
 
 
+def test_import_dataset_skips_macos_metadata_files(tmp_path: Path):
+    zip_path = tmp_path / "camo.zip"
+    with ZipFile(zip_path, "w") as archive:
+        archive.writestr("prius_hybrid_camo/images/raw/prius_hybrid_camo_h20_a045.jpg", PNG_1X1)
+        archive.writestr("suv_camo/images/raw/suv_camo_h20_a045.jpg", PNG_1X1)
+        archive.writestr(
+            "._prius_hybrid_camo/images/raw/._prius_hybrid_camo_h20_a045.jpg",
+            b"appledouble",
+        )
+        archive.writestr("suv_camo/images/raw/._suv_camo_h20_a045.jpg", b"appledouble")
+        archive.writestr("__MACOSX/suv_camo/._suv_camo_h20_a045.jpg", b"appledouble")
+
+    with isolated_client(tmp_path) as client:
+        response = client.post(
+            "/api/datasets/import",
+            json={
+                "source_path": str(zip_path),
+                "project_name": "Camo Project",
+                "dataset_name": "camo",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["image_count"] == 2
+        assert [group["name"] for group in payload["groups"]] == [
+            "prius_hybrid_camo",
+            "suv_camo",
+        ]
+
+        images = client.get(f"/api/datasets/{payload['dataset_id']}/images").json()["items"]
+        assert len(images) == 2
+        assert all("._" not in image["relative_path"] for image in images)
+
+
 def test_list_projects_returns_imported_dataset_summaries(tmp_path: Path):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)
@@ -198,10 +244,48 @@ def test_list_projects_returns_imported_dataset_summaries(tmp_path: Path):
                         "source_type": "zip",
                         "import_status": "imported",
                         "image_count": 2,
+                        "annotated_image_count": 0,
+                        "annotation_count": 0,
                     }
                 ],
             }
         ]
+
+        class_response = client.post(
+            f"/api/projects/{imported['project_id']}/classes",
+            json={"name": "target", "color": "#2f80ed"},
+        )
+        assert class_response.status_code == 200
+        images = client.get(f"/api/datasets/{imported['dataset_id']}/images").json()["items"]
+        annotation_response = client.put(
+            f"/api/images/{images[0]['id']}/annotations",
+            json={
+                "annotations": [
+                    {
+                        "class_id": class_response.json()["id"],
+                        "x_center": 0.5,
+                        "y_center": 0.5,
+                        "width": 0.2,
+                        "height": 0.2,
+                    },
+                    {
+                        "class_id": class_response.json()["id"],
+                        "x_center": 0.2,
+                        "y_center": 0.2,
+                        "width": 0.1,
+                        "height": 0.1,
+                    },
+                ]
+            },
+        )
+        assert annotation_response.status_code == 200
+
+        updated_projects_response = client.get("/api/projects")
+
+        assert updated_projects_response.status_code == 200
+        updated_dataset = updated_projects_response.json()["items"][0]["datasets"][0]
+        assert updated_dataset["annotated_image_count"] == 1
+        assert updated_dataset["annotation_count"] == 2
 
 
 def test_dataset_coverage_summary_reports_diversity(tmp_path: Path):

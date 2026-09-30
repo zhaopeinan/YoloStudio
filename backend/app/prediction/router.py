@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.auth.deps import get_current_user, require_admin
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -30,7 +32,11 @@ from app.prediction.schemas import (
 from app.storage.visibility import StorageEntityNotFoundError, require_active_entity
 
 
-router = APIRouter(prefix="/api", tags=["prediction"])
+router = APIRouter(
+    prefix="/api",
+    tags=["prediction"],
+    dependencies=[Depends(get_current_user)],
+)
 FAILURE_TYPE_PATTERN = "^(all|matched|false_positive|false_negative|class_confusion)$"
 
 
@@ -51,6 +57,7 @@ def _read_job(job: PredictionJob, db: Session) -> PredictionJobRead:
         id=job.id,
         run_id=job.run_id,
         project_id=job.project_id,
+        version_id=job.version_id,
         status=job.status,
         image_scope=job.image_scope,
         confidence_threshold=job.confidence_threshold,
@@ -113,17 +120,22 @@ def create_run_prediction_job(
     request: PredictionJobCreate,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
 ) -> PredictionJobRead:
     run = _require_active_run(db, run_id)
 
-    job = create_prediction_job(
-        db,
-        settings,
-        run,
-        image_scope=request.image_scope,
-        confidence_threshold=request.confidence_threshold,
-        image_filters=request.image_filters,
-    )
+    try:
+        job = create_prediction_job(
+            db,
+            settings,
+            run,
+            image_scope=request.image_scope,
+            confidence_threshold=request.confidence_threshold,
+            version_id=request.version_id,
+            image_filters=request.image_filters,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     job = execute_prediction_job(db, job, run, predictor=predict_images)
     return _read_job(job, db)
 
@@ -137,19 +149,24 @@ def create_run_prediction_threshold_scan(
     request: PredictionThresholdScanCreate,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
 ) -> PredictionThresholdScanRead:
     run = _require_active_run(db, run_id)
 
     jobs: list[PredictionJobRead] = []
     for threshold in request.thresholds:
-        job = create_prediction_job(
-            db,
-            settings,
-            run,
-            image_scope=request.image_scope,
-            confidence_threshold=threshold,
-            image_filters=request.image_filters,
-        )
+        try:
+            job = create_prediction_job(
+                db,
+                settings,
+                run,
+                image_scope=request.image_scope,
+                confidence_threshold=threshold,
+                version_id=request.version_id,
+                image_filters=request.image_filters,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         job = execute_prediction_job(db, job, run, predictor=predict_images)
         jobs.append(_read_job(job, db))
     return PredictionThresholdScanRead(items=jobs)

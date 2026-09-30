@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 from app.core.settings import Settings
 from app.db.models import Annotation, ClassDef, Dataset, DatasetVersion, Image
 from app.quality.router import build_quality_summary
+from app.storage.visibility import (
+    StorageEntityNotFoundError,
+    require_active_entity,
+)
 
 
 SPLITS = ("train", "val", "test")
@@ -49,8 +53,24 @@ def _safe_name(path: str) -> str:
     return f"{stem}{source.suffix.lower()}"
 
 
-def _label_name(image: Image) -> str:
-    return Path(_safe_name(image.relative_path)).with_suffix(".txt").name
+def _unique_export_name(image: Image, used_names: set[str]) -> str:
+    base = f"ds{image.dataset_id}__{_safe_name(image.relative_path)}"
+    if base not in used_names:
+        used_names.add(base)
+        return base
+    stem = Path(base).stem
+    suffix = Path(base).suffix
+    index = 2
+    while True:
+        candidate = f"{stem}__{index}{suffix}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        index += 1
+
+
+def _label_name(image_name: str) -> str:
+    return Path(image_name).with_suffix(".txt").name
 
 
 def _format_float(value: float) -> str:
@@ -78,38 +98,82 @@ def _copy_image(settings: Settings, image: Image, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def _resolve_datasets(
+    db: Session,
+    primary_dataset_id: int,
+    dataset_ids: list[int] | None,
+) -> list[Dataset]:
+    requested = list(dict.fromkeys(dataset_ids or [primary_dataset_id]))
+    if primary_dataset_id not in requested:
+        requested.insert(0, primary_dataset_id)
+    else:
+        # Keep primary first for FK / naming.
+        requested = [primary_dataset_id, *[item for item in requested if item != primary_dataset_id]]
+
+    datasets: list[Dataset] = []
+    for dataset_id in requested:
+        try:
+            require_active_entity(db, "dataset", dataset_id)
+        except StorageEntityNotFoundError as exc:
+            raise VersionExportError(str(exc)) from exc
+        dataset = db.get(Dataset, dataset_id)
+        if dataset is None:
+            raise VersionExportError(f"Dataset was not found: {dataset_id}")
+        datasets.append(dataset)
+
+    project_ids = {dataset.project_id for dataset in datasets}
+    if len(project_ids) != 1:
+        raise VersionExportError("Cannot merge datasets from different projects")
+    return datasets
+
+
+def _validate_dataset_quality(db: Session, dataset: Dataset, *, multi: bool) -> None:
+    quality = build_quality_summary(db, dataset.id)
+    blockers = []
+    if quality.image_count == 0:
+        blockers.append("dataset has no images" if not multi else "has no images")
+    if quality.class_count == 0:
+        blockers.append("project has no active classes")
+    if quality.invalid_box_count > 0:
+        blockers.append("dataset has invalid boxes" if not multi else "has invalid boxes")
+    if quality.duplicate_box_count > 0:
+        blockers.append("dataset has duplicate boxes" if not multi else "has duplicate boxes")
+    if blockers:
+        if multi:
+            raise VersionExportError(
+                f"Cannot create dataset version for '{dataset.name}': " + ", ".join(blockers)
+            )
+        raise VersionExportError("Cannot create dataset version: " + ", ".join(blockers))
+
+
 def create_dataset_version(
     db: Session,
     settings: Settings,
     dataset_id: int,
     name: str | None = None,
     class_ids: list[int] | None = None,
+    image_scope: str = "annotated",
+    dataset_ids: list[int] | None = None,
 ) -> DatasetVersion:
-    dataset = db.get(Dataset, dataset_id)
-    if dataset is None:
-        raise VersionExportError("Dataset was not found")
+    if image_scope not in {"annotated", "all"}:
+        raise VersionExportError("Unsupported dataset version image scope")
 
-    quality = build_quality_summary(db, dataset_id)
-    blockers = []
-    if quality.image_count == 0:
-        blockers.append("dataset has no images")
-    if quality.class_count == 0:
-        blockers.append("project has no active classes")
-    if quality.invalid_box_count > 0:
-        blockers.append("dataset has invalid boxes")
-    if quality.duplicate_box_count > 0:
-        blockers.append("dataset has duplicate boxes")
-    if blockers:
-        raise VersionExportError("Cannot create dataset version: " + ", ".join(blockers))
+    datasets = _resolve_datasets(db, dataset_id, dataset_ids)
+    primary = datasets[0]
+    multi = len(datasets) > 1
+    for dataset in datasets:
+        _validate_dataset_quality(db, dataset, multi=multi)
+
+    source_dataset_ids = [dataset.id for dataset in datasets]
 
     requested_class_ids = list(dict.fromkeys(class_ids or []))
     class_query = select(ClassDef).where(
-        ClassDef.project_id == dataset.project_id,
+        ClassDef.project_id == primary.project_id,
         ClassDef.active == 1,
     )
     if requested_class_ids:
         class_query = class_query.where(ClassDef.id.in_(requested_class_ids))
-    classes = db.scalars(class_query.order_by(ClassDef.id)).all()
+    classes = list(db.scalars(class_query.order_by(ClassDef.id)).all())
     if requested_class_ids and {class_def.id for class_def in classes} != set(requested_class_ids):
         raise VersionExportError("Selected classes must belong to the dataset project")
     if not classes:
@@ -117,26 +181,62 @@ def create_dataset_version(
     class_mapping = {str(class_def.id): index for index, class_def in enumerate(classes)}
     selected_class_ids = [class_def.id for class_def in classes]
 
-    annotated_images = db.scalars(
-        select(Image)
-        .join(Annotation, Annotation.image_id == Image.id)
-        .where(Image.dataset_id == dataset_id, Annotation.class_id.in_(selected_class_ids))
-        .group_by(Image.id)
-        .order_by(Image.id)
-    ).all()
-    eligible_image_count = len(annotated_images)
-    if eligible_image_count < MIN_ANNOTATED_IMAGES:
+    annotated_images = list(
+        db.scalars(
+            select(Image)
+            .join(Annotation, Annotation.image_id == Image.id)
+            .where(
+                Image.dataset_id.in_(source_dataset_ids),
+                Annotation.class_id.in_(selected_class_ids),
+            )
+            .group_by(Image.id)
+            .order_by(Image.id)
+        ).all()
+    )
+    if image_scope == "all":
+        export_images = list(
+            db.scalars(
+                select(Image)
+                .where(Image.dataset_id.in_(source_dataset_ids))
+                .order_by(Image.id)
+            ).all()
+        )
+    else:
+        export_images = annotated_images
+
+    if len(export_images) < MIN_ANNOTATED_IMAGES:
+        if image_scope == "annotated":
+            raise VersionExportError(
+                "Cannot create dataset version: at least "
+                f"{MIN_ANNOTATED_IMAGES} annotated images are required for training and "
+                f"validation; current selection has {len(export_images)}."
+            )
         raise VersionExportError(
             "Cannot create dataset version: at least "
-            f"{MIN_ANNOTATED_IMAGES} annotated images are required for training and "
-            f"validation; current selection has {eligible_image_count}."
+            f"{MIN_ANNOTATED_IMAGES} images are required for training and validation; "
+            f"current selection has {len(export_images)}."
         )
-    splits = _split_images(annotated_images)
+    if not annotated_images:
+        raise VersionExportError(
+            "Cannot create dataset version: at least one annotated image is required; "
+            "current selection has 0."
+        )
+    splits = _split_images(export_images)
+
+    if name and name.strip():
+        version_name = name.strip()
+    elif len(datasets) == 1:
+        version_name = f"{primary.name}-v1"
+    else:
+        joined = "+".join(dataset.name for dataset in datasets[:3])
+        if len(datasets) > 3:
+            joined = f"{joined}+{len(datasets) - 3}more"
+        version_name = f"merged-{joined}"
 
     version = DatasetVersion(
-        project_id=dataset.project_id,
-        dataset_id=dataset.id,
-        name=name.strip() if name and name.strip() else f"{dataset.name}-v1",
+        project_id=primary.project_id,
+        dataset_id=primary.id,
+        name=version_name,
         class_mapping=class_mapping,
         split_manifest={},
         artifact_path="",
@@ -146,7 +246,7 @@ def create_dataset_version(
     db.flush()
 
     artifact_root = (
-        settings.workspace_root / "projects" / str(dataset.project_id) / "versions" / str(version.id)
+        settings.workspace_root / "projects" / str(primary.project_id) / "versions" / str(version.id)
     )
     for split in SPLITS:
         (artifact_root / "images" / split).mkdir(parents=True, exist_ok=True)
@@ -156,17 +256,21 @@ def create_dataset_version(
     annotations = db.scalars(
         select(Annotation)
         .join(Image, Annotation.image_id == Image.id)
-        .where(Image.dataset_id == dataset.id, Annotation.class_id.in_(selected_class_ids))
+        .where(
+            Image.dataset_id.in_(source_dataset_ids),
+            Annotation.class_id.in_(selected_class_ids),
+        )
         .order_by(Annotation.id)
     ).all()
     for annotation in annotations:
         annotations_by_image.setdefault(annotation.image_id, []).append(annotation)
 
+    used_names: set[str] = set()
     manifest_images = []
     for split, split_images in splits.items():
         for image in split_images:
-            image_name = _safe_name(image.relative_path)
-            label_name = _label_name(image)
+            image_name = _unique_export_name(image, used_names)
+            label_name = _label_name(image_name)
             _copy_image(settings, image, artifact_root / "images" / split / image_name)
 
             image_annotations = annotations_by_image.get(image.id, [])
@@ -201,6 +305,7 @@ def create_dataset_version(
             manifest_images.append(
                 {
                     "image_id": image.id,
+                    "dataset_id": image.dataset_id,
                     "source_relative_path": image.relative_path,
                     "export_image": str(Path("images") / split / image_name),
                     "export_label": str(Path("labels") / split / label_name),
@@ -216,13 +321,28 @@ def create_dataset_version(
             )
 
     split_counts = {split: len(split_images) for split, split_images in splits.items()}
+    dataset_summaries = [
+        {
+            "dataset_id": dataset.id,
+            "dataset_name": dataset.name,
+            "image_count": sum(1 for image in export_images if image.dataset_id == dataset.id),
+            "annotated_image_count": sum(
+                1 for image in annotated_images if image.dataset_id == dataset.id
+            ),
+        }
+        for dataset in datasets
+    ]
     manifest = {
         "version_id": version.id,
-        "project_id": dataset.project_id,
-        "dataset_id": dataset.id,
-        "dataset_name": dataset.name,
+        "project_id": primary.project_id,
+        "dataset_id": primary.id,
+        "dataset_name": primary.name,
+        "source_dataset_ids": source_dataset_ids,
+        "source_datasets": dataset_summaries,
+        "merged": len(source_dataset_ids) > 1,
         "class_mapping": class_mapping,
         "selected_class_ids": selected_class_ids,
+        "image_scope": image_scope,
         "split_counts": split_counts,
         "images": manifest_images,
     }

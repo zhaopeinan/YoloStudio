@@ -16,6 +16,7 @@ class ExportArtifactRead(BaseModel):
     format: str
     status: str
     artifact_path: str
+    download_url: str | None = None
     error_message: str | None
     metadata: dict
     started_at: datetime | None

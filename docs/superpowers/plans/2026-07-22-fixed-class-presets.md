@@ -13,8 +13,8 @@
 ### Task 1: 增加固定类别预设状态和批量创建行为
 
 **Files:**
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/App.tsx`
-- Test: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/App.test.tsx`
+- Modify: `~/DevProjects/YOLO_Trainer/frontend/src/App.tsx`
+- Test: `~/DevProjects/YOLO_Trainer/frontend/src/App.test.tsx`
 
 - [x] **Step 1: 写批量类别选择的失败测试**
 
@@ -25,7 +25,7 @@
 运行：
 
 ```bash
-cd /Users/peinan/DevProjects/YOLO_Trainer/frontend
+cd ~/DevProjects/YOLO_Trainer/frontend
 npx vitest run src/App.test.tsx -t "固定类别"
 ```
 
@@ -59,9 +59,9 @@ const fixedClassPresets = [
 ### Task 2: 重做类别管理页面为固定复选卡片
 
 **Files:**
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/App.tsx`
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/styles.css`
-- Test: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/App.test.tsx`
+- Modify: `~/DevProjects/YOLO_Trainer/frontend/src/App.tsx`
+- Modify: `~/DevProjects/YOLO_Trainer/frontend/src/styles.css`
+- Test: `~/DevProjects/YOLO_Trainer/frontend/src/App.test.tsx`
 
 - [x] **Step 1: 替换手动输入表单**
 
@@ -84,7 +84,7 @@ const fixedClassPresets = [
 运行：
 
 ```bash
-cd /Users/peinan/DevProjects/YOLO_Trainer/frontend
+cd ~/DevProjects/YOLO_Trainer/frontend
 npx vitest run src/App.test.tsx -t "类别|固定类别|首个类别|编辑"
 ```
 
@@ -97,12 +97,12 @@ npx vitest run src/App.test.tsx -t "类别|固定类别|首个类别|编辑"
 
 - [x] **Step 1: 运行前端全量测试**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer/frontend && npm test -- --run`，预期全部测试通过。
+运行 `cd ~/DevProjects/YOLO_Trainer/frontend && npm test -- --run`，预期全部测试通过。
 
 - [x] **Step 2: 运行前端构建**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer/frontend && npm run build`，预期 TypeScript 检查和 Vite 构建成功。
+运行 `cd ~/DevProjects/YOLO_Trainer/frontend && npm run build`，预期 TypeScript 检查和 Vite 构建成功。
 
 - [x] **Step 3: 检查差异格式和状态**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer && git diff --check && git status --short`，确认无空白错误，且不触碰用户已有的无关未跟踪文件。
+运行 `cd ~/DevProjects/YOLO_Trainer && git diff --check && git status --short`，确认无空白错误，且不触碰用户已有的无关未跟踪文件。

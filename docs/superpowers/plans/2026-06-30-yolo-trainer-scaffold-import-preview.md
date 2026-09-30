@@ -1294,7 +1294,7 @@ import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { DatasetScanSummary, HealthResponse, getHealth, scanDataset } from "./api";
 
-const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
+const defaultDatasetPath = "~/DevProjects/YOLO_Trainer/image_dataset.zip";
 
 export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -1776,7 +1776,7 @@ Dataset scan check:
 ```bash
 curl -X POST http://127.0.0.1:8000/api/datasets/scan \
   -H "Content-Type: application/json" \
-  -d '{"source_path":"/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip"}'
+  -d '{"source_path":"~/DevProjects/YOLO_Trainer/image_dataset.zip"}'
 ```
 
 Expected scan facts for the provided archive:
@@ -1797,7 +1797,7 @@ npm run dev
 Open `http://127.0.0.1:5173`, keep the backend running, and scan:
 
 ```text
-/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip
+~/DevProjects/YOLO_Trainer/image_dataset.zip
 ```
 ```
 
@@ -1829,7 +1829,7 @@ In another terminal:
 ```bash
 curl -s -X POST http://127.0.0.1:8000/api/datasets/scan \
   -H "Content-Type: application/json" \
-  -d '{"source_path":"/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip"}'
+  -d '{"source_path":"~/DevProjects/YOLO_Trainer/image_dataset.zip"}'
 ```
 
 Expected response includes:

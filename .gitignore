@@ -15,3 +15,13 @@ workspace/
 *.onnx
 *.engine
 runs/
+
+# Local datasets, weights, screenshots, and generated reports
+image_dataset/
+image_dataset.zip
+*.zip
+output/
+artifacts/
+system_description/
+.playwright-cli/
+*.egg-info/

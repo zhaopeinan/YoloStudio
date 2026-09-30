@@ -3,7 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -18,6 +29,16 @@ class TimestampMixin:
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class User(TimestampMixin, Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class Project(TimestampMixin, Base):
@@ -183,6 +204,9 @@ class PredictionJob(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("training_runs.id"), nullable=False, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("dataset_versions.id"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
     image_scope: Mapped[str] = mapped_column(String(40), nullable=False, default="all")
     confidence_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
@@ -235,3 +259,63 @@ class ExportArtifact(TimestampMixin, Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     run: Mapped["TrainingRun"] = relationship(back_populates="exports")
+
+
+class PreviewVideo(TimestampMixin, Base):
+    __tablename__ = "preview_videos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    original_filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    stored_path: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    jobs: Mapped[list["PreviewJob"]] = relationship(back_populates="video")
+
+
+class ModelWeight(TimestampMixin, Base):
+    __tablename__ = "model_weights"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    original_filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    stored_path: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class DatasetSource(TimestampMixin, Base):
+    """Uploaded dataset zip archives available for scan/import."""
+
+    __tablename__ = "dataset_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    original_filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    stored_path: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class PreviewJob(TimestampMixin, Base):
+    __tablename__ = "preview_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    dataset_id: Mapped[int | None] = mapped_column(ForeignKey("datasets.id"), index=True)
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("training_runs.id"), index=True)
+    video_id: Mapped[int | None] = mapped_column(ForeignKey("preview_videos.id"), index=True)
+    model_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False, default="video")
+    source_filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    result_path: Mapped[str | None] = mapped_column(Text)
+    frame_directory: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    confidence_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
+    frame_step: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    fps: Mapped[float | None] = mapped_column(Float)
+    total_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_frames: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    video: Mapped[PreviewVideo | None] = relationship(back_populates="jobs")

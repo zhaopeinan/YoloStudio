@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="YOLO_TRAINER_", arbitrary_types_allowed=True)
 
     workspace_root: Path = Field(default=REPO_ROOT / "workspace")
+    jwt_secret: str = Field(default="yolo-trainer-dev-secret-change-me")
+    jwt_algorithm: str = Field(default="HS256")
+    access_token_expire_minutes: int = Field(default=60 * 24 * 7)
+    default_admin_username: str = Field(default="admin")
+    default_admin_password: str = Field(default="admin123")
 
     @property
     def database_path(self) -> Path:

@@ -174,6 +174,8 @@ def validate_training_dataset(version: DatasetVersion, version_root: Path) -> No
 
 
 def create_queued_run(db, settings: Settings, version: DatasetVersion, request) -> TrainingRun:
+    from app.training.weights import resolve_training_model
+
     active = db.scalar(
         select(TrainingRun)
         .where(TrainingRun.project_id == version.project_id, TrainingRun.status.in_(ACTIVE_STATUSES))
@@ -181,6 +183,9 @@ def create_queued_run(db, settings: Settings, version: DatasetVersion, request) 
     )
     if active is not None:
         raise ValueError("Another training run is already active")
+
+    # Validate the selected model can be resolved before queuing.
+    resolve_training_model(db, settings, version.project_id, request.model)
 
     run = TrainingRun(
         project_id=version.project_id,
@@ -364,6 +369,16 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
         config = dict(run.config)
         artifact_root = Path(run.artifact_path)
         device = run.device
+        project_id = run.project_id
+        try:
+            from app.training.weights import resolve_training_model
+
+            resolved_model = resolve_training_model(
+                db, settings or get_settings(), project_id, str(config.get("model") or "")
+            )
+        except ValueError as exc:
+            fail_training_run(run_id, str(exc), bind=bind)
+            return
 
     try:
         training_data_yaml = data_yaml
@@ -374,8 +389,12 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
                 f"gridmask dataset prepared: {training_data_yaml.parent}",
                 bind=bind,
             )
-        model = YOLO(config["model"])
-        append_run_log(run_id, "ultralytics training started", bind=bind)
+        model = YOLO(resolved_model)
+        append_run_log(
+            run_id,
+            f"ultralytics training started (model={config.get('model')} -> {resolved_model})",
+            bind=bind,
+        )
         results = model.train(
             data=str(training_data_yaml),
             epochs=config["epochs"],

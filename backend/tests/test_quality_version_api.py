@@ -319,6 +319,7 @@ def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
         version = version_response.json()
         assert version["name"] == "smoke-export"
         assert version["frozen"] is True
+        assert version["image_scope"] == "annotated"
         assert version["class_mapping"] == {str(class_payload["id"]): 0}
         assert version["split_counts"] == {"train": 1, "val": 1, "test": 0}
 
@@ -341,6 +342,7 @@ def test_create_dataset_version_exports_yolo_artifacts(tmp_path: Path):
         assert manifest["dataset_id"] == dataset["dataset_id"]
         assert manifest["project_id"] == dataset["project_id"]
         assert manifest["class_mapping"] == {str(class_payload["id"]): 0}
+        assert manifest["image_scope"] == "annotated"
         assert len(manifest["images"]) == 2
         assert {item["split"] for item in manifest["images"]} == {"train", "val"}
         assert all(item["annotations"] for item in manifest["images"])
@@ -411,6 +413,19 @@ def test_create_dataset_version_requires_train_and_validation_images(tmp_path: P
             / "versions"
         )
         assert not versions_root.exists()
+
+        all_scope_response = client.post(
+            f"/api/datasets/{dataset['dataset_id']}/versions",
+            json={"name": "all-images", "image_scope": "all"},
+        )
+
+        assert all_scope_response.status_code == 200
+        assert all_scope_response.json()["image_scope"] == "all"
+        all_scope_manifest = json.loads(
+            Path(all_scope_response.json()["artifact_path"], "manifest.json").read_text()
+        )
+        assert len(all_scope_manifest["images"]) == 2
+        assert sum(bool(item["annotations"]) for item in all_scope_manifest["images"]) == 1
 
 
 def test_create_dataset_version_reports_zero_selected_annotated_images(tmp_path: Path):

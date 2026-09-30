@@ -4,6 +4,7 @@ import {
   Box,
   CheckCircle2,
   Database,
+  Download,
   Edit3,
   FolderSearch,
   HardDrive,
@@ -21,8 +22,10 @@ import {
   Tags,
   Trash2,
   Upload,
+  LogOut,
+  Users,
 } from "lucide-react";
-import type { CSSProperties, FormEvent, PointerEvent, ReactNode } from "react";
+import type { CSSProperties, ChangeEvent, FormEvent, PointerEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Annotation,
@@ -51,11 +54,16 @@ import type {
   PredictionFilters,
   PredictionImageReview,
   PredictionJob,
+  PredictionReviewAnnotation,
   QualityTagApplySummary,
   RunExperimentSummary,
   TrainingAugmentationConfig,
+  TrainingModelOption,
   TrainingRunArtifactSummary,
   TrainingRun,
+  ModelWeight,
+  DatasetSourceOption,
+  DetectedClassSuggestion,
 } from "./api";
 import {
   applyQualityTags,
@@ -63,35 +71,47 @@ import {
   createClass,
   createDatasetVersion,
   deleteClass,
+  deleteDatasetSource,
+  deleteModelWeight,
   createPredictionJob,
-  createPredictionThresholdScan,
   createRunExport,
   createTrainingRun,
   getAnnotations,
   getDatasetCoverage,
   getExportCapabilities,
+  getExportDownloadUrl,
   getHealth,
   getPredictionJobLogs,
   getPredictionImageReview,
   getProjectTrainingSummary,
   getQuality,
+  getRunBestWeightsUrl,
   getTrainingRunArtifacts,
   getTrainingRunLogs,
   getTrainingRunSummary,
   importDataset,
   listClasses,
+  listDatasetSources,
   listDatasetVersions,
+  listProjectVersions,
+  listDetectedClasses,
   listImages,
+  listModelWeights,
   listPredictionJobs,
   listPredictions,
   listProjects,
   listQualityIssues,
   listRunExports,
+  listTrainingModels,
   listTrainingRuns,
   replaceAnnotations,
   refreshImageDimensions,
   scanDataset,
+  setUnauthorizedHandler,
   updateClass,
+  uploadDatasetSource,
+  uploadModelWeight,
+  authedMediaUrl,
 } from "./api";
 import {
   formatEdgeTag,
@@ -103,7 +123,13 @@ import { WorkflowShell } from "./WorkflowShell";
 import { AnnotationCanvasToolbar } from "./AnnotationCanvasToolbar";
 import { AnnotationFilterDrawer } from "./AnnotationFilterDrawer";
 import { AnnotationToolbar } from "./AnnotationToolbar";
+import { suggestClassFromFilename, type FilenameSuggestion } from "./annotation-suggestions";
 import { StorageManagementView } from "./StorageManagementView";
+import { PreviewView } from "./PreviewView";
+import { TrainingLiveMonitor } from "./TrainingLiveMonitor";
+import { LoginView } from "./LoginView";
+import { UserManagementView } from "./UserManagementView";
+import { roleLabel, useAuth } from "./auth";
 import {
   fitViewport,
   constrainPan,
@@ -121,18 +147,20 @@ import {
 } from "./annotation-workbench";
 import { buildWorkflowSteps, parseWorkflowHash, workflowStepOrder, type WorkflowStep } from "./workflow";
 
-const defaultDatasetPath = "/Users/peinan/DevProjects/YOLO_Trainer/image_dataset.zip";
+function resolveDefaultDatasetPath(): string {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host && host !== "localhost" && host !== "127.0.0.1") {
+      return "/opt/YOLO_Trainer/image_dataset.zip";
+    }
+  }
+  return "/tmp/image_dataset.zip";
+}
+
+const defaultDatasetPath = resolveDefaultDatasetPath();
 const defaultProjectName = "YOLO 目标检测项目";
 const defaultDatasetName = "image_dataset";
 const defaultClassColor = "#ef4444";
-const fixedClassPresets = [
-  { name: "fire_truck", color: "#e45756" },
-  { name: "person_white", color: "#2f80ed" },
-  { name: "prius_hybrid", color: "#27ae60" },
-  { name: "car_lexus", color: "#f2994a" },
-  { name: "prius_hybrid_camo", color: "#9b51e0" },
-  { name: "suv_camo", color: "#1f6f78" },
-] as const;
 const compactAnnotationViewportQuery = "(max-width: 820px)";
 
 function usesCompactAnnotationViewport(): boolean {
@@ -195,11 +223,6 @@ function defaultPredictionFilters() {
     class_id: "",
     confidence_min: "",
     confidence_max: "",
-    platform: "",
-    altitude_min: "",
-    altitude_max: "",
-    timestamp_min: "",
-    timestamp_max: "",
   };
 }
 
@@ -259,15 +282,41 @@ type CanvasPanState = {
 };
 
 export default function App() {
+  const { user, loading: authLoading, isAdmin, logout } = useAuth();
+  const [showUserManagement, setShowUserManagement] = useState(false);
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("dataset");
   const [datasetPageTab, setDatasetPageTab] = useState<"import" | "management">("import");
   const currentStepRef = useRef<WorkflowStep>("dataset");
   const workflowStepsRef = useRef<ReturnType<typeof buildWorkflowSteps>>([]);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      logout();
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [logout]);
+
+  useEffect(() => {
+    if (!isAdmin && showUserManagement) {
+      setShowUserManagement(false);
+    }
+    if (!isAdmin && (datasetPageTab === "management" || currentStep === "training" || currentStep === "preview" || currentStep === "evaluation")) {
+      setDatasetPageTab("import");
+      if (currentStep === "training" || currentStep === "preview" || currentStep === "evaluation") {
+        setCurrentStep("dataset");
+        window.history.replaceState(null, "", "#dataset");
+      }
+    }
+  }, [isAdmin, showUserManagement, datasetPageTab, currentStep]);
   const skipNextStorageWorkspaceRefreshRef = useRef(false);
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [datasetPath, setDatasetPath] = useState(defaultDatasetPath);
+  const [datasetSourceOptions, setDatasetSourceOptions] = useState<DatasetSourceOption[]>([]);
+  const [selectedDatasetSourceRef, setSelectedDatasetSourceRef] = useState("");
+  const [isUploadingDatasetSource, setIsUploadingDatasetSource] = useState(false);
+  const [deletingDatasetSourceId, setDeletingDatasetSourceId] = useState<number | null>(null);
   const [projectName, setProjectName] = useState(defaultProjectName);
   const [datasetName, setDatasetName] = useState(defaultDatasetName);
   const [scan, setScan] = useState<DatasetScanSummary | null>(null);
@@ -277,17 +326,18 @@ export default function App() {
   const [selectedSavedDataset, setSelectedSavedDataset] = useState("");
   const [savedDatasetError, setSavedDatasetError] = useState<string | null>(null);
   const [isLoadingSavedDataset, setIsLoadingSavedDataset] = useState(false);
+  const [openingStorageDatasetId, setOpeningStorageDatasetId] = useState<number | null>(null);
   const [importedDataset, setImportedDataset] = useState<DatasetImportResponse | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [classes, setClasses] = useState<ProjectClass[]>([]);
-  const [selectedFixedClassNames, setSelectedFixedClassNames] = useState<string[]>(
-    fixedClassPresets.map((preset) => preset.name),
-  );
+  const [detectedClasses, setDetectedClasses] = useState<DetectedClassSuggestion[]>([]);
+  const [selectedDetectedClassNames, setSelectedDetectedClassNames] = useState<string[]>([]);
+  const [isLoadingDetectedClasses, setIsLoadingDetectedClasses] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
   const [versionClassIds, setVersionClassIds] = useState<number[]>([]);
   const [classError, setClassError] = useState<string | null>(null);
-  const [isEnablingFixedClasses, setIsEnablingFixedClasses] = useState(false);
+  const [isEnablingDetectedClasses, setIsEnablingDetectedClasses] = useState(false);
   const [classDeleteTarget, setClassDeleteTarget] = useState<ProjectClass | null>(null);
   const [isDeletingClass, setIsDeletingClass] = useState(false);
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
@@ -305,6 +355,7 @@ export default function App() {
   const [isImageFilterDrawerOpen, setIsImageFilterDrawerOpen] = useState(false);
   const [imageFilterError, setImageFilterError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<DraftBox[]>([]);
+  const [annotationStatus, setAnnotationStatus] = useState<DatasetImage["annotation_status"]>("unreviewed");
   const [annotationsDirty, setAnnotationsDirty] = useState(false);
   const annotationsDirtyRef = useRef(false);
   const [pendingWorkflowStep, setPendingWorkflowStep] = useState<WorkflowStep | null>(null);
@@ -344,7 +395,13 @@ export default function App() {
     useState<DatasetDimensionRefreshSummary | null>(null);
   const [isRefreshingDimensions, setIsRefreshingDimensions] = useState(false);
   const [versions, setVersions] = useState<DatasetVersion[]>([]);
+  const [projectVersions, setProjectVersions] = useState<DatasetVersion[]>([]);
+  const [selectedTrainingVersionId, setSelectedTrainingVersionId] = useState<number | null>(null);
+  const [selectedEvalRunId, setSelectedEvalRunId] = useState<number | null>(null);
+  const [selectedEvalVersionId, setSelectedEvalVersionId] = useState<number | null>(null);
   const [versionName, setVersionName] = useState("");
+  const [versionImageScope, setVersionImageScope] = useState<"annotated" | "all">("annotated");
+  const [versionDatasetIds, setVersionDatasetIds] = useState<number[]>([]);
   const [versionError, setVersionError] = useState<string | null>(null);
   const [isCreatingVersion, setIsCreatingVersion] = useState(false);
   const [runs, setRuns] = useState<TrainingRun[]>([]);
@@ -358,7 +415,12 @@ export default function App() {
   const [trainingNotice, setTrainingNotice] = useState<string | null>(null);
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<number | null>(null);
-  const [trainingModel, setTrainingModel] = useState("yolov8n.pt");
+  const [liveMonitorRunId, setLiveMonitorRunId] = useState<number | null>(null);
+  const [trainingModel, setTrainingModel] = useState("base:yolov8n.pt");
+  const [trainingModelOptions, setTrainingModelOptions] = useState<TrainingModelOption[]>([]);
+  const [modelWeights, setModelWeights] = useState<ModelWeight[]>([]);
+  const [isUploadingWeight, setIsUploadingWeight] = useState(false);
+  const [deletingWeightId, setDeletingWeightId] = useState<number | null>(null);
   const [trainingEpochs, setTrainingEpochs] = useState(50);
   const [trainingImageSize, setTrainingImageSize] = useState(640);
   const [trainingBatchSize, setTrainingBatchSize] = useState(8);
@@ -372,15 +434,13 @@ export default function App() {
   const [predictionLogs, setPredictionLogs] = useState<Record<number, string>>({});
   const [predictionError, setPredictionError] = useState<string | null>(null);
   const [isCreatingPrediction, setIsCreatingPrediction] = useState(false);
-  const [isCreatingThresholdScan, setIsCreatingThresholdScan] = useState(false);
   const [predictionScope, setPredictionScope] = useState("all");
   const [predictionConfidence, setPredictionConfidence] = useState(0.25);
-  const [useImageFiltersForPrediction, setUseImageFiltersForPrediction] = useState(false);
-  const [predictionThresholds, setPredictionThresholds] = useState(
-    "0.15, 0.25, 0.35, 0.5, 0.65",
-  );
   const [predictionFilters, setPredictionFilters] = useState(defaultPredictionFilters);
+  const [showEvalAdvanced, setShowEvalAdvanced] = useState(false);
   const [activeReview, setActiveReview] = useState<PredictionImageReview | null>(null);
+  const [evalReview, setEvalReview] = useState<PredictionImageReview | null>(null);
+  const [evalReviewFocusId, setEvalReviewFocusId] = useState<number | null>(null);
   const [showGroundTruthLayer, setShowGroundTruthLayer] = useState(true);
   const [showPredictionLayer, setShowPredictionLayer] = useState(true);
   const [exportCapabilities, setExportCapabilities] = useState<ExportCapabilities | null>(null);
@@ -389,11 +449,17 @@ export default function App() {
   const [isCreatingExport, setIsCreatingExport] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!user) {
+      return;
+    }
     getHealth()
       .then(setHealth)
       .catch((error: Error) => setHealthError(error.message));
     void refreshProjects();
-  }, []);
+    if (isAdmin) {
+      void refreshDatasetSources();
+    }
+  }, [user?.id, isAdmin]);
 
   const totalGroupImages = useMemo(
     () => scan?.groups.reduce((total, group) => total + group.image_count, 0) ?? 0,
@@ -410,7 +476,19 @@ export default function App() {
     [classes, selectedClassId],
   );
 
+  const filenameSuggestion = useMemo<FilenameSuggestion>(
+    () => suggestClassFromFilename(selectedImage?.relative_path ?? "", classes),
+    [classes, selectedImage?.relative_path],
+  );
+
   const annotationReady = Boolean(importedDataset && classes.length > 0 && selectedImage && selectedClass);
+  const projectDatasets = useMemo(() => {
+    if (!importedDataset) {
+      return [];
+    }
+    const project = projects.find((item) => item.id === importedDataset.project_id);
+    return project?.datasets ?? [];
+  }, [importedDataset, projects]);
   const advancedImageFilters = useMemo<AdvancedImageFilters>(
     () => ({
       platform: imageFilters.platform,
@@ -434,6 +512,20 @@ export default function App() {
     return new Map(classes.map((classItem) => [classItem.id, classItem]));
   }, [classes]);
 
+  const evalReviewIndex = useMemo(() => {
+    if (evalReviewFocusId == null) {
+      return -1;
+    }
+    return predictions.findIndex((prediction) => prediction.id === evalReviewFocusId);
+  }, [evalReviewFocusId, predictions]);
+
+  const evalFocusedPrediction = useMemo(() => {
+    if (evalReviewIndex < 0) {
+      return null;
+    }
+    return predictions[evalReviewIndex] ?? null;
+  }, [evalReviewIndex, predictions]);
+
   const selectedAnnotation = useMemo(
     () => annotations.find((annotation) => annotation.local_id === selectedAnnotationId) ?? null,
     [annotations, selectedAnnotationId],
@@ -447,8 +539,18 @@ export default function App() {
   }, [selectedAnnotationId, selectedImageId]);
 
   useEffect(() => {
+    if (filenameSuggestion.selected) {
+      setSelectedClassId(filenameSuggestion.selected.id);
+    }
+  }, [selectedImageId, filenameSuggestion.selected?.id]);
+
+  useEffect(() => {
     const width = Number(selectedImage?.width);
     const height = Number(selectedImage?.height);
+    setAnnotationStatus(
+      selectedImage?.annotation_status
+        ?? (selectedImage?.annotation_count ? "annotated" : "unreviewed"),
+    );
     setAnnotationImageSize({
       width: Number.isFinite(width) && width > 0 ? width : 0,
       height: Number.isFinite(height) && height > 0 ? height : 0,
@@ -585,10 +687,19 @@ export default function App() {
     () => predictionJobs.filter((job) => isActivePredictionJob(job.status)).map((job) => job.id),
     [predictionJobs],
   );
-  const latestRunId = runs[0]?.id ?? null;
-  const latestRun = runs[0] ?? null;
+  const selectedEvalRun = useMemo(
+    () => runs.find((run) => run.id === selectedEvalRunId) ?? null,
+    [runs, selectedEvalRunId],
+  );
+  const completedEvalRuns = useMemo(
+    () => runs.filter((run) => run.status === "completed"),
+    [runs],
+  );
   const imagePageStart = imagePage.total === 0 ? 0 : imagePage.offset + 1;
   const imagePageEnd = Math.min(imagePage.offset + images.length, imagePage.total);
+  const versionImageCount = versionImageScope === "annotated"
+    ? quality?.annotated_image_count ?? 0
+    : quality?.image_count ?? 0;
   const canPageImagesPrevious = imagePage.offset > 0;
   const canPageImagesNext = imagePage.offset + imagePage.limit < imagePage.total;
   const hasApplicableQualityIssues = qualityIssues.some(
@@ -600,33 +711,46 @@ export default function App() {
     qualityAutoTagIssueTypes.has(qualityIssueType) &&
     hasApplicableQualityIssues &&
     !isApplyingQualityTags;
-  const activePredictionImageFilters = useMemo(
-    () =>
-      useImageFiltersForPrediction
-        ? activeImageFilterRequest(toImageFilterRequest(imageFilters))
-        : undefined,
-    [imageFilters, useImageFiltersForPrediction],
-  );
-  const predictionImageFilterSummary = useMemo(
-    () =>
-      activePredictionImageFilters
-        ? formatImageFilterSummary(activePredictionImageFilters, classById)
-        : "所选范围内的全部图像",
-    [activePredictionImageFilters, classById],
-  );
   const workflowSteps = useMemo(
     () =>
-      buildWorkflowSteps({
-        hasDataset: Boolean(importedDataset),
-        classCount: classes.length,
-        annotatedImageCount: quality?.annotated_image_count ?? 0,
-        versionCount: versions.length,
-        runCount: runs.length,
-        predictionJobCount: predictionJobs.length,
-        exportCount: exports.length,
-      }),
-    [classes.length, exports.length, importedDataset, predictionJobs.length, quality, runs.length, versions.length],
+      buildWorkflowSteps(
+        {
+          hasDataset: Boolean(importedDataset),
+          classCount: classes.length,
+          annotatedImageCount: quality?.annotated_image_count ?? 0,
+          versionCount: versions.length,
+          runCount: runs.length,
+          predictionJobCount: predictionJobs.length,
+          exportCount: exports.length,
+        },
+        { isAdmin },
+      ),
+    [
+      classes.length,
+      exports.length,
+      importedDataset,
+      isAdmin,
+      predictionJobs.length,
+      quality,
+      runs.length,
+      versions.length,
+    ],
   );
+  const previewDatasets = useMemo(() => {
+    if (!importedDataset) return [];
+    const project = projects.find((candidate) => candidate.id === importedDataset.project_id);
+    if (project) return project.datasets;
+    return [{
+      id: importedDataset.dataset_id,
+      project_id: importedDataset.project_id,
+      name: importedDataset.dataset_name,
+      source_type: "imported",
+      import_status: "imported",
+      image_count: importedDataset.image_count,
+      annotated_image_count: 0,
+      annotation_count: 0,
+    }];
+  }, [importedDataset, projects]);
 
   currentStepRef.current = currentStep;
   workflowStepsRef.current = workflowSteps;
@@ -652,11 +776,13 @@ export default function App() {
     isSpacePressedRef.current = false;
     setImportedDataset(null);
     setClasses([]);
-    setSelectedFixedClassNames(fixedClassPresets.map((preset) => preset.name));
+    setDetectedClasses([]);
+    setSelectedDetectedClassNames([]);
+    setIsLoadingDetectedClasses(false);
     setSelectedClassId(null);
     setVersionClassIds([]);
     setClassError(null);
-    setIsEnablingFixedClasses(false);
+    setIsEnablingDetectedClasses(false);
     setClassDeleteTarget(null);
     setIsDeletingClass(false);
     setEditingClassId(null);
@@ -674,6 +800,7 @@ export default function App() {
     setIsImageFilterDrawerOpen(false);
     setImageFilterError(null);
     setAnnotations([]);
+    setAnnotationStatus("unreviewed");
     setSelectedAnnotationId(null);
     clearAnnotationsDirty();
     setPendingWorkflowStep(null);
@@ -700,7 +827,10 @@ export default function App() {
     setDimensionRefresh(null);
     setIsRefreshingDimensions(false);
     setVersions([]);
+    setSelectedTrainingVersionId(null);
     setVersionName("");
+    setVersionImageScope("annotated");
+    setVersionDatasetIds([]);
     setVersionError(null);
     setIsCreatingVersion(false);
     setRuns([]);
@@ -724,15 +854,18 @@ export default function App() {
     setThresholdScan(false);
     setPredictionJobs([]);
     setPredictions([]);
+    setEvalReview(null);
+    setEvalReviewFocusId(null);
     setPredictionLogs({});
     setPredictionError(null);
     setIsCreatingPrediction(false);
-    setIsCreatingThresholdScan(false);
     setPredictionScope("all");
     setPredictionConfidence(0.25);
-    setUseImageFiltersForPrediction(false);
-    setPredictionThresholds("0.15, 0.25, 0.35, 0.5, 0.65");
     setPredictionFilters(defaultPredictionFilters());
+    setShowEvalAdvanced(false);
+    setSelectedEvalRunId(null);
+    setSelectedEvalVersionId(null);
+    setProjectVersions([]);
     setShowGroundTruthLayer(true);
     setShowPredictionLayer(true);
     setExportCapabilities(null);
@@ -785,6 +918,10 @@ export default function App() {
     setAnnotationNotice(null);
     setActiveReview(null);
     setSelectedImageId(imageId);
+    const nextImage = images.find((image) => image.id === imageId);
+    setAnnotationStatus(
+      nextImage?.annotation_status ?? (nextImage?.annotation_count ? "annotated" : "unreviewed"),
+    );
   }
 
   function requestAnnotationImage(imageId: number) {
@@ -825,6 +962,7 @@ export default function App() {
         const response = await getAnnotations(selectedImageId);
         const nextAnnotations = response.items.map(toDraftBox);
         setAnnotations(nextAnnotations);
+        setAnnotationStatus(response.annotation_status ?? (nextAnnotations.length ? "annotated" : "unreviewed"));
         setSelectedAnnotationId(nextAnnotations[0]?.local_id ?? null);
         clearAnnotationsDirty();
       } catch (error) {
@@ -901,32 +1039,29 @@ export default function App() {
   }, [activeRunIds, hasActiveRun, importedDataset]);
 
   useEffect(() => {
-    if (!latestRunId || !hasActivePredictionJob) {
+    if (!selectedEvalRunId || !hasActivePredictionJob) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      void refreshPredictionJobs(latestRunId);
+      void refreshPredictionJobs(selectedEvalRunId);
       activePredictionJobIds.forEach((jobId) => {
         void loadPredictionLogs(jobId);
       });
     }, monitorRefreshMs);
 
     return () => window.clearInterval(interval);
-  }, [activePredictionJobIds, hasActivePredictionJob, latestRunId]);
+  }, [activePredictionJobIds, hasActivePredictionJob, selectedEvalRunId]);
 
   useEffect(() => {
-    if (!latestRunId) {
-      setExportCapabilities(null);
-      setExports([]);
-      setRunSummary(null);
-      setProjectExperimentSummary(null);
+    if (!selectedEvalRunId) {
       return;
     }
 
-    void refreshExports(latestRunId);
-    void refreshRunSummary(latestRunId);
-  }, [latestRunId]);
+    void refreshExports(selectedEvalRunId);
+    void refreshRunSummary(selectedEvalRunId);
+    void refreshPredictionJobs(selectedEvalRunId);
+  }, [selectedEvalRunId]);
 
   async function handleScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -939,6 +1074,77 @@ export default function App() {
       setScanError(error instanceof Error ? error.message : "数据集扫描失败");
     } finally {
       setIsScanning(false);
+    }
+  }
+
+  function applyDatasetSourceOption(option: DatasetSourceOption | undefined) {
+    if (!option) {
+      setSelectedDatasetSourceRef("");
+      return;
+    }
+    setSelectedDatasetSourceRef(option.source_ref);
+    setDatasetPath(option.source_path);
+    const stem = option.original_filename.replace(/\.zip$/i, "");
+    if (stem) {
+      setDatasetName(stem);
+    }
+  }
+
+  async function refreshDatasetSources(preferredRef?: string) {
+    try {
+      const response = await listDatasetSources();
+      setDatasetSourceOptions(response.items);
+      const preferred =
+        (preferredRef
+          ? response.items.find((item) => item.source_ref === preferredRef)
+          : undefined) ??
+        response.items.find((item) => item.source_path === datasetPath) ??
+        response.items.find((item) => item.source_ref === selectedDatasetSourceRef) ??
+        response.items[0];
+      applyDatasetSourceOption(preferred);
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "数据集来源列表加载失败");
+    }
+  }
+
+  async function handleUploadDatasetSource(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    setIsUploadingDatasetSource(true);
+    setScanError(null);
+    setImportError(null);
+    try {
+      const form = new FormData();
+      form.append("archive", file);
+      const saved = await uploadDatasetSource(form);
+      await refreshDatasetSources(`upload:${saved.id}`);
+      setScan(null);
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "数据集上传失败");
+    } finally {
+      setIsUploadingDatasetSource(false);
+    }
+  }
+
+  async function handleDeleteDatasetSource(option: DatasetSourceOption) {
+    if (option.source_id === null) {
+      return;
+    }
+    if (!window.confirm(`确定删除已上传压缩包「${option.original_filename}」？`)) {
+      return;
+    }
+    setDeletingDatasetSourceId(option.source_id);
+    setScanError(null);
+    try {
+      await deleteDatasetSource(option.source_id);
+      await refreshDatasetSources();
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "数据集删除失败");
+    } finally {
+      setDeletingDatasetSourceId(null);
     }
   }
 
@@ -993,7 +1199,7 @@ export default function App() {
     }
   }
 
-  async function loadDatasetWorkspace(dataset: DatasetImportResponse) {
+  async function loadDatasetWorkspace(dataset: DatasetImportResponse): Promise<{ classCount: number }> {
     setImportedDataset(dataset);
     setProjectName(dataset.project_name);
     setDatasetName(dataset.dataset_name);
@@ -1016,9 +1222,10 @@ export default function App() {
     const runResponse = await listTrainingRuns(dataset.project_id);
 
     setClasses(classResponse.items);
-    setSelectedFixedClassNames(fixedClassPresets.map((preset) => preset.name));
     setSelectedClassId(classResponse.items[0]?.id ?? null);
     setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
+    setVersionDatasetIds([dataset.dataset_id]);
+    await refreshDetectedClasses(dataset.dataset_id);
     setImages(imageResponse.items);
     setImagePage({
       limit: imageResponse.limit,
@@ -1036,22 +1243,76 @@ export default function App() {
     setQualityIssues(qualityIssueResponse.items);
     setDimensionRefresh(null);
     setVersions(versionResponse.items);
+    setSelectedTrainingVersionId((current) => {
+      if (current && versionResponse.items.some((item) => item.id === current)) {
+        return current;
+      }
+      return versionResponse.items[0]?.id ?? null;
+    });
+    setVersionImageScope("annotated");
     setRuns(runResponse.items);
     setRunLogs({});
     await refreshRunArtifacts(runResponse.items.map((run) => run.id));
+    await refreshTrainingModels(dataset.project_id);
     setPredictionJobs([]);
     setPredictions([]);
+    setEvalReview(null);
+    setEvalReviewFocusId(null);
     setPredictionLogs({});
     setExportCapabilities(null);
     setExports([]);
-    if (runResponse.items[0]) {
-      await refreshRunSummary(runResponse.items[0].id);
+
+    let projectVersionItems: DatasetVersion[] = versionResponse.items;
+    try {
+      const projectVersionResponse = await listProjectVersions(dataset.project_id);
+      projectVersionItems = projectVersionResponse.items;
+      setProjectVersions(projectVersionItems);
+    } catch {
+      setProjectVersions(versionResponse.items);
+    }
+
+    const defaultEvalRun =
+      runResponse.items.find((run) => run.status === "completed") ?? runResponse.items[0] ?? null;
+    setSelectedEvalRunId(defaultEvalRun?.id ?? null);
+    setSelectedEvalVersionId(defaultEvalRun?.version_id ?? projectVersionItems[0]?.id ?? null);
+
+    if (defaultEvalRun) {
+      await refreshRunSummary(defaultEvalRun.id);
       await refreshProjectTrainingSummary(dataset.project_id);
-      await refreshPredictionJobs(runResponse.items[0].id);
-      await refreshExports(runResponse.items[0].id);
+      await refreshPredictionJobs(defaultEvalRun.id);
+      await refreshExports(defaultEvalRun.id);
     } else {
       setRunSummary(null);
       setProjectExperimentSummary(null);
+    }
+    return { classCount: classResponse.items.length };
+  }
+
+  async function handleOpenDatasetFromStorage(dataset: {
+    project_id: number;
+    project_name: string;
+    dataset_id: number;
+    dataset_name: string;
+    image_count: number;
+  }) {
+    setOpeningStorageDatasetId(dataset.dataset_id);
+    setSavedDatasetError(null);
+    try {
+      const { classCount } = await loadDatasetWorkspace({
+        project_id: dataset.project_id,
+        dataset_id: dataset.dataset_id,
+        project_name: dataset.project_name,
+        dataset_name: dataset.dataset_name,
+        image_count: dataset.image_count,
+        groups: [],
+      });
+      setSelectedSavedDataset(`${dataset.project_id}:${dataset.dataset_id}`);
+      commitWorkflowStep(classCount > 0 ? "annotation" : "classes");
+    } catch (error) {
+      setSavedDatasetError(error instanceof Error ? error.message : "数据集加载失败");
+      setDatasetPageTab("import");
+    } finally {
+      setOpeningStorageDatasetId(null);
     }
   }
 
@@ -1099,6 +1360,12 @@ export default function App() {
       setCoverage(coverageResponse);
       setQualityIssues(qualityIssueResponse.items);
       setVersions(versionResponse.items);
+      setSelectedTrainingVersionId((current) => {
+        if (current && versionResponse.items.some((item) => item.id === current)) {
+          return current;
+        }
+        return versionResponse.items[0]?.id ?? null;
+      });
       if (importedDataset) {
         const runResponse = await listTrainingRuns(importedDataset.project_id);
         setRuns(runResponse.items);
@@ -1133,6 +1400,7 @@ export default function App() {
       const response = await getAnnotations(imageId);
       const nextAnnotations = response.items.map(toDraftBox);
       setAnnotations(nextAnnotations);
+      setAnnotationStatus(response.annotation_status ?? (nextAnnotations.length ? "annotated" : "unreviewed"));
       setSelectedAnnotationId(nextAnnotations[0]?.local_id ?? null);
       clearAnnotationsDirty();
     } catch (error) {
@@ -1283,7 +1551,7 @@ export default function App() {
   function buildTrainingRunRequest(versionId: number) {
     return {
       version_id: versionId,
-      model: trainingModel.trim() || "yolov8n.pt",
+      model: trainingModel.trim() || "base:yolov8n.pt",
       epochs: trainingEpochs,
       image_size: trainingImageSize,
       batch_size: trainingBatchSize,
@@ -1299,7 +1567,7 @@ export default function App() {
     const config = run.config;
     return {
       version_id: versionId,
-      model: stringConfig(config, "model", trainingModel.trim() || "yolov8n.pt"),
+      model: stringConfig(config, "model", trainingModel.trim() || "base:yolov8n.pt"),
       epochs: numberConfig(config, "epochs", trainingEpochs),
       image_size: numberConfig(config, "image_size", trainingImageSize),
       batch_size: numberConfig(config, "batch_size", trainingBatchSize),
@@ -1313,7 +1581,7 @@ export default function App() {
 
   function applyRunConfigToForm(run: TrainingRun) {
     const config = run.config;
-    setTrainingModel(stringConfig(config, "model", "yolov8n.pt"));
+    setTrainingModel(stringConfig(config, "model", "base:yolov8n.pt"));
     setTrainingEpochs(numberConfig(config, "epochs", 50));
     setTrainingImageSize(numberConfig(config, "image_size", 640));
     setTrainingBatchSize(numberConfig(config, "batch_size", 8));
@@ -1324,6 +1592,74 @@ export default function App() {
     setThresholdScan(booleanConfig(config, "threshold_scan", false));
     setTrainingNotice(`已加载训练任务 #${run.id} 的配置`);
     setTrainingError(null);
+  }
+
+  async function refreshTrainingModels(projectId = importedDataset?.project_id) {
+    if (!projectId) {
+      return;
+    }
+    try {
+      const [models, weights] = await Promise.all([
+        listTrainingModels(projectId),
+        listModelWeights(projectId),
+      ]);
+      setTrainingModelOptions(models.items);
+      setModelWeights(weights.items);
+      setTrainingModel((current) =>
+        models.items.some((item) => item.model_ref === current) || current.trim() !== ""
+          ? current
+          : models.items[0]?.model_ref ?? "base:yolov8n.pt",
+      );
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "模型列表加载失败");
+    }
+  }
+
+  async function handleUploadModelWeight(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !importedDataset) {
+      return;
+    }
+    setIsUploadingWeight(true);
+    setTrainingError(null);
+    setTrainingNotice(null);
+    try {
+      const form = new FormData();
+      form.append("project_id", String(importedDataset.project_id));
+      form.append("weight", file);
+      const saved = await uploadModelWeight(form);
+      await refreshTrainingModels(importedDataset.project_id);
+      setTrainingModel(`weight:${saved.id}`);
+      setTrainingNotice(`已上传权重：${saved.original_filename}`);
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "权重上传失败");
+    } finally {
+      setIsUploadingWeight(false);
+    }
+  }
+
+  async function handleDeleteModelWeight(weight: ModelWeight) {
+    if (!importedDataset) {
+      return;
+    }
+    if (!window.confirm(`确定删除上传权重「${weight.original_filename}」？`)) {
+      return;
+    }
+    setDeletingWeightId(weight.id);
+    setTrainingError(null);
+    try {
+      await deleteModelWeight(weight.id);
+      if (trainingModel === `weight:${weight.id}`) {
+        setTrainingModel("base:yolov8n.pt");
+      }
+      await refreshTrainingModels(importedDataset.project_id);
+      setTrainingNotice(`已删除权重：${weight.original_filename}`);
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "权重删除失败");
+    } finally {
+      setDeletingWeightId(null);
+    }
   }
 
   async function refreshTrainingRuns(projectId = importedDataset?.project_id) {
@@ -1377,10 +1713,12 @@ export default function App() {
     }
   }
 
-  async function refreshPredictionJobs(runId = runs[0]?.id) {
+  async function refreshPredictionJobs(runId = selectedEvalRunId ?? runs[0]?.id) {
     if (!runId) {
       setPredictionJobs([]);
       setPredictions([]);
+      setEvalReview(null);
+      setEvalReviewFocusId(null);
       return;
     }
 
@@ -1398,6 +1736,8 @@ export default function App() {
         await refreshRunSummary(runId);
       } else {
         setPredictions([]);
+        setEvalReview(null);
+        setEvalReviewFocusId(null);
         await refreshRunSummary(runId);
       }
     } catch (error) {
@@ -1405,7 +1745,7 @@ export default function App() {
     }
   }
 
-  async function refreshExports(runId = runs[0]?.id) {
+  async function refreshExports(runId = selectedEvalRunId ?? runs[0]?.id) {
     if (!runId) {
       setExportCapabilities(null);
       setExports([]);
@@ -1425,7 +1765,7 @@ export default function App() {
     }
   }
 
-  async function refreshRunSummary(runId = runs[0]?.id) {
+  async function refreshRunSummary(runId = selectedEvalRunId ?? runs[0]?.id) {
     if (!runId) {
       setRunSummary(null);
       return;
@@ -1445,6 +1785,8 @@ export default function App() {
       toPredictionFilterRequest(predictionFilters),
     );
     setPredictions(predictionsResponse.items);
+    setEvalReview(null);
+    setEvalReviewFocusId(null);
   }
 
   function handleApplyPredictionFilters() {
@@ -1467,25 +1809,46 @@ export default function App() {
 
     setPredictionError(null);
     listPredictions(job.id)
-      .then((response) => setPredictions(response.items))
+      .then((response) => {
+        setPredictions(response.items);
+        setEvalReview(null);
+        setEvalReviewFocusId(null);
+      })
       .catch((error: Error) => setPredictionError(error.message));
   }
 
-  async function handleEnableFixedClasses() {
+  async function refreshDetectedClasses(datasetId: number) {
+    setIsLoadingDetectedClasses(true);
+    setClassError(null);
+    try {
+      const response = await listDetectedClasses(datasetId);
+      setDetectedClasses(response.items);
+      // Default: all detected class names selected for confirmation.
+      setSelectedDetectedClassNames(response.items.map((item) => item.name));
+    } catch (error) {
+      setDetectedClasses([]);
+      setSelectedDetectedClassNames([]);
+      setClassError(error instanceof Error ? error.message : "类别扫描失败");
+    } finally {
+      setIsLoadingDetectedClasses(false);
+    }
+  }
+
+  async function handleEnableDetectedClasses() {
     if (
       !importedDataset
-      || selectedFixedClassNames.length === 0
-      || isEnablingFixedClasses
+      || selectedDetectedClassNames.length === 0
+      || isEnablingDetectedClasses
     ) {
       return;
     }
 
-    setIsEnablingFixedClasses(true);
+    setIsEnablingDetectedClasses(true);
     setClassError(null);
     const isFirstClass = classes.length === 0;
     const existingNames = new Set(classes.map((classItem) => classItem.name));
-    const classesToCreate = fixedClassPresets.filter(
-      (preset) => selectedFixedClassNames.includes(preset.name) && !existingNames.has(preset.name),
+    const classesToCreate = detectedClasses.filter(
+      (preset) => selectedDetectedClassNames.includes(preset.name) && !existingNames.has(preset.name),
     );
     const createdClasses: ProjectClass[] = [];
 
@@ -1509,7 +1872,7 @@ export default function App() {
     } catch (error) {
       setClassError(error instanceof Error ? error.message : "类别启用失败");
     } finally {
-      setIsEnablingFixedClasses(false);
+      setIsEnablingDetectedClasses(false);
     }
   }
 
@@ -1528,7 +1891,7 @@ export default function App() {
       setClasses(remainingClasses);
       setVersionClassIds((current) => current.filter((classId) => classId !== deletedClassId));
       setSelectedClassId((current) => (current === deletedClassId ? remainingClasses[0]?.id ?? null : current));
-      setSelectedFixedClassNames((current) => current.filter((name) => name !== classDeleteTarget.name));
+      setSelectedDetectedClassNames((current) => current.filter((name) => name !== classDeleteTarget.name));
       setClassDeleteTarget(null);
       void refreshTrainingPrep();
     } catch (error) {
@@ -1769,6 +2132,7 @@ export default function App() {
         edge_tags: [],
       },
     ]);
+    setAnnotationStatus("annotated");
     markAnnotationsDirty();
     setSelectedAnnotationId(localId);
   }
@@ -1954,6 +2318,9 @@ export default function App() {
   function deleteAnnotation(localId: string) {
     markAnnotationsDirty();
     setAnnotations((current) => current.filter((annotation) => annotation.local_id !== localId));
+    if (annotations.length === 1) {
+      setAnnotationStatus("unreviewed");
+    }
     if (selectedAnnotationId === localId) {
       setSelectedAnnotationId(null);
     }
@@ -1996,6 +2363,7 @@ export default function App() {
           local_id: `copy-${adjacent.id}-${Date.now()}-${index}`,
         }));
       setAnnotations(nextAnnotations);
+      setAnnotationStatus(nextAnnotations.length > 0 ? "annotated" : "unreviewed");
       markAnnotationsDirty();
       setSelectedAnnotationId(nextAnnotations[0]?.local_id ?? null);
     } catch (error) {
@@ -2013,6 +2381,7 @@ export default function App() {
 
       return [...current, predictionToDraftBox(prediction, classInfo)];
     });
+    setAnnotationStatus("annotated");
     setSelectedAnnotationId(localId);
     markAnnotationsDirty();
     setShowGroundTruthLayer(true);
@@ -2057,10 +2426,18 @@ export default function App() {
     );
 
     try {
-      const response = await replaceAnnotations(selectedImageId, annotations.map(toAnnotationWrite));
+      const requestedStatus = annotations.length > 0
+        ? "annotated"
+        : annotationStatus === "negative"
+          ? "negative"
+          : "unreviewed";
+      const response = requestedStatus === "negative"
+        ? await replaceAnnotations(selectedImageId, annotations.map(toAnnotationWrite), "negative")
+        : await replaceAnnotations(selectedImageId, annotations.map(toAnnotationWrite));
       const nextAnnotations = response.items.map(toDraftBox);
       setAnnotations(nextAnnotations);
       clearAnnotationsDirty();
+      setAnnotationStatus(response.annotation_status ?? requestedStatus);
       setSelectedAnnotationId(
         selectedIndex >= 0
           ? nextAnnotations[selectedIndex]?.local_id ?? null
@@ -2069,10 +2446,15 @@ export default function App() {
       setImages((current) =>
         current.map((image) =>
           image.id === selectedImageId
-            ? { ...image, annotation_count: response.items.length }
+            ? {
+                ...image,
+                annotation_count: response.items.length,
+                annotation_status: response.annotation_status ?? requestedStatus,
+              }
             : image,
         ),
       );
+      await refreshProjects();
       void refreshTrainingPrep();
       return true;
     } catch (error) {
@@ -2099,8 +2481,40 @@ export default function App() {
     }
   }
 
+  async function handleConfirmNegative() {
+    if (!selectedImageId || annotations.length > 0) {
+      return;
+    }
+
+    setIsSavingAnnotations(true);
+    setAnnotationError(null);
+    try {
+      const response = await replaceAnnotations(selectedImageId, [], "negative");
+      setAnnotations([]);
+      setAnnotationStatus(response.annotation_status ?? "negative");
+      clearAnnotationsDirty();
+      setSelectedAnnotationId(null);
+      setImages((current) =>
+        current.map((image) =>
+          image.id === selectedImageId
+            ? { ...image, annotation_count: 0, annotation_status: "negative" }
+            : image,
+        ),
+      );
+      setAnnotationNotice("已确认该图像无目标，已保存为负样本");
+      void refreshTrainingPrep();
+    } catch (error) {
+      setAnnotationError(error instanceof Error ? error.message : "保存负样本失败");
+    } finally {
+      setIsSavingAnnotations(false);
+    }
+  }
+
   async function handleCreateDatasetVersion() {
-    if (!importedDataset || !quality?.ready_for_training) {
+    if (!importedDataset || versionDatasetIds.length === 0) {
+      return;
+    }
+    if (versionDatasetIds.length === 1 && !quality?.ready_for_training) {
       return;
     }
 
@@ -2112,10 +2526,14 @@ export default function App() {
         importedDataset.dataset_id,
         versionName.trim() || undefined,
         versionClassIds,
+        versionImageScope,
+        versionDatasetIds,
       );
       setVersions((current) => [created, ...current]);
+      setSelectedTrainingVersionId(created.id);
       setVersionName("");
       await refreshTrainingPrep(importedDataset.dataset_id);
+      await refreshProjects();
     } catch (error) {
       setVersionError(error instanceof Error ? error.message : "数据集版本导出失败");
     } finally {
@@ -2123,8 +2541,24 @@ export default function App() {
     }
   }
 
+  function toggleVersionDataset(datasetId: number) {
+    setVersionDatasetIds((current) => {
+      if (current.includes(datasetId)) {
+        if (importedDataset && datasetId === importedDataset.dataset_id) {
+          return current;
+        }
+        if (current.length <= 1) {
+          return current;
+        }
+        return current.filter((id) => id !== datasetId);
+      }
+      return [...current, datasetId];
+    });
+  }
+
   async function handleStartTrainingRun() {
-    const version = versions[0];
+    const version =
+      versions.find((item) => item.id === selectedTrainingVersionId) ?? versions[0] ?? null;
     if (!version || !importedDataset) {
       return;
     }
@@ -2136,6 +2570,7 @@ export default function App() {
     try {
       const run = await createTrainingRun(buildTrainingRunRequest(version.id));
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      setTrainingNotice(`已使用版本「${version.name}」启动训练`);
       await refreshTrainingRuns(importedDataset.project_id);
       await refreshRunSummary(run.id);
       await loadRunLogs(run.id);
@@ -2147,7 +2582,8 @@ export default function App() {
   }
 
   async function handleRerunTrainingRun(sourceRun: TrainingRun) {
-    const version = versions[0];
+    const version =
+      versions.find((item) => item.id === selectedTrainingVersionId) ?? versions[0] ?? null;
     if (!version || !importedDataset) {
       return;
     }
@@ -2159,7 +2595,9 @@ export default function App() {
     try {
       const run = await createTrainingRun(requestFromRunConfig(version.id, sourceRun));
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
-      setTrainingNotice(`已基于训练任务 #${sourceRun.id} 开始重新训练`);
+      setTrainingNotice(
+        `已基于训练任务 #${sourceRun.id}，使用版本「${version.name}」开始重新训练`,
+      );
       await refreshTrainingRuns(importedDataset.project_id);
       await refreshRunSummary(run.id);
       await loadRunLogs(run.id);
@@ -2198,8 +2636,13 @@ export default function App() {
   }
 
   async function handleCreatePredictionJob() {
-    const run = runs[0];
-    if (!run) {
+    const run = selectedEvalRun;
+    if (!run || run.status !== "completed") {
+      setPredictionError("请选择已完成的训练任务作为评估权重");
+      return;
+    }
+    if (!selectedEvalVersionId) {
+      setPredictionError("请选择评估数据版本");
       return;
     }
 
@@ -2210,7 +2653,7 @@ export default function App() {
       const job = await createPredictionJob(run.id, {
         image_scope: predictionScope,
         confidence_threshold: predictionConfidence,
-        image_filters: activePredictionImageFilters,
+        version_id: selectedEvalVersionId,
       });
       setPredictionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
       await loadFilteredPredictions(job.id);
@@ -2220,43 +2663,6 @@ export default function App() {
       setPredictionError(error instanceof Error ? error.message : "预测任务启动失败");
     } finally {
       setIsCreatingPrediction(false);
-    }
-  }
-
-  async function handleCreateThresholdScan() {
-    const run = runs[0];
-    if (!run) {
-      return;
-    }
-
-    let thresholds: number[];
-    try {
-      thresholds = parseThresholdList(predictionThresholds);
-    } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "阈值扫描输入无效");
-      return;
-    }
-
-    setIsCreatingThresholdScan(true);
-    setPredictionError(null);
-
-    try {
-      const response = await createPredictionThresholdScan(run.id, {
-        image_scope: predictionScope,
-        thresholds,
-        image_filters: activePredictionImageFilters,
-      });
-      setPredictionJobs((current) => mergePredictionJobs(response.items, current));
-      const latestJob = response.items[response.items.length - 1];
-      if (latestJob) {
-        await loadFilteredPredictions(latestJob.id);
-        await loadPredictionLogs(latestJob.id);
-      }
-      await refreshRunSummary(run.id);
-    } catch (error) {
-      setPredictionError(error instanceof Error ? error.message : "阈值扫描失败");
-    } finally {
-      setIsCreatingThresholdScan(false);
     }
   }
 
@@ -2270,7 +2676,7 @@ export default function App() {
   }
 
   async function handleCreateExport(format: string) {
-    const run = runs[0];
+    const run = selectedEvalRun;
     if (!run) {
       return;
     }
@@ -2289,40 +2695,75 @@ export default function App() {
     }
   }
 
+  function handleSelectEvalRun(runId: number) {
+    setSelectedEvalRunId(runId);
+    const run = runs.find((item) => item.id === runId);
+    if (run) {
+      setSelectedEvalVersionId(run.version_id);
+    }
+  }
   async function openPredictionImage(prediction: Prediction) {
     setPredictionError(null);
 
     try {
       const review = await getPredictionImageReview(prediction.job_id, prediction.image_id);
-      const existingImage = images.find((image) => image.id === review.image.id);
-      const reviewAnnotations = review.annotations.map(toDraftBox);
-      setActiveReview(review);
-      setAnnotations(reviewAnnotations);
-      setSelectedAnnotationId(reviewAnnotations[0]?.local_id ?? null);
-      clearAnnotationsDirty();
+      setEvalReview(review);
+      setEvalReviewFocusId(prediction.id);
       setShowGroundTruthLayer(true);
       setShowPredictionLayer(true);
-      if (!existingImage) {
-        setImages((current) => [
-          ...current,
-          {
-            id: review.image.id,
-            relative_path: review.image.relative_path,
-            width: null,
-            height: null,
-            platform: review.image.platform,
-            altitude: review.image.altitude,
-            timestamp: review.image.timestamp,
-            annotation_count: review.annotations.length,
-            image_url: review.image.image_url,
-          },
-        ]);
-      }
-      setSelectedImageId(review.image.id);
-      commitWorkflowStep("annotation");
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "预测结果审查加载失败");
     }
+  }
+
+  async function navigateEvalReview(delta: number) {
+    if (predictions.length === 0 || evalReviewFocusId == null) {
+      return;
+    }
+    const currentIndex = predictions.findIndex((item) => item.id === evalReviewFocusId);
+    if (currentIndex < 0) {
+      return;
+    }
+    const nextIndex = Math.min(predictions.length - 1, Math.max(0, currentIndex + delta));
+    if (nextIndex === currentIndex) {
+      return;
+    }
+    await openPredictionImage(predictions[nextIndex]);
+  }
+
+  function openEvalReviewInAnnotation() {
+    if (!evalReview) {
+      return;
+    }
+
+    const review = evalReview;
+    const existingImage = images.find((image) => image.id === review.image.id);
+    const reviewAnnotations = review.annotations.map(toDraftBox);
+    setActiveReview(review);
+    setAnnotations(reviewAnnotations);
+    setSelectedAnnotationId(reviewAnnotations[0]?.local_id ?? null);
+    clearAnnotationsDirty();
+    setShowGroundTruthLayer(true);
+    setShowPredictionLayer(true);
+    if (!existingImage) {
+      setImages((current) => [
+        ...current,
+        {
+          id: review.image.id,
+          relative_path: review.image.relative_path,
+          width: null,
+          height: null,
+          platform: review.image.platform,
+          altitude: review.image.altitude,
+          timestamp: review.image.timestamp,
+          annotation_count: review.annotations.length,
+          annotation_status: review.annotations.length > 0 ? "annotated" : "unreviewed",
+          image_url: review.image.image_url,
+        },
+      ]);
+    }
+    setSelectedImageId(review.image.id);
+    commitWorkflowStep("annotation");
   }
 
   function openQualityIssue(issue: DatasetQualityIssue) {
@@ -2344,12 +2785,27 @@ export default function App() {
           altitude: null,
           timestamp: null,
           annotation_count: issue.issue_type === "unannotated_image" ? 0 : 1,
+          annotation_status: issue.issue_type === "unannotated_image" ? "unreviewed" : "annotated",
           image_url: issue.image_url,
         },
       ];
     });
     setSelectedImageId(issue.image_id);
     commitWorkflowStep("annotation");
+  }
+
+  if (authLoading) {
+    return (
+      <main className="login-shell">
+        <section className="login-card">
+          <p className="muted">正在恢复登录状态…</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return <LoginView />;
   }
 
   return (
@@ -2359,9 +2815,30 @@ export default function App() {
           <p className="eyebrow">本地目标检测工作台</p>
           <h1>YOLO Trainer</h1>
         </div>
-        <div className="device-pill">
-          <Activity size={16} />
-          <span>{health?.devices.selected ?? "连接中"}</span>
+        <div className="topbar-actions">
+          <div className="device-pill">
+            <Activity size={16} />
+            <span>{health?.devices.selected ?? "连接中"}</span>
+          </div>
+          <div className="user-pill" aria-label="当前用户">
+            <span>
+              {user.username} · {roleLabel(user.role)}
+            </span>
+            {isAdmin ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setShowUserManagement((current) => !current)}
+              >
+                <Users size={16} />
+                {showUserManagement ? "返回工作流" : "用户管理"}
+              </button>
+            ) : null}
+            <button type="button" className="secondary-button" onClick={logout}>
+              <LogOut size={16} />
+              退出
+            </button>
+          </div>
         </div>
       </section>
 
@@ -2387,6 +2864,9 @@ export default function App() {
 
       {healthError ? <div className="error-banner">{healthError}</div> : null}
 
+      {showUserManagement && isAdmin ? <UserManagementView /> : null}
+
+      {!showUserManagement ? (
       <WorkflowShell
         currentStep={currentStep}
         steps={workflowSteps}
@@ -2407,6 +2887,7 @@ export default function App() {
         </div>
       ) : null}
       {currentStep === "dataset" ? <div className="dataset-page">
+        {isAdmin ? (
         <div className="dataset-primary-tabs" role="tablist" aria-label="项目与数据视图">
           <button
             type="button"
@@ -2427,24 +2908,70 @@ export default function App() {
             数据管理
           </button>
         </div>
+        ) : null}
 
-        {datasetPageTab === "import" ? <section className="panel">
+        {datasetPageTab === "import" || !isAdmin ? <section className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">数据集导入</p>
-            <h2>扫描本地数据集</h2>
+            <p className="eyebrow">{isAdmin ? "数据集导入" : "数据集加载"}</p>
+            <h2>{isAdmin ? "扫描本地数据集" : "加载已保存数据集"}</h2>
           </div>
           <FolderSearch size={22} />
         </div>
 
         <form className="scan-form" onSubmit={handleScan}>
-          <label htmlFor="dataset-path">数据集路径</label>
-          <div className="input-row">
-            <input
-              id="dataset-path"
-              value={datasetPath}
-              onChange={(event) => setDatasetPath(event.target.value)}
-            />
+          {isAdmin ? (
+          <>
+          <label htmlFor="dataset-source">数据集来源</label>
+          <div className="input-row dataset-source-row">
+            <select
+              id="dataset-source"
+              aria-label="数据集来源"
+              value={selectedDatasetSourceRef}
+              onChange={(event) => {
+                const option = datasetSourceOptions.find(
+                  (item) => item.source_ref === event.target.value,
+                );
+                applyDatasetSourceOption(option);
+                setScan(null);
+              }}
+            >
+              {datasetSourceOptions.length === 0 ? (
+                <option value="">暂无可扫描数据集，请先上传 ZIP</option>
+              ) : null}
+              {datasetSourceOptions.some((item) => item.kind === "server") ? (
+                <optgroup label="服务器文件">
+                  {datasetSourceOptions
+                    .filter((item) => item.kind === "server")
+                    .map((item) => (
+                      <option key={item.source_ref} value={item.source_ref}>
+                        {item.label}（{formatBytes(item.size_bytes)}）
+                      </option>
+                    ))}
+                </optgroup>
+              ) : null}
+              {datasetSourceOptions.some((item) => item.kind === "upload") ? (
+                <optgroup label="已上传压缩包">
+                  {datasetSourceOptions
+                    .filter((item) => item.kind === "upload")
+                    .map((item) => (
+                      <option key={item.source_ref} value={item.source_ref}>
+                        {item.label}（{formatBytes(item.size_bytes)}）
+                      </option>
+                    ))}
+                </optgroup>
+              ) : null}
+            </select>
+            <label className="preview-upload-button">
+              <Upload size={16} /> {isUploadingDatasetSource ? "上传中..." : "上传 ZIP"}
+              <input
+                aria-label="上传数据集 ZIP"
+                type="file"
+                accept=".zip,application/zip"
+                onChange={(event) => void handleUploadDatasetSource(event)}
+                disabled={isUploadingDatasetSource}
+              />
+            </label>
             <button type="submit" disabled={isScanning || datasetPath.trim().length === 0}>
               {isScanning ? "扫描中" : "扫描数据集"}
             </button>
@@ -2463,6 +2990,63 @@ export default function App() {
               {isImporting ? "导入中" : "导入数据集"}
             </button>
           </div>
+
+          {datasetSourceOptions.some((item) => item.kind === "upload") ? (
+            <div className="dataset-source-library" aria-label="已上传数据集">
+              <table className="training-weight-table" aria-label="已上传数据集列表">
+                <thead>
+                  <tr>
+                    <th scope="col">文件名</th>
+                    <th scope="col">大小</th>
+                    <th scope="col">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {datasetSourceOptions
+                    .filter((item) => item.kind === "upload")
+                    .map((item) => (
+                      <tr
+                        key={item.source_ref}
+                        className={
+                          selectedDatasetSourceRef === item.source_ref ? "is-selected" : undefined
+                        }
+                      >
+                        <th scope="row">{item.original_filename}</th>
+                        <td>{formatBytes(item.size_bytes)}</td>
+                        <td>
+                          <div className="training-weight-row-actions">
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={() => {
+                                applyDatasetSourceOption(item);
+                                setScan(null);
+                              }}
+                            >
+                              选用
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button danger-button"
+                              aria-label={`删除数据集 ${item.original_filename}`}
+                              disabled={deletingDatasetSourceId === item.source_id}
+                              onClick={() => void handleDeleteDatasetSource(item)}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-state dataset-source-hint">
+              可上传本地 YOLO 数据集 ZIP 压缩包；上传后会出现在上方下拉菜单中。
+            </p>
+          )}
+
           <div className="import-name-grid">
             <label htmlFor="project-name">
               项目名称
@@ -2481,6 +3065,8 @@ export default function App() {
               />
             </label>
           </div>
+          </>
+          ) : null}
           <div className="saved-dataset-row" aria-label="已保存数据集加载器">
             <label htmlFor="saved-dataset">
               已保存数据集
@@ -2496,7 +3082,8 @@ export default function App() {
                       key={`${project.id}-${dataset.id}`}
                       value={savedDatasetValue(project.id, dataset.id)}
                     >
-                      {project.name} / {dataset.name}（{dataset.image_count} 张图像）
+                      {project.name} / {dataset.name}（{dataset.image_count} 张图像 · 已标注{" "}
+                      {dataset.annotated_image_count ?? 0} 张 · {dataset.annotation_count ?? 0} 个边界框）
                     </option>
                   )),
                 )}
@@ -2575,6 +3162,8 @@ export default function App() {
         </section> : (
           <StorageManagementView
             loadedDatasetId={importedDataset?.dataset_id ?? null}
+            openingDatasetId={openingStorageDatasetId}
+            onOpenDataset={handleOpenDatasetFromStorage}
             onDatasetTrashed={() => clearLoadedDatasetWorkspace()}
             onStorageChanged={handleStorageChanged}
           />
@@ -2589,7 +3178,7 @@ export default function App() {
               <h2>质量审查</h2>
             </div>
             <div className="panel-heading-actions">
-              {importedDataset ? (
+              {importedDataset && isAdmin ? (
                 <button
                   type="button"
                   className="secondary-button"
@@ -2669,6 +3258,7 @@ export default function App() {
               </label>
 
               <div className="quality-actions">
+                {isAdmin ? (
                 <button
                   type="button"
                   className="secondary-button"
@@ -2678,6 +3268,7 @@ export default function App() {
                   <Tags size={16} />
                   {isApplyingQualityTags ? "正在应用标签" : "应用自动标签"}
                 </button>
+                ) : null}
                 {qualityTagSummary ? (
                   <span className="summary-line">{formatQualityTagSummary(qualityTagSummary)}</span>
                 ) : null}
@@ -2729,6 +3320,8 @@ export default function App() {
           </div>
 
           <div className="version-controls">
+            {isAdmin ? (
+            <>
             <label htmlFor="version-name">版本名称</label>
             <div className="input-row">
               <input
@@ -2740,12 +3333,83 @@ export default function App() {
               />
               <button
                 type="button"
-                disabled={!importedDataset || !quality?.ready_for_training || isCreatingVersion}
-                onClick={handleCreateDatasetVersion}
+                disabled={
+                  !importedDataset
+                  || versionDatasetIds.length === 0
+                  || versionClassIds.length === 0
+                  || isCreatingVersion
+                  || (versionDatasetIds.length === 1 && !quality?.ready_for_training)
+                }
+                onClick={() => void handleCreateDatasetVersion()}
               >
-                {isCreatingVersion ? "导出中" : "创建数据集版本"}
+                {isCreatingVersion
+                  ? "导出中"
+                  : versionDatasetIds.length > 1
+                    ? "合并创建训练版本"
+                    : "创建数据集版本"}
               </button>
             </div>
+            <div className="subset-controls" aria-label="合并训练数据集">
+              <span>参与训练的数据集</span>
+              <p className="version-scope-hint">
+                勾选同一项目下的多个数据集，可合并成一个训练版本，避免只训新数据导致旧数据遗忘。
+                当前数据集默认选中且不可取消。
+              </p>
+              <div className="subset-grid version-dataset-grid">
+                {projectDatasets.length === 0 ? (
+                  <p className="empty-state">暂无同项目数据集可选。</p>
+                ) : (
+                  projectDatasets.map((dataset) => {
+                    const isCurrent = importedDataset?.dataset_id === dataset.id;
+                    const checked = versionDatasetIds.includes(dataset.id);
+                    return (
+                      <label key={dataset.id}>
+                        <input
+                          type="checkbox"
+                          aria-label={`合并数据集 ${dataset.name}`}
+                          checked={checked}
+                          disabled={!importedDataset || isCurrent}
+                          onChange={() => toggleVersionDataset(dataset.id)}
+                        />
+                        <span>
+                          {dataset.name}
+                          {isCurrent ? "（当前）" : ""}
+                          {" · "}
+                          {dataset.image_count} 张 / 已标注 {dataset.annotated_image_count ?? 0}
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+              {versionDatasetIds.length > 1 ? (
+                <p className="version-scope-hint">
+                  已选 {versionDatasetIds.length} 个数据集，将合并导出后再训练。
+                </p>
+              ) : null}
+            </div>
+            <label htmlFor="version-image-scope">导出范围</label>
+            <select
+              id="version-image-scope"
+              aria-label="版本导出范围"
+              value={versionImageScope}
+              disabled={!importedDataset}
+              onChange={(event) => setVersionImageScope(event.target.value as "annotated" | "all")}
+            >
+              <option value="annotated">
+                仅已标注图像（当前集 {quality?.annotated_image_count ?? 0} 张）
+              </option>
+              <option value="all">
+                全部图像（当前集 {quality?.image_count ?? 0} 张）
+              </option>
+            </select>
+            <p className="version-scope-hint">
+              导出范围作用于所有勾选数据集。当前范围参考当前集约 {versionImageCount} 张；
+              合并后实际数量以后端汇总为准。
+              {versionImageScope === "annotated"
+                ? "未标注图像不会复制到训练版本。"
+                : "全量范围会包含尚未标注的图像，空标签将作为负样本参与训练。"}
+            </p>
             <div className="subset-controls" aria-label="版本类别子集">
               <span>类别子集</span>
               <div className="subset-grid">
@@ -2767,6 +3431,10 @@ export default function App() {
                 )}
               </div>
             </div>
+            </>
+            ) : (
+              <p className="muted">标注员可查看已有版本；创建版本由管理员操作。</p>
+            )}
           </div>
 
           {versionError ? <div className="error-banner">{versionError}</div> : null}
@@ -2778,10 +3446,25 @@ export default function App() {
               versions.map((version) => (
                 <div className="version-row" key={version.id}>
                   <div>
-                    <strong>{version.name}</strong>
+                    <strong>
+                      {version.name}
+                      {version.merged ? " · 合并版" : ""}
+                    </strong>
                     <span>{version.artifact_path}</span>
+                    {version.source_dataset_ids && version.source_dataset_ids.length > 1 ? (
+                      <span>
+                        来源数据集：
+                        {version.source_dataset_ids
+                          .map((id) => {
+                            const match = projectDatasets.find((item) => item.id === id);
+                            return match ? match.name : `#${id}`;
+                          })
+                          .join(" + ")}
+                      </span>
+                    ) : null}
                   </div>
                   <span>
+                    {formatVersionImageScope(version.image_scope)} |{" "}
                     {version.split_counts.train}/{version.split_counts.val}/
                     {version.split_counts.test}
                   </span>
@@ -2803,13 +3486,162 @@ export default function App() {
           </div>
 
           <div className="training-form">
-            <label htmlFor="training-model">模型预设或本地权重</label>
-            <input
+            <label htmlFor="training-version">训练数据版本</label>
+            <select
+              id="training-version"
+              aria-label="训练数据版本"
+              value={selectedTrainingVersionId ?? ""}
+              onChange={(event) =>
+                setSelectedTrainingVersionId(
+                  event.target.value ? Number(event.target.value) : null,
+                )
+              }
+              disabled={versions.length === 0}
+            >
+              {versions.length === 0 ? (
+                <option value="">请先在「质量与版本」创建标注版本</option>
+              ) : null}
+              {versions.map((version) => (
+                <option key={version.id} value={version.id}>
+                  {version.name}
+                  {version.merged ? " · 合并版" : ""}
+                  {" · "}
+                  训练{version.split_counts.train}/验证{version.split_counts.val}/测试
+                  {version.split_counts.test}
+                </option>
+              ))}
+            </select>
+            {selectedTrainingVersionId ? (
+              <p className="version-scope-hint">
+                {(() => {
+                  const selected =
+                    versions.find((item) => item.id === selectedTrainingVersionId) ?? null;
+                  if (!selected) {
+                    return "请选择要用于训练的标注版本。";
+                  }
+                  if (selected.merged && selected.source_dataset_ids?.length) {
+                    const names = selected.source_dataset_ids
+                      .map((id) => {
+                        const match = projectDatasets.find((item) => item.id === id);
+                        return match ? match.name : `#${id}`;
+                      })
+                      .join(" + ");
+                    return `当前为合并版，来源：${names}`;
+                  }
+                  return `将使用版本「${selected.name}」进行训练。`;
+                })()}
+              </p>
+            ) : null}
+
+            <label htmlFor="training-model">起始模型</label>
+            <select
               id="training-model"
               value={trainingModel}
               onChange={(event) => setTrainingModel(event.target.value)}
               disabled={versions.length === 0}
-            />
+            >
+              {!trainingModelOptions.some((item) => item.model_ref === trainingModel) &&
+              trainingModel ? (
+                <option value={trainingModel}>{trainingModel}（历史配置）</option>
+              ) : null}
+              <optgroup label="内置模型">
+                {trainingModelOptions
+                  .filter((item) => item.kind === "base")
+                  .map((item) => (
+                    <option key={item.model_ref} value={item.model_ref}>
+                      {item.label}
+                    </option>
+                  ))}
+              </optgroup>
+              {trainingModelOptions.some((item) => item.kind === "trained") ? (
+                <optgroup label="本项目训练结果">
+                  {trainingModelOptions
+                    .filter((item) => item.kind === "trained")
+                    .map((item) => (
+                      <option key={item.model_ref} value={item.model_ref}>
+                        {item.label}
+                      </option>
+                    ))}
+                </optgroup>
+              ) : null}
+              {trainingModelOptions.some((item) => item.kind === "upload") ? (
+                <optgroup label="已上传权重">
+                  {trainingModelOptions
+                    .filter((item) => item.kind === "upload")
+                    .map((item) => (
+                      <option key={item.model_ref} value={item.model_ref}>
+                        {item.label}
+                      </option>
+                    ))}
+                </optgroup>
+              ) : null}
+            </select>
+
+            <div className="training-weight-library" aria-label="权重库">
+              <div className="training-weight-library-heading">
+                <div>
+                  <strong>权重库</strong>
+                  <span>上传 .pt 后可在上方下拉中选择，用于继续训练</span>
+                </div>
+                <label className="preview-upload-button">
+                  <Upload size={16} /> {isUploadingWeight ? "正在上传..." : "上传权重"}
+                  <input
+                    aria-label="上传训练权重"
+                    type="file"
+                    accept=".pt,application/octet-stream"
+                    onChange={(event) => void handleUploadModelWeight(event)}
+                    disabled={isUploadingWeight || !importedDataset || versions.length === 0}
+                  />
+                </label>
+              </div>
+              {modelWeights.length === 0 ? (
+                <p className="empty-state">暂无已上传权重。</p>
+              ) : (
+                <table className="training-weight-table" aria-label="权重库列表">
+                  <thead>
+                    <tr>
+                      <th scope="col">文件名</th>
+                      <th scope="col">大小</th>
+                      <th scope="col">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelWeights.map((weight) => (
+                      <tr
+                        key={weight.id}
+                        className={
+                          trainingModel === `weight:${weight.id}` ? "is-selected" : undefined
+                        }
+                      >
+                        <th scope="row">{weight.original_filename}</th>
+                        <td>{formatBytes(weight.size_bytes)}</td>
+                        <td>
+                          <div className="training-weight-row-actions">
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={() => setTrainingModel(`weight:${weight.id}`)}
+                              disabled={versions.length === 0}
+                            >
+                              选用
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button danger-button"
+                              aria-label={`删除权重 ${weight.original_filename}`}
+                              onClick={() => void handleDeleteModelWeight(weight)}
+                              disabled={deletingWeightId === weight.id}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
 
             <div className="training-number-grid">
               <label htmlFor="training-epochs">
@@ -2957,8 +3789,8 @@ export default function App() {
 
             <button
               type="button"
-              disabled={versions.length === 0 || isStartingRun}
-              onClick={handleStartTrainingRun}
+              disabled={versions.length === 0 || !selectedTrainingVersionId || isStartingRun}
+              onClick={() => void handleStartTrainingRun()}
             >
               <Play size={16} />
               {isStartingRun ? "正在启动" : "开始训练"}
@@ -3017,6 +3849,13 @@ export default function App() {
                   <button
                     type="button"
                     className="secondary-button"
+                    onClick={() => setLiveMonitorRunId(run.id)}
+                  >
+                    实时监控
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
                     onClick={() => applyRunConfigToForm(run)}
                   >
                     加载配置
@@ -3048,6 +3887,15 @@ export default function App() {
         </section>
       </section> : null}
 
+      {currentStep === "preview" ? (
+        <PreviewView
+          projectId={importedDataset?.project_id ?? null}
+          datasets={previewDatasets}
+          runs={runs}
+          classes={classes}
+        />
+      ) : null}
+
       {currentStep === "evaluation" ? <>
       <section className="panel prediction-panel" aria-label="预测分析">
         <div className="panel-heading compact-heading">
@@ -3062,60 +3910,93 @@ export default function App() {
         </div>
 
         <div className="prediction-controls">
-          <label htmlFor="prediction-scope">图像范围</label>
-          <input
-            id="prediction-scope"
-            value={predictionScope}
-            onChange={(event) => setPredictionScope(event.target.value)}
-            disabled={runs.length === 0}
-          />
-          <label htmlFor="prediction-confidence">置信度阈值</label>
-          <input
-            id="prediction-confidence"
-            type="number"
-            min={0}
-            max={1}
-            step={0.05}
-            value={predictionConfidence}
-            onChange={(event) => setPredictionConfidence(Number(event.target.value))}
-            disabled={runs.length === 0}
-          />
-          <label className="prediction-filter-toggle" htmlFor="use-image-filters-prediction">
-            <input
-              id="use-image-filters-prediction"
-              type="checkbox"
-              checked={useImageFiltersForPrediction}
-              onChange={(event) => setUseImageFiltersForPrediction(event.target.checked)}
-              disabled={runs.length === 0}
-            />
-            使用图像筛选条件
+          <label htmlFor="eval-run">
+            评估权重
+            <select
+              id="eval-run"
+              value={selectedEvalRunId ?? ""}
+              onChange={(event) => handleSelectEvalRun(Number(event.target.value))}
+              disabled={completedEvalRuns.length === 0}
+            >
+              {completedEvalRuns.length === 0 ? (
+                <option value="">暂无已完成训练任务</option>
+              ) : (
+                completedEvalRuns.map((run) => {
+                  const version = projectVersions.find((item) => item.id === run.version_id);
+                  const versionLabel = version
+                    ? `${version.name}${version.merged ? " · 合并" : ""}`
+                    : `版本 #${run.version_id}`;
+                  return (
+                    <option key={run.id} value={run.id}>
+                      训练任务 #{run.id} · {versionLabel} · best.pt
+                    </option>
+                  );
+                })
+              )}
+            </select>
           </label>
-          <span className="prediction-filter-summary">{predictionImageFilterSummary}</span>
+          <label htmlFor="eval-version">
+            评估数据版本
+            <select
+              id="eval-version"
+              value={selectedEvalVersionId ?? ""}
+              onChange={(event) => setSelectedEvalVersionId(Number(event.target.value))}
+              disabled={projectVersions.length === 0}
+            >
+              {projectVersions.length === 0 ? (
+                <option value="">暂无数据版本</option>
+              ) : (
+                projectVersions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    #{version.id} · {version.name}
+                    {version.merged ? " · 合并" : ""}
+                    {" · "}
+                    训练{version.split_counts.train}/验证{version.split_counts.val}/测试
+                    {version.split_counts.test}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label htmlFor="prediction-scope">
+            图像范围
+            <select
+              id="prediction-scope"
+              value={predictionScope}
+              onChange={(event) => setPredictionScope(event.target.value)}
+              disabled={!selectedEvalRun}
+            >
+              <option value="all">全部</option>
+              <option value="train">训练集</option>
+              <option value="val">验证集</option>
+              <option value="test">测试集</option>
+            </select>
+          </label>
+          <label htmlFor="prediction-confidence">
+            置信度阈值
+            <input
+              id="prediction-confidence"
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={predictionConfidence}
+              onChange={(event) => setPredictionConfidence(Number(event.target.value))}
+              disabled={!selectedEvalRun}
+            />
+          </label>
           <button
             type="button"
-            disabled={runs.length === 0 || isCreatingPrediction}
-            onClick={handleCreatePredictionJob}
+            disabled={
+              !selectedEvalRun ||
+              selectedEvalRun.status !== "completed" ||
+              !selectedEvalVersionId ||
+              isCreatingPrediction
+            }
+            onClick={() => void handleCreatePredictionJob()}
           >
             <Radar size={16} />
             {isCreatingPrediction ? "正在分析" : "开始预测分析"}
-          </button>
-          <label className="threshold-scan-field" htmlFor="prediction-thresholds">
-            扫描阈值
-            <input
-              id="prediction-thresholds"
-              value={predictionThresholds}
-              onChange={(event) => setPredictionThresholds(event.target.value)}
-              disabled={runs.length === 0}
-            />
-          </label>
-          <button
-            type="button"
-            className="secondary-button threshold-scan-button"
-            disabled={runs.length === 0 || isCreatingThresholdScan}
-            onClick={handleCreateThresholdScan}
-          >
-            <Radar size={16} />
-            {isCreatingThresholdScan ? "正在扫描" : "执行阈值扫描"}
           </button>
         </div>
 
@@ -3194,77 +4075,6 @@ export default function App() {
               disabled={predictionJobs.length === 0}
             />
           </label>
-          <label htmlFor="prediction-filter-platform">
-            预测平台
-            <input
-              id="prediction-filter-platform"
-              value={predictionFilters.platform}
-              onChange={(event) =>
-                setPredictionFilters((current) => ({ ...current, platform: event.target.value }))
-              }
-              disabled={predictionJobs.length === 0}
-            />
-          </label>
-          <label htmlFor="prediction-filter-alt-min">
-            最低高度
-            <input
-              id="prediction-filter-alt-min"
-              type="number"
-              value={predictionFilters.altitude_min}
-              onChange={(event) =>
-                setPredictionFilters((current) => ({
-                  ...current,
-                  altitude_min: event.target.value,
-                }))
-              }
-              disabled={predictionJobs.length === 0}
-            />
-          </label>
-          <label htmlFor="prediction-filter-alt-max">
-            最高高度
-            <input
-              id="prediction-filter-alt-max"
-              type="number"
-              value={predictionFilters.altitude_max}
-              onChange={(event) =>
-                setPredictionFilters((current) => ({
-                  ...current,
-                  altitude_max: event.target.value,
-                }))
-              }
-              disabled={predictionJobs.length === 0}
-            />
-          </label>
-          <label htmlFor="prediction-filter-time-min">
-            最早时间
-            <input
-              id="prediction-filter-time-min"
-              type="number"
-              value={predictionFilters.timestamp_min}
-              onChange={(event) =>
-                setPredictionFilters((current) => ({
-                  ...current,
-                  timestamp_min: event.target.value,
-                }))
-              }
-              disabled={predictionJobs.length === 0}
-            />
-          </label>
-          <label htmlFor="prediction-filter-time-max">
-            最晚时间
-            <input
-              id="prediction-filter-time-max"
-              type="number"
-              value={predictionFilters.timestamp_max}
-              onChange={(event) =>
-                setPredictionFilters((current) => ({
-                  ...current,
-                  timestamp_max: event.target.value,
-                }))
-              }
-              disabled={predictionJobs.length === 0}
-            />
-          </label>
           <div className="prediction-filter-actions">
             <button
               type="button"
@@ -3295,7 +4105,7 @@ export default function App() {
             <Metric label="类别混淆" value={predictionJobs[0].class_confusion_count.toLocaleString()} />
           </div>
         ) : (
-          <p className="empty-state">请从已完成或失败的训练任务开始预测分析，以审查模型输出。</p>
+          <p className="empty-state">选择已完成的训练权重与数据版本后，开始预测分析以审查模型输出。</p>
         )}
 
         <div className="prediction-layout">
@@ -3303,58 +4113,200 @@ export default function App() {
             {predictions.length === 0 ? (
               <p className="empty-state">预测结果与问题样本将显示在这里。</p>
             ) : (
-              predictions.slice(0, 20).map((prediction) => (
-                <div className="prediction-row" key={prediction.id}>
+              predictions.map((prediction) => (
+                <button
+                  type="button"
+                  className={
+                    prediction.id === evalReviewFocusId
+                      ? "prediction-row selected"
+                      : "prediction-row"
+                  }
+                  key={prediction.id}
+                  aria-pressed={prediction.id === evalReviewFocusId}
+                  onClick={() => void openPredictionImage(prediction)}
+                >
                   <div>
                     <strong>{formatFailureType(prediction.failure_type)}</strong>
-                    <span>图像 #{prediction.image_id} | 类别 #{prediction.class_id}</span>
+                    <span>
+                      图像 #{prediction.image_id} |{" "}
+                      {classById.get(prediction.class_id)?.name ?? `类别 #${prediction.class_id}`}
+                    </span>
                   </div>
                   <span>{prediction.confidence.toFixed(2)}</span>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => openPredictionImage(prediction)}
-                  >
-                    打开图像
-                  </button>
-                </div>
+                </button>
               ))
             )}
           </div>
 
-          <div className="prediction-jobs" aria-label="预测任务">
-            {predictionJobs.length === 0 ? null : (
-              predictionJobs.map((job) => (
-                <div className="run-row" key={job.id}>
-                  <div className="run-row-heading">
-                    <strong>预测任务 #{job.id}</strong>
-                    <span className={`run-status ${job.status}`}>{formatRunStatus(job.status)}</span>
+          <div className="eval-review-panel" aria-label="问题样本查看器">
+            {evalReview ? (
+              <>
+                <div className="eval-review-toolbar">
+                  <div>
+                    <strong>筛选样本查看</strong>
+                    <span>
+                      {evalReviewIndex >= 0
+                        ? `${evalReviewIndex + 1} / ${predictions.length}`
+                        : `— / ${predictions.length}`}
+                      {" · "}
+                      {evalReview.image.relative_path}
+                    </span>
                   </div>
-                  <span>{job.image_filters ? formatImageFilterSummary(job.image_filters, classById) : "所选范围内的全部图像"}</span>
-                  <span>{job.artifact_path}</span>
-                  {job.error_message ? <p className="run-error">{job.error_message}</p> : null}
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => loadPredictionLogs(job.id)}
-                  >
-                    加载预测日志
-                  </button>
-                  {predictionLogs[job.id] ? (
-                    <pre className="log-preview">{predictionLogs[job.id]}</pre>
-                  ) : null}
+                  <div className="eval-review-nav">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={evalReviewIndex <= 0}
+                      onClick={() => void navigateEvalReview(-1)}
+                    >
+                      上一张
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={
+                        evalReviewIndex < 0 || evalReviewIndex >= predictions.length - 1
+                      }
+                      onClick={() => void navigateEvalReview(1)}
+                    >
+                      下一张
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={openEvalReviewInAnnotation}
+                    >
+                      去标注页修正
+                    </button>
+                  </div>
                 </div>
-              ))
+
+                {evalFocusedPrediction ? (
+                  <div className="eval-review-focus">
+                    <strong>{formatFailureType(evalFocusedPrediction.failure_type)}</strong>
+                    <span>
+                      {classById.get(evalFocusedPrediction.class_id)?.name ??
+                        `类别 #${evalFocusedPrediction.class_id}`}{" "}
+                      · 置信度 {evalFocusedPrediction.confidence.toFixed(2)}
+                    </span>
+                  </div>
+                ) : null}
+
+                <div className="eval-review-layers" aria-label="评估审查图层">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={showGroundTruthLayer}
+                      onChange={(event) => setShowGroundTruthLayer(event.target.checked)}
+                    />
+                    真值标注
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={showPredictionLayer}
+                      onChange={(event) => setShowPredictionLayer(event.target.checked)}
+                    />
+                    预测框
+                  </label>
+                  <div className="review-legend" aria-label="预测结果图例">
+                    <span className="legend matched">匹配正确</span>
+                    <span className="legend false-positive">误报</span>
+                    <span className="legend false-negative">漏报</span>
+                  </div>
+                </div>
+
+                <div className="eval-review-counts">
+                  匹配正确 {evalReview.counts.matched ?? 0} | 误报{" "}
+                  {evalReview.counts.false_positive ?? 0} | 漏报{" "}
+                  {evalReview.counts.false_negative ?? 0} | 类别混淆{" "}
+                  {evalReview.counts.class_confusion ?? 0}
+                </div>
+
+                <div className="eval-review-canvas" aria-label="评估样本画布">
+                  <img
+                    src={authedMediaUrl(evalReview.image.image_url)}
+                    alt={evalReview.image.relative_path}
+                    draggable={false}
+                  />
+                  <svg viewBox="0 0 1 1" preserveAspectRatio="none">
+                    {showGroundTruthLayer
+                      ? evalReview.annotations.map((annotation) => (
+                          <ReviewAnnotationRect
+                            key={annotation.id}
+                            annotation={annotation}
+                            highlighted={
+                              evalFocusedPrediction?.matched_annotation_id === annotation.id
+                            }
+                          />
+                        ))
+                      : null}
+                    {showPredictionLayer
+                      ? evalReview.predictions.map((prediction) => (
+                          <PredictionRect
+                            key={prediction.id}
+                            prediction={prediction}
+                            className={classById.get(prediction.class_id)?.name}
+                            highlighted={prediction.id === evalReviewFocusId}
+                          />
+                        ))
+                      : null}
+                  </svg>
+                </div>
+              </>
+            ) : (
+              <p className="empty-state">
+                点击左侧筛选结果即可在此查看图像。可用上一张 / 下一张在当前筛选列表中浏览。
+              </p>
             )}
           </div>
+        </div>
+
+        <div className="prediction-jobs" aria-label="预测任务">
+          {predictionJobs.length === 0 ? null : (
+            predictionJobs.map((job) => (
+              <div className="run-row" key={job.id}>
+                <div className="run-row-heading">
+                  <strong>预测任务 #{job.id}</strong>
+                  <span className={`run-status ${job.status}`}>{formatRunStatus(job.status)}</span>
+                </div>
+                <span>
+                  数据版本 #{job.version_id ?? "—"} · 范围 {job.image_scope} · 置信度{" "}
+                  {job.confidence_threshold}
+                </span>
+                {job.error_message ? <p className="run-error">{job.error_message}</p> : null}
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => loadPredictionLogs(job.id)}
+                >
+                  加载预测日志
+                </button>
+                {predictionLogs[job.id] ? (
+                  <pre className="log-preview">{predictionLogs[job.id]}</pre>
+                ) : null}
+              </div>
+            ))
+          )}
         </div>
       </section>
 
       {summaryError ? <div className="error-banner">{summaryError}</div> : null}
-      <ExperimentDashboard
-        summary={runSummary}
-        projectSummary={projectExperimentSummary}
-      />
+      <section className="panel eval-advanced-panel" aria-label="高级实验看板">
+        <button
+          type="button"
+          className="secondary-button eval-advanced-toggle"
+          onClick={() => setShowEvalAdvanced((current) => !current)}
+        >
+          {showEvalAdvanced ? "收起高级：实验看板" : "展开高级：实验看板"}
+        </button>
+        {showEvalAdvanced ? (
+          <ExperimentDashboard
+            summary={runSummary}
+            projectSummary={projectExperimentSummary}
+          />
+        ) : null}
+      </section>
 
       <section className="panel export-panel" aria-label="模型导出">
         <div className="panel-heading compact-heading">
@@ -3371,40 +4323,34 @@ export default function App() {
           <ExportOption
             title=".pt 权重"
             format="pt"
-            enabled={Boolean(latestRun && latestRun.status === "completed" && exportCapabilities?.pt_available)}
+            enabled={Boolean(
+              selectedEvalRun &&
+                selectedEvalRun.status === "completed" &&
+                exportCapabilities?.pt_available,
+            )}
             reason={formatExportReason(exportCapabilities?.reasons.pt)}
             isCreating={isCreatingExport === "pt"}
             onCreate={handleCreateExport}
           />
-          <ExportOption
-            title="ONNX"
-            format="onnx"
-            enabled={Boolean(
-              latestRun && latestRun.status === "completed" && exportCapabilities?.onnx_available,
-            )}
-            reason={formatExportReason(exportCapabilities?.reasons.onnx)}
-            isCreating={isCreatingExport === "onnx"}
-            onCreate={handleCreateExport}
-          />
-          <ExportOption
-            title="TensorRT"
-            format="tensorrt"
-            enabled={Boolean(
-              latestRun &&
-                latestRun.status === "completed" &&
-                exportCapabilities?.tensorrt_available,
-            )}
-            reason={formatExportReason(exportCapabilities?.reasons.tensorrt)}
-            isCreating={isCreatingExport === "tensorrt"}
-            onCreate={handleCreateExport}
-          />
+          {selectedEvalRunId && exportCapabilities?.pt_available ? (
+            <a
+              className="secondary-button export-download-link"
+              href={authedMediaUrl(getRunBestWeightsUrl(selectedEvalRunId))}
+              download={`run-${selectedEvalRunId}-best.pt`}
+            >
+              <Download size={16} />
+              下载训练权重 best.pt
+            </a>
+          ) : null}
         </div>
 
         {exportCapabilities?.weights_path ? (
-          <p className="export-source">源权重：{exportCapabilities.weights_path}</p>
+          <p className="export-source">
+            源权重（训练任务 #{selectedEvalRunId}）：{exportCapabilities.weights_path}
+          </p>
         ) : (
           <p className="empty-state">
-            请完成生成 `ultralytics/weights/best.pt` 的训练任务，以启用模型导出。
+            请选择已完成并生成 `ultralytics/weights/best.pt` 的训练任务，以启用模型导出。
           </p>
         )}
 
@@ -3412,18 +4358,41 @@ export default function App() {
           {exports.length === 0 ? (
             <p className="empty-state">导出的模型产物将显示在这里。</p>
           ) : (
-            exports.map((artifact) => (
-              <div className="export-row" key={artifact.id}>
-                <div>
-                  <strong>{artifact.format.toUpperCase()} 导出任务 #{artifact.id}</strong>
-                  <span>{artifact.artifact_path || "暂无产物路径"}</span>
+            exports.map((artifact) => {
+              const downloadUrl =
+                artifact.download_url ||
+                (artifact.status === "completed"
+                  ? getExportDownloadUrl(artifact.run_id, artifact.id)
+                  : null);
+              return (
+                <div className="export-row" key={artifact.id}>
+                  <div>
+                    <strong>
+                      {artifact.format.toUpperCase()} 导出任务 #{artifact.id}
+                    </strong>
+                    <span>{artifact.artifact_path || "暂无产物路径"}</span>
+                  </div>
+                  <div className="export-row-actions">
+                    <span className={`run-status ${artifact.status}`}>
+                      {formatRunStatus(artifact.status)}
+                    </span>
+                    {downloadUrl ? (
+                      <a
+                        className="secondary-button"
+                        href={authedMediaUrl(downloadUrl)}
+                        download={`run-${artifact.run_id}.${artifact.format}`}
+                      >
+                        <Download size={16} />
+                        下载
+                      </a>
+                    ) : null}
+                  </div>
+                  {artifact.error_message ? (
+                    <p className="run-error">{artifact.error_message}</p>
+                  ) : null}
                 </div>
-                <span className={`run-status ${artifact.status}`}>{formatRunStatus(artifact.status)}</span>
-                {artifact.error_message ? (
-                  <p className="run-error">{artifact.error_message}</p>
-                ) : null}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </section>
@@ -3439,56 +4408,113 @@ export default function App() {
           </div>
 
           <div className="fixed-class-management">
+            {isAdmin ? (
+            <>
             <div className="fixed-class-heading">
               <div>
-                <h3>选择本项目要标注的目标类别</h3>
-                <p>勾选需要的类别后，一次启用到项目类别库。</p>
+                <h3>从数据集文件名识别到的类别</h3>
+                <p>
+                  已根据 ZIP 中重复的文件名前缀自动扫描类别。默认全部勾选，可取消不需要的项后确认启用。
+                </p>
               </div>
-              <span className="fixed-class-count">已选 {selectedFixedClassNames.length} / {fixedClassPresets.length}</span>
+              <span className="fixed-class-count">
+                已选 {selectedDetectedClassNames.length} / {detectedClasses.length}
+              </span>
             </div>
-            <fieldset className="fixed-class-picker" disabled={!importedDataset || isEnablingFixedClasses}>
-              <legend className="sr-only">固定目标类别</legend>
-              {fixedClassPresets.map((preset) => {
-                const isSelected = selectedFixedClassNames.includes(preset.name);
-                const isExisting = classes.some((classItem) => classItem.name === preset.name);
-                return (
-                  <label
-                    className={isSelected ? "fixed-class-option selected" : "fixed-class-option"}
-                    key={preset.name}
-                  >
-                    <input
-                      type="checkbox"
-                      aria-label={preset.name}
-                      checked={isSelected}
-                      onChange={() => {
-                        setSelectedFixedClassNames((current) =>
-                          current.includes(preset.name)
-                            ? current.filter((name) => name !== preset.name)
-                            : [...current, preset.name],
-                        );
-                      }}
-                    />
-                    <span
-                      className="fixed-class-option-color"
-                      style={{ background: preset.color }}
-                      aria-hidden="true"
-                    />
-                    <span className="fixed-class-option-name">{preset.name}</span>
-                    <span className="fixed-class-option-status">
-                      {isExisting ? "已在类别库" : isSelected ? "待启用" : "未选择"}
-                    </span>
-                  </label>
-                );
-              })}
-            </fieldset>
-            <button
-              type="button"
-              onClick={handleEnableFixedClasses}
-              disabled={!importedDataset || isEnablingFixedClasses || selectedFixedClassNames.length === 0}
-            >
-              <CheckCircle2 size={16} />
-              {isEnablingFixedClasses ? "正在启用..." : "启用所选类别"}
-            </button>
+            {isLoadingDetectedClasses ? (
+              <p className="empty-state">正在扫描文件名类别...</p>
+            ) : detectedClasses.length === 0 ? (
+              <p className="empty-state">
+                未能从文件名识别出重复前缀类别。请确认图像命名类似
+                <code>fire_truck_h20_a045.jpg</code>，或稍后手动添加类别。
+              </p>
+            ) : (
+              <fieldset
+                className="fixed-class-picker"
+                disabled={!importedDataset || isEnablingDetectedClasses}
+              >
+                <legend className="sr-only">扫描到的目标类别</legend>
+                {detectedClasses.map((preset) => {
+                  const isSelected = selectedDetectedClassNames.includes(preset.name);
+                  const isExisting = classes.some((classItem) => classItem.name === preset.name);
+                  return (
+                    <label
+                      className={isSelected ? "fixed-class-option selected" : "fixed-class-option"}
+                      key={preset.name}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={preset.name}
+                        checked={isSelected}
+                        onChange={() => {
+                          setSelectedDetectedClassNames((current) =>
+                            current.includes(preset.name)
+                              ? current.filter((name) => name !== preset.name)
+                              : [...current, preset.name],
+                          );
+                        }}
+                      />
+                      <span
+                        className="fixed-class-option-color"
+                        style={{ background: preset.color }}
+                        aria-hidden="true"
+                      />
+                      <span className="fixed-class-option-name">{preset.name}</span>
+                      <span className="fixed-class-option-meta">{preset.image_count} 张</span>
+                      <span className="fixed-class-option-status">
+                        {isExisting ? "已在类别库" : isSelected ? "待启用" : "未选择"}
+                      </span>
+                    </label>
+                  );
+                })}
+              </fieldset>
+            )}
+            <div className="fixed-class-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() =>
+                  setSelectedDetectedClassNames(detectedClasses.map((item) => item.name))
+                }
+                disabled={
+                  !importedDataset
+                  || isEnablingDetectedClasses
+                  || detectedClasses.length === 0
+                  || isLoadingDetectedClasses
+                }
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setSelectedDetectedClassNames([])}
+                disabled={
+                  !importedDataset
+                  || isEnablingDetectedClasses
+                  || selectedDetectedClassNames.length === 0
+                }
+              >
+                全不选
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleEnableDetectedClasses()}
+                disabled={
+                  !importedDataset
+                  || isEnablingDetectedClasses
+                  || selectedDetectedClassNames.length === 0
+                  || isLoadingDetectedClasses
+                }
+              >
+                <CheckCircle2 size={16} />
+                {isEnablingDetectedClasses ? "正在启用..." : "确认启用所选类别"}
+              </button>
+            </div>
+            </>
+            ) : (
+              <p className="muted">标注员可查看类别列表，类别启用与编辑由管理员负责。</p>
+            )}
           </div>
 
           {classError ? <div className="error-banner">{classError}</div> : null}
@@ -3542,6 +4568,8 @@ export default function App() {
                       <span style={{ background: classItem.color }} />
                       {classItem.name}
                     </button>
+                    {isAdmin ? (
+                    <>
                     <button
                       type="button"
                       className="icon-button"
@@ -3565,6 +4593,8 @@ export default function App() {
                     >
                       <Trash2 size={16} />
                     </button>
+                    </>
+                    ) : null}
                   </div>
                 ),
               )
@@ -3647,6 +4677,15 @@ export default function App() {
           onCopyNext={() => { void copyAdjacentAnnotations("next"); }}
           onGroundTruthChange={setShowGroundTruthLayer}
           onPredictionChange={setShowPredictionLayer}
+          annotationStatus={annotationStatus}
+          filenameSuggestion={filenameSuggestion}
+          onApplySuggestion={() => {
+            if (filenameSuggestion.selected) {
+              setSelectedClassId(filenameSuggestion.selected.id);
+            }
+          }}
+          onConfirmNegative={() => { void handleConfirmNegative(); }}
+          canConfirmNegative={annotations.length === 0}
         />
 
       {pendingAnnotationImageId !== null ? (
@@ -3767,6 +4806,14 @@ export default function App() {
                     {image.platform ?? "未知平台"} | {formatImageAltitude(image.altitude)} |{" "}
                     {image.annotation_count} 个边界框
                   </span>
+                  <span className="image-row-status">
+                    <b className={`annotation-status-chip ${image.annotation_status ?? (image.annotation_count ? "annotated" : "unreviewed")}`}>
+                      {formatAnnotationStatus(image.annotation_status ?? (image.annotation_count ? "annotated" : "unreviewed"))}
+                    </b>
+                    {suggestClassFromFilename(image.relative_path, classes).selected
+                      ? `建议：${suggestClassFromFilename(image.relative_path, classes).selected?.name}`
+                      : ""}
+                  </span>
                 </button>
               ))
             )}
@@ -3836,7 +4883,7 @@ export default function App() {
                   } as CSSProperties}
                 >
                   <img
-                    src={selectedImage.image_url}
+                    src={authedMediaUrl(selectedImage.image_url)}
                     alt={selectedImage.relative_path}
                     width={annotationImageSize.width || undefined}
                     height={annotationImageSize.height || undefined}
@@ -4131,6 +5178,13 @@ export default function App() {
       </section>
       ) : null}
       </WorkflowShell>
+      ) : null}
+      {liveMonitorRunId != null ? (
+        <TrainingLiveMonitor
+          runId={liveMonitorRunId}
+          onClose={() => setLiveMonitorRunId(null)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -4242,11 +5296,6 @@ function toPredictionFilterRequest(filters: ReturnType<typeof defaultPredictionF
     class_id: filters.class_id ? Number(filters.class_id) : undefined,
     confidence_min: filters.confidence_min === "" ? undefined : Number(filters.confidence_min),
     confidence_max: filters.confidence_max === "" ? undefined : Number(filters.confidence_max),
-    platform: filters.platform.trim() || undefined,
-    altitude_min: filters.altitude_min === "" ? undefined : Number(filters.altitude_min),
-    altitude_max: filters.altitude_max === "" ? undefined : Number(filters.altitude_max),
-    timestamp_min: filters.timestamp_min === "" ? undefined : Number(filters.timestamp_min),
-    timestamp_max: filters.timestamp_max === "" ? undefined : Number(filters.timestamp_max),
   };
 }
 
@@ -4296,37 +5345,6 @@ function parseTags(value: string) {
     .filter(Boolean);
 }
 
-function parseThresholdList(value: string) {
-  const parts = value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (parts.length === 0) {
-    throw new Error("请至少输入一个置信度阈值。");
-  }
-  if (parts.length > 20) {
-    throw new Error("阈值扫描最多支持 20 个数值。");
-  }
-
-  const thresholds = parts.map((part) => Number(part));
-  if (thresholds.some((threshold) => Number.isNaN(threshold))) {
-    throw new Error("阈值扫描值必须为数字。");
-  }
-  if (thresholds.some((threshold) => threshold < 0 || threshold > 1)) {
-    throw new Error("阈值扫描值必须在 0 到 1 之间。");
-  }
-
-  return Array.from(new Set(thresholds.map((threshold) => Number(threshold.toFixed(4))))).sort(
-    (left, right) => left - right,
-  );
-}
-
-function mergePredictionJobs(incoming: PredictionJob[], existing: PredictionJob[]) {
-  const byId = new Map<number, PredictionJob>();
-  [...incoming, ...existing].forEach((job) => byId.set(job.id, job));
-  return Array.from(byId.values()).sort((left, right) => right.id - left.id);
-}
-
 function toDraftBox(annotation: Annotation, index: number): DraftBox {
   return {
     ...annotation,
@@ -4359,12 +5377,13 @@ function predictionToDraftBox(
 }
 
 function toAnnotationWrite(annotation: DraftBox): AnnotationWrite {
+  const geometry = serializeClampedGeometry(annotation);
   return {
     class_id: annotation.class_id,
-    x_center: roundGeometry(annotation.x_center),
-    y_center: roundGeometry(annotation.y_center),
-    width: roundGeometry(annotation.width),
-    height: roundGeometry(annotation.height),
+    x_center: geometry.x_center,
+    y_center: geometry.y_center,
+    width: geometry.width,
+    height: geometry.height,
     track_id: annotation.track_id?.trim() ? annotation.track_id.trim() : null,
     edge_tags: annotation.edge_tags ?? [],
   };
@@ -4435,6 +5454,32 @@ function clampCenter(value: number, size: number) {
 
 function roundGeometry(value: number) {
   return Number(value.toFixed(6));
+}
+
+/** Round edges first, then rebuild center/size so edge boxes survive 6-digit rounding. */
+function serializeClampedGeometry(annotation: Pick<DraftBox, "x_center" | "y_center" | "width" | "height">) {
+  let left = roundGeometry(annotation.x_center - annotation.width / 2);
+  let right = roundGeometry(annotation.x_center + annotation.width / 2);
+  let top = roundGeometry(annotation.y_center - annotation.height / 2);
+  let bottom = roundGeometry(annotation.y_center + annotation.height / 2);
+  left = clamp(left);
+  right = clamp(right);
+  top = clamp(top);
+  bottom = clamp(bottom);
+  if (right <= left) {
+    right = Math.min(1, left + 0.001);
+  }
+  if (bottom <= top) {
+    bottom = Math.min(1, top + 0.001);
+  }
+  const width = roundGeometry(right - left);
+  const height = roundGeometry(bottom - top);
+  return {
+    x_center: roundGeometry(left + width / 2),
+    y_center: roundGeometry(top + height / 2),
+    width: Math.max(width, 0.001),
+    height: Math.max(height, 0.001),
+  };
 }
 
 function setPointerCaptureSafe(element: Element | null, pointerId: number) {
@@ -4615,8 +5660,12 @@ function DragRect(props: { dragState: DragState; color?: string }) {
   );
 }
 
-function PredictionRect(props: { prediction: Prediction; className?: string }) {
-  const { prediction, className } = props;
+function PredictionRect(props: {
+  prediction: Prediction;
+  className?: string;
+  highlighted?: boolean;
+}) {
+  const { prediction, className, highlighted = false } = props;
   const color =
     prediction.failure_type === "matched"
       ? "#16a34a"
@@ -4634,17 +5683,17 @@ function PredictionRect(props: { prediction: Prediction; className?: string }) {
   const labelY = clamp(top - 0.018);
 
   return (
-    <g>
+    <g opacity={highlighted ? 1 : 0.85}>
       <title>{label}</title>
       <rect
         x={left}
         y={top}
         width={prediction.width}
         height={prediction.height}
-        fill="transparent"
+        fill={highlighted ? `${color}22` : "transparent"}
         stroke={color}
         strokeDasharray={prediction.failure_type === "matched" ? "0" : "0.02 0.012"}
-        strokeWidth={0.006}
+        strokeWidth={highlighted ? 0.01 : 0.006}
         vectorEffect="non-scaling-stroke"
       />
       <text
@@ -4658,6 +5707,45 @@ function PredictionRect(props: { prediction: Prediction; className?: string }) {
         strokeWidth={0.006}
       >
         {label}
+      </text>
+    </g>
+  );
+}
+
+function ReviewAnnotationRect(props: {
+  annotation: PredictionReviewAnnotation;
+  highlighted?: boolean;
+}) {
+  const { annotation, highlighted = false } = props;
+  const left = annotation.x_center - annotation.width / 2;
+  const top = annotation.y_center - annotation.height / 2;
+  const color = annotation.class_color || "#38bdf8";
+  const label = annotation.class_name || `类别 ${annotation.class_id}`;
+
+  return (
+    <g opacity={highlighted ? 1 : 0.9}>
+      <title>{label}</title>
+      <rect
+        x={left}
+        y={top}
+        width={annotation.width}
+        height={annotation.height}
+        fill="transparent"
+        stroke={color}
+        strokeWidth={highlighted ? 0.01 : 0.005}
+        vectorEffect="non-scaling-stroke"
+      />
+      <text
+        x={clamp(left)}
+        y={clamp(top - 0.018)}
+        fill={color}
+        fontSize={0.02}
+        fontWeight={800}
+        paintOrder="stroke"
+        stroke="#111820"
+        strokeWidth={0.005}
+      >
+        GT | {label}
       </text>
     </g>
   );
@@ -5195,6 +6283,18 @@ function annotationGuidance(
     return "绘制边界框前，请先选择类别。";
   }
   return "在图像上拖动以添加边界框。";
+}
+
+function formatAnnotationStatus(status: DatasetImage["annotation_status"]) {
+  return {
+    unreviewed: "待标注",
+    annotated: "已标注",
+    negative: "已确认无目标",
+  }[status];
+}
+
+function formatVersionImageScope(scope: DatasetVersion["image_scope"] = "annotated") {
+  return scope === "all" ? "全量图像" : "仅已标注图像";
 }
 
 function DatasetCoveragePanel(props: { coverage: DatasetCoverageSummary | null }) {

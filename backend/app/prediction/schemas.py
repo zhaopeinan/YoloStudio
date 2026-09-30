@@ -21,12 +21,14 @@ class PredictionImageFilters(BaseModel):
 class PredictionJobCreate(BaseModel):
     image_scope: str = Field(default="all", pattern="^(all|train|val|test)$")
     confidence_threshold: float = Field(default=0.25, ge=0, le=1)
+    version_id: int | None = Field(default=None, ge=1)
     image_filters: PredictionImageFilters | None = None
 
 
 class PredictionThresholdScanCreate(BaseModel):
     image_scope: str = Field(default="all", pattern="^(all|train|val|test)$")
     thresholds: list[float] = Field(..., min_length=1, max_length=20)
+    version_id: int | None = Field(default=None, ge=1)
     image_filters: PredictionImageFilters | None = None
 
     @field_validator("thresholds")
@@ -44,6 +46,7 @@ class PredictionJobRead(BaseModel):
     id: int
     run_id: int
     project_id: int
+    version_id: int | None
     status: str
     image_scope: str
     confidence_threshold: float

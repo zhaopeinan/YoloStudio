@@ -1,4 +1,6 @@
+from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +34,47 @@ class DatasetScanSummary(BaseModel):
     warnings: list[str]
 
 
+class DatasetSourceRead(BaseModel):
+    id: int
+    original_filename: str
+    size_bytes: int
+    source_path: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class DatasetSourceList(BaseModel):
+    items: list[DatasetSourceRead]
+
+
+class DatasetSourceOption(BaseModel):
+    source_ref: str
+    label: str
+    kind: str
+    source_path: str
+    original_filename: str
+    size_bytes: int
+    source_id: int | None = None
+
+
+class DatasetSourceOptionList(BaseModel):
+    items: list[DatasetSourceOption]
+
+
+class DetectedClassSuggestion(BaseModel):
+    name: str
+    image_count: int
+    color: str
+    sample_filenames: list[str] = Field(default_factory=list)
+
+
+class DetectedClassList(BaseModel):
+    dataset_id: int
+    total_images: int
+    method: str
+    items: list[DetectedClassSuggestion]
+
+
 class DatasetImportRequest(BaseModel):
     source_path: Path = Field(..., description="Absolute path to a local dataset zip file or folder")
     project_name: str = Field(..., min_length=1, max_length=160)
@@ -60,6 +103,8 @@ class ProjectDatasetRead(BaseModel):
     source_type: str
     import_status: str
     image_count: int
+    annotated_image_count: int
+    annotation_count: int
 
 
 class ProjectRead(BaseModel):
@@ -81,6 +126,7 @@ class DatasetImageRead(BaseModel):
     altitude: float | None
     timestamp: float | None
     annotation_count: int
+    annotation_status: Literal["unreviewed", "annotated", "negative"]
     image_url: str
 
 

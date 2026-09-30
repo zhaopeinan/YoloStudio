@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+
+from app.auth.deps import get_current_user, require_admin
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
-from app.db.models import DatasetVersion, Project, TrainingRun
+from app.db.models import DatasetVersion, ModelWeight, Project, TrainingRun
 from app.db.session import get_db
 from app.experiments.schemas import ProjectExperimentSummary, RunExperimentSummary
 from app.experiments.summary import build_project_experiment_summary, build_run_experiment_summary
@@ -16,6 +18,7 @@ from app.storage.visibility import (
     active_entity_predicate,
     require_active_entity,
 )
+from app.training.live import build_live_snapshot, query_nvidia_smi
 from app.training.runner import (
     cancel_training_run,
     create_queued_run,
@@ -24,6 +27,12 @@ from app.training.runner import (
     read_run_logs,
 )
 from app.training.schemas import (
+    GpuStatus,
+    ModelWeightList,
+    ModelWeightRead,
+    TrainingLiveSnapshot,
+    TrainingModelList,
+    TrainingModelOption,
     TrainingRunArtifact,
     TrainingRunArtifactSummary,
     TrainingRunCreate,
@@ -31,9 +40,20 @@ from app.training.schemas import (
     TrainingRunLogs,
     TrainingRunRead,
 )
+from app.training.weights import (
+    MAX_WEIGHT_BYTES,
+    create_model_weight,
+    delete_model_weight,
+    list_model_weights,
+    list_training_model_options,
+)
 
 
-router = APIRouter(prefix="/api", tags=["training"])
+router = APIRouter(
+    prefix="/api",
+    tags=["training"],
+    dependencies=[Depends(get_current_user)],
+)
 
 MAX_ARTIFACT_ITEMS = 200
 ARTIFACT_CATEGORY_ORDER = {
@@ -145,12 +165,87 @@ def _get_active_run(db: Session, run_id: int) -> TrainingRun:
     return run
 
 
+def _require_project(db: Session, project_id: int) -> Project:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project was not found")
+    return project
+
+
+def _read_weight(weight: ModelWeight) -> ModelWeightRead:
+    return ModelWeightRead(
+        id=weight.id,
+        project_id=weight.project_id,
+        original_filename=weight.original_filename,
+        size_bytes=weight.size_bytes,
+        created_at=weight.created_at,
+        updated_at=weight.updated_at,
+    )
+
+
+@router.get("/training/models", response_model=TrainingModelList)
+def list_training_models(
+    project_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db),
+) -> TrainingModelList:
+    _require_project(db, project_id)
+    return TrainingModelList(
+        items=[TrainingModelOption(**item) for item in list_training_model_options(db, project_id)]
+    )
+
+
+@router.get("/training/weights", response_model=ModelWeightList)
+def list_training_weights(
+    project_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db),
+) -> ModelWeightList:
+    _require_project(db, project_id)
+    return ModelWeightList(items=[_read_weight(item) for item in list_model_weights(db, project_id)])
+
+
+@router.post("/training/weights", response_model=ModelWeightRead)
+async def upload_training_weight(
+    project_id: int = Form(..., ge=1),
+    weight: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
+) -> ModelWeightRead:
+    _require_project(db, project_id)
+    content = await weight.read(MAX_WEIGHT_BYTES + 1)
+    try:
+        saved = create_model_weight(
+            db,
+            settings,
+            project_id,
+            weight.filename or "uploaded.pt",
+            content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _read_weight(saved)
+
+
+@router.delete("/training/weights/{weight_id}", status_code=204)
+def remove_training_weight(
+    weight_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
+) -> None:
+    try:
+        delete_model_weight(db, settings, weight_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/training/runs", response_model=TrainingRunRead)
 def create_training_run(
     request: TrainingRunCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
 ) -> TrainingRunRead:
     _require_active(db, "dataset_version", request.version_id)
     version = db.get(DatasetVersion, request.version_id)
@@ -207,7 +302,11 @@ def get_training_run_artifacts(
 
 
 @router.post("/training/runs/{run_id}/cancel", response_model=TrainingRunRead)
-def cancel_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunRead:
+def cancel_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> TrainingRunRead:
     run = _get_active_run(db, run_id)
     if not cancel_training_run(run_id, bind=db.get_bind()):
         raise HTTPException(status_code=400, detail="Training run is not active")
@@ -219,6 +318,23 @@ def cancel_run(run_id: int, db: Session = Depends(get_db)) -> TrainingRunRead:
 def get_training_run_logs(run_id: int, db: Session = Depends(get_db)) -> TrainingRunLogs:
     run = _get_active_run(db, run_id)
     return TrainingRunLogs(run_id=run.id, text=read_run_logs(run))
+
+
+@router.get("/training/runs/{run_id}/live", response_model=TrainingLiveSnapshot)
+def get_training_run_live(
+    run_id: int,
+    include_gpu: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> TrainingLiveSnapshot:
+    """Lightweight live snapshot for the training monitor modal (1s polling)."""
+    run = _get_active_run(db, run_id)
+    return TrainingLiveSnapshot.model_validate(build_live_snapshot(run, include_gpu=include_gpu))
+
+
+@router.get("/system/gpu", response_model=GpuStatus)
+def get_system_gpu() -> GpuStatus:
+    """Read-only nvidia-smi snapshot; failures never affect training."""
+    return GpuStatus.model_validate(query_nvidia_smi())
 
 
 @router.get("/training/runs/{run_id}/summary", response_model=RunExperimentSummary)

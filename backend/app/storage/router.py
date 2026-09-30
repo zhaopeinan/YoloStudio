@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth.deps import get_current_user, require_admin
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
@@ -17,6 +19,7 @@ from app.storage.service import (
     StorageConflictError,
     StorageMoveError,
     StoragePathError,
+    cascade_purge_trash_item,
     get_storage_item_detail,
     list_trash_items,
     list_storage_items,
@@ -29,7 +32,11 @@ from app.storage.service import (
 from app.storage.visibility import StorageEntityNotFoundError
 
 
-router = APIRouter(prefix="/api/storage", tags=["storage"])
+router = APIRouter(
+    prefix="/api/storage",
+    tags=["storage"],
+    dependencies=[Depends(get_current_user), Depends(require_admin)],
+)
 
 
 def _raise_storage_error(exc: Exception) -> None:
@@ -144,5 +151,21 @@ def purge_item(
 ) -> StorageMutationResponse:
     try:
         return purge_trash_item(db, settings, trash_id, request.confirm_name)
+    except Exception as exc:
+        _raise_storage_error(exc)
+
+
+@router.post(
+    "/trash/{trash_id}/cascade-purge",
+    response_model=StorageMutationResponse,
+)
+def cascade_purge_item(
+    trash_id: int,
+    request: TrashPurgeRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> StorageMutationResponse:
+    try:
+        return cascade_purge_trash_item(db, settings, trash_id, request.confirm_name)
     except Exception as exc:
         _raise_storage_error(exc)

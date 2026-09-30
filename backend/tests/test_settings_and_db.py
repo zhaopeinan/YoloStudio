@@ -27,5 +27,6 @@ def test_init_db_creates_foundation_tables(tmp_path: Path):
         "images",
         "export_artifacts",
         "trash_items",
+        "users",
     }.issubset(tables)
     assert settings.workspace_root.exists()

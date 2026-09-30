@@ -1,11 +1,15 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+
+from app.auth.deps import get_current_user, require_admin
 from fastapi.responses import FileResponse
 from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
+from app.annotations.status import get_annotation_status
+from app.datasets.class_detect import detect_classes_for_dataset
 from app.datasets.importer import import_dataset, read_image_dimensions
 from app.datasets.scanner import scan_dataset_source
 from app.datasets.schemas import (
@@ -19,11 +23,23 @@ from app.datasets.schemas import (
     DatasetImportSummary,
     DatasetScanRequest,
     DatasetScanSummary,
+    DatasetSourceList,
+    DatasetSourceOption,
+    DatasetSourceOptionList,
+    DatasetSourceRead,
+    DetectedClassList,
+    DetectedClassSuggestion,
     ProjectDatasetRead,
     ProjectList,
     ProjectRead,
 )
-from app.db.models import Annotation, ClassDef, Dataset, Image, Prediction, Project
+from app.datasets.sources import (
+    create_dataset_source,
+    delete_dataset_source,
+    list_dataset_source_options,
+    list_dataset_sources,
+)
+from app.db.models import Annotation, ClassDef, Dataset, DatasetSource, Image, Prediction, Project
 from app.db.session import get_db
 from app.storage.visibility import (
     StorageEntityNotFoundError,
@@ -32,11 +48,19 @@ from app.storage.visibility import (
 )
 
 
-router = APIRouter(prefix="/api/datasets", tags=["datasets"])
+router = APIRouter(
+    prefix="/api/datasets",
+    tags=["datasets"],
+    dependencies=[Depends(get_current_user)],
+)
 FAILURE_TYPE_PATTERN = "^(all|matched|false_positive|false_negative|class_confusion)$"
 
 
-projects_router = APIRouter(prefix="/api/projects", tags=["projects"])
+projects_router = APIRouter(
+    prefix="/api/projects",
+    tags=["projects"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _get_active_dataset(db: Session, dataset_id: int) -> Dataset:
@@ -84,6 +108,22 @@ def list_projects(db: Session = Depends(get_db)) -> ProjectList:
         .where(active_entity_predicate("dataset", Dataset.id))
         .order_by(Dataset.project_id, Dataset.id)
     ).all()
+    annotation_counts_by_dataset: dict[int, tuple[int, int]] = {}
+    if datasets:
+        annotation_counts = db.execute(
+            select(
+                Image.dataset_id,
+                func.count(func.distinct(Annotation.image_id)).label("annotated_image_count"),
+                func.count(Annotation.id).label("annotation_count"),
+            )
+            .join(Annotation, Annotation.image_id == Image.id)
+            .where(Image.dataset_id.in_([dataset.id for dataset in datasets]))
+            .group_by(Image.dataset_id)
+        ).all()
+        annotation_counts_by_dataset = {
+            dataset_id: (annotated_image_count, annotation_count)
+            for dataset_id, annotated_image_count, annotation_count in annotation_counts
+        }
     datasets_by_project: dict[int, list[Dataset]] = {}
     for dataset in datasets:
         datasets_by_project.setdefault(dataset.project_id, []).append(dataset)
@@ -101,6 +141,8 @@ def list_projects(db: Session = Depends(get_db)) -> ProjectList:
                         source_type=dataset.source_type,
                         import_status=dataset.import_status,
                         image_count=dataset.image_count,
+                        annotated_image_count=annotation_counts_by_dataset.get(dataset.id, (0, 0))[0],
+                        annotation_count=annotation_counts_by_dataset.get(dataset.id, (0, 0))[1],
                     )
                     for dataset in datasets_by_project.get(project.id, [])
                 ],
@@ -111,7 +153,10 @@ def list_projects(db: Session = Depends(get_db)) -> ProjectList:
 
 
 @router.post("/scan", response_model=DatasetScanSummary)
-def scan_dataset(request: DatasetScanRequest) -> DatasetScanSummary:
+def scan_dataset(
+    request: DatasetScanRequest,
+    _: object = Depends(require_admin),
+) -> DatasetScanSummary:
     try:
         return scan_dataset_source(request.source_path)
     except FileNotFoundError as exc:
@@ -120,11 +165,73 @@ def scan_dataset(request: DatasetScanRequest) -> DatasetScanSummary:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _read_dataset_source(source: DatasetSource) -> DatasetSourceRead:
+    return DatasetSourceRead(
+        id=source.id,
+        original_filename=source.original_filename,
+        size_bytes=source.size_bytes,
+        source_path=source.stored_path,
+        created_at=source.created_at,
+        updated_at=source.updated_at,
+    )
+
+
+@router.get("/sources", response_model=DatasetSourceOptionList)
+def list_dataset_source_library(
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> DatasetSourceOptionList:
+    return DatasetSourceOptionList(
+        items=[DatasetSourceOption(**item) for item in list_dataset_source_options(db)]
+    )
+
+
+@router.get("/sources/uploads", response_model=DatasetSourceList)
+def list_uploaded_dataset_sources(
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> DatasetSourceList:
+    return DatasetSourceList(items=[_read_dataset_source(item) for item in list_dataset_sources(db)])
+
+
+@router.post("/sources", response_model=DatasetSourceRead)
+async def upload_dataset_source(
+    archive: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
+) -> DatasetSourceRead:
+    try:
+        saved = await create_dataset_source(
+            db,
+            settings,
+            archive.filename or "dataset.zip",
+            archive,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _read_dataset_source(saved)
+
+
+@router.delete("/sources/{source_id}", status_code=204)
+def remove_dataset_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
+) -> None:
+    try:
+        delete_dataset_source(db, settings, source_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/import", response_model=DatasetImportSummary)
 def import_dataset_endpoint(
     request: DatasetImportRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
 ) -> DatasetImportSummary:
     try:
         return import_dataset(db, settings, request)
@@ -132,6 +239,21 @@ def import_dataset_endpoint(
         raise HTTPException(status_code=404, detail="Dataset source was not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{dataset_id}/detected-classes", response_model=DetectedClassList)
+def get_detected_classes(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+) -> DetectedClassList:
+    _get_active_dataset(db, dataset_id)
+    payload = detect_classes_for_dataset(db, dataset_id)
+    return DetectedClassList(
+        dataset_id=payload["dataset_id"],
+        total_images=payload["total_images"],
+        method=payload["method"],
+        items=[DetectedClassSuggestion(**item) for item in payload["items"]],
+    )
 
 
 @router.get("/{dataset_id}/images", response_model=DatasetImageList)
@@ -210,6 +332,7 @@ def list_dataset_images(
                 altitude=image.altitude,
                 timestamp=image.timestamp,
                 annotation_count=int(annotation_count),
+                annotation_status=get_annotation_status(image),
                 image_url=f"/api/images/{image.id}/file",
             )
             for image, annotation_count in rows
@@ -350,6 +473,7 @@ def refresh_dataset_image_dimensions(
     dataset_id: int,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _: object = Depends(require_admin),
 ) -> DatasetDimensionRefreshSummary:
     dataset = _get_active_dataset(db, dataset_id)
 
@@ -386,7 +510,11 @@ def refresh_dataset_image_dimensions(
     )
 
 
-images_router = APIRouter(prefix="/api/images", tags=["images"])
+images_router = APIRouter(
+    prefix="/api/images",
+    tags=["images"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @images_router.get("/{image_id}/file")

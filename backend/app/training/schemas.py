@@ -21,7 +21,7 @@ class TrainingAugmentationConfig(BaseModel):
 
 class TrainingRunCreate(BaseModel):
     version_id: int
-    model: str = Field(default="yolov8n.pt", min_length=1, max_length=240)
+    model: str = Field(default="base:yolov8n.pt", min_length=1, max_length=240)
     epochs: int = Field(default=50, ge=1, le=1000)
     image_size: int = Field(default=640, ge=32, le=4096)
     batch_size: int = Field(default=8, ge=1, le=256)
@@ -69,3 +69,81 @@ class TrainingRunArtifactSummary(BaseModel):
     artifact_root: str
     total_count: int
     items: list[TrainingRunArtifact]
+
+
+class ModelWeightRead(BaseModel):
+    id: int
+    project_id: int
+    original_filename: str
+    size_bytes: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ModelWeightList(BaseModel):
+    items: list[ModelWeightRead]
+
+
+class TrainingModelOption(BaseModel):
+    model_ref: str
+    label: str
+    kind: str
+    run_id: int | None = None
+    weight_id: int | None = None
+    status: str
+
+
+class TrainingModelList(BaseModel):
+    items: list[TrainingModelOption]
+
+
+class TrainingLiveProgress(BaseModel):
+    epoch: int | None = None
+    total_epochs: int | None = None
+    percent: float | None = None
+    elapsed_sec: float | None = None
+    eta_sec: float | None = None
+    phase: str
+
+
+class GpuProcessInfo(BaseModel):
+    pid: int | None = None
+    name: str
+    memory_mb: float | None = None
+
+
+class GpuDeviceInfo(BaseModel):
+    index: int
+    name: str
+    utilization_gpu: float | None = None
+    memory_used_mb: float | None = None
+    memory_total_mb: float | None = None
+    temperature_c: float | None = None
+    power_w: float | None = None
+    power_limit_w: float | None = None
+    processes: list[GpuProcessInfo] = Field(default_factory=list)
+
+
+class GpuStatus(BaseModel):
+    available: bool
+    gpus: list[GpuDeviceInfo] = Field(default_factory=list)
+    error: str | None = None
+    queried_at: str
+
+
+class TrainingLiveSnapshot(BaseModel):
+    run_id: int
+    project_id: int
+    status: str
+    status_label: str
+    device: str
+    config: dict
+    progress: TrainingLiveProgress
+    latest: dict[str, float]
+    series: dict[str, list[float | None]]
+    log_tail: list[str]
+    error_message: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    updated_at: str
+    gpu: GpuStatus | None = None

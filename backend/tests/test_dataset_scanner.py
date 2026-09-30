@@ -66,6 +66,36 @@ def test_scan_dataset_zip_rejects_missing_zip(tmp_path: Path):
         scan_dataset_zip(tmp_path / "missing.zip")
 
 
+def test_scan_dataset_zip_ignores_macos_metadata_entries(tmp_path: Path):
+    zip_path = tmp_path / "camo.zip"
+    with ZipFile(zip_path, "w") as archive:
+        archive.writestr(
+            "prius_hybrid_camo/images/raw/prius_hybrid_camo_h20_a045.jpg",
+            b"real",
+        )
+        archive.writestr(
+            "suv_camo/images/raw/suv_camo_h20_a045.jpg",
+            b"real",
+        )
+        archive.writestr(
+            "._prius_hybrid_camo/images/raw/._prius_hybrid_camo_h20_a045.jpg",
+            b"appledouble",
+        )
+        archive.writestr(
+            "suv_camo/images/raw/._suv_camo_h20_a045.jpg",
+            b"appledouble",
+        )
+        archive.writestr("__MACOSX/suv_camo/._suv_camo_h20_a045.jpg", b"appledouble")
+        archive.writestr("prius_hybrid_camo/.DS_Store", b"store")
+
+    result = scan_dataset_zip(zip_path)
+
+    assert result.total_images == 2
+    assert [group.name for group in result.groups] == ["prius_hybrid_camo", "suv_camo"]
+    assert all(not group.name.startswith("._") for group in result.groups)
+    assert any("已忽略" in warning for warning in result.warnings)
+
+
 def test_scan_dataset_source_counts_folder_images_and_metadata(tmp_path: Path):
     source_path = tmp_path / "sample-folder"
     create_sample_folder(source_path)

@@ -283,7 +283,7 @@ Run:
 ```bash
 launchctl remove com.codex.yolo-trainer.backend || true
 launchctl submit -l com.codex.yolo-trainer.backend -- /bin/zsh -lc \
-  'cd /Users/peinan/DevProjects/YOLO_Trainer/backend && exec .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >>/tmp/yolo-trainer-backend.log 2>&1'
+  'cd ~/DevProjects/YOLO_Trainer/backend && exec .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >>/tmp/yolo-trainer-backend.log 2>&1'
 ```
 
 Expected: `curl http://127.0.0.1:8000/api/health` returns `status: ok` and selects `mps` or `cpu` according to local availability.

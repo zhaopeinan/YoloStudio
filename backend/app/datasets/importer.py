@@ -12,7 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings
-from app.datasets.scanner import IMAGE_EXTENSIONS, _collection_name, _safe_float
+from app.datasets.scanner import (
+    IMAGE_EXTENSIONS,
+    _collection_name,
+    _safe_float,
+    is_ignored_dataset_member,
+)
 from app.datasets.schemas import (
     DatasetImportGroupSummary,
     DatasetImportRequest,
@@ -220,7 +225,7 @@ def _metadata_from_lines(group: str, lines: list[str]) -> dict[tuple[str, str], 
 def _load_archive_metadata_by_group_and_file(archive: ZipFile) -> dict[tuple[str, str], dict]:
     metadata: dict[tuple[str, str], dict] = {}
     for name in archive.namelist():
-        if Path(name).name != "meta.jsonl" or name.endswith("/"):
+        if Path(name).name != "meta.jsonl" or name.endswith("/") or is_ignored_dataset_member(name):
             continue
         group = _label_collection_name(name)
         with archive.open(name) as handle:
@@ -235,6 +240,8 @@ def _load_folder_metadata_by_group_and_file(source_path: Path) -> dict[tuple[str
         if not path.is_file():
             continue
         name = path.relative_to(source_path).as_posix()
+        if is_ignored_dataset_member(name):
+            continue
         group = _collection_name(name)
         metadata.update(_metadata_from_lines(group, path.read_text(encoding="utf-8").splitlines()))
     return metadata
@@ -252,7 +259,11 @@ def _label_keys(group: str, member_path: Path) -> list[tuple[str, str]]:
 
 def _load_archive_class_names(archive: ZipFile) -> list[str]:
     for name in archive.namelist():
-        if Path(name).name.lower() not in {"data.yaml", "dataset.yaml"} or name.endswith("/"):
+        if (
+            Path(name).name.lower() not in {"data.yaml", "dataset.yaml"}
+            or name.endswith("/")
+            or is_ignored_dataset_member(name)
+        ):
             continue
         with archive.open(name) as handle:
             return _parse_class_names_from_yaml(handle.read().decode("utf-8"))
@@ -262,7 +273,12 @@ def _load_archive_class_names(archive: ZipFile) -> list[str]:
 def _load_folder_class_names(source_path: Path) -> list[str]:
     for yaml_name in ("data.yaml", "dataset.yaml"):
         path = next(
-            (candidate for candidate in source_path.rglob(yaml_name) if candidate.is_file()),
+            (
+                candidate
+                for candidate in source_path.rglob(yaml_name)
+                if candidate.is_file()
+                and not is_ignored_dataset_member(candidate.relative_to(source_path).as_posix())
+            ),
             None,
         )
         if path is not None:
@@ -275,7 +291,7 @@ def _load_archive_labels_by_image_key(
 ) -> dict[tuple[str, str], list[SourceAnnotation]]:
     labels: dict[tuple[str, str], list[SourceAnnotation]] = defaultdict(list)
     for name in archive.namelist():
-        if name.endswith("/") or Path(name).suffix.lower() != ".txt":
+        if name.endswith("/") or Path(name).suffix.lower() != ".txt" or is_ignored_dataset_member(name):
             continue
         if "labels" not in _safe_archive_parts(name):
             continue
@@ -298,6 +314,8 @@ def _load_folder_labels_by_image_key(
         if not path.is_file():
             continue
         relative_name = path.relative_to(source_path).as_posix()
+        if is_ignored_dataset_member(relative_name):
+            continue
         if "labels" not in _safe_archive_parts(relative_name):
             continue
         group = _label_collection_name(relative_name)
@@ -392,7 +410,11 @@ def _open_zip_source(source_path: Path) -> tuple[ZipFile, DatasetSourceBundle]:
     except BadZipFile as exc:
         raise ValueError(f"Invalid zip archive: {source_path}") from exc
 
-    names = [name for name in archive.namelist() if not name.endswith("/")]
+    names = [
+        name
+        for name in archive.namelist()
+        if not name.endswith("/") and not is_ignored_dataset_member(name)
+    ]
     image_names = [name for name in names if Path(name).suffix.lower() in IMAGE_EXTENSIONS]
     images = [
         SourceImage(
@@ -419,6 +441,8 @@ def _load_folder_source(source_path: Path) -> DatasetSourceBundle:
         if path.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
         name = path.relative_to(source_path).as_posix()
+        if is_ignored_dataset_member(name):
+            continue
         images.append(
             SourceImage(
                 name=name,

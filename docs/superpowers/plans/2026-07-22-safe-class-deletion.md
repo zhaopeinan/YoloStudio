@@ -13,9 +13,9 @@
 ### Task 1: 后端类别使用计数和安全删除接口
 
 **Files:**
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/backend/app/classes/schemas.py`
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/backend/app/classes/router.py`
-- Test: `/Users/peinan/DevProjects/YOLO_Trainer/backend/tests/test_class_annotation_api.py`
+- Modify: `~/DevProjects/YOLO_Trainer/backend/app/classes/schemas.py`
+- Modify: `~/DevProjects/YOLO_Trainer/backend/app/classes/router.py`
+- Test: `~/DevProjects/YOLO_Trainer/backend/tests/test_class_annotation_api.py`
 
 - [x] **Step 1: 写后端失败测试**
 
@@ -26,7 +26,7 @@
 运行：
 
 ```bash
-cd /Users/peinan/DevProjects/YOLO_Trainer/backend
+cd ~/DevProjects/YOLO_Trainer/backend
 pytest tests/test_class_annotation_api.py -q
 ```
 
@@ -42,15 +42,15 @@ pytest tests/test_class_annotation_api.py -q
 
 - [x] **Step 5: 运行后端测试确认通过**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer/backend && pytest tests/test_class_annotation_api.py -q`，预期该文件全部通过。
+运行 `cd ~/DevProjects/YOLO_Trainer/backend && pytest tests/test_class_annotation_api.py -q`，预期该文件全部通过。
 
 ### Task 2: 前端 API、状态和确认删除交互
 
 **Files:**
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/api.ts`
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/App.tsx`
-- Modify: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/styles.css`
-- Test: `/Users/peinan/DevProjects/YOLO_Trainer/frontend/src/App.test.tsx`
+- Modify: `~/DevProjects/YOLO_Trainer/frontend/src/api.ts`
+- Modify: `~/DevProjects/YOLO_Trainer/frontend/src/App.tsx`
+- Modify: `~/DevProjects/YOLO_Trainer/frontend/src/styles.css`
+- Test: `~/DevProjects/YOLO_Trainer/frontend/src/App.test.tsx`
 
 - [x] **Step 1: 写前端失败测试**
 
@@ -58,7 +58,7 @@ pytest tests/test_class_annotation_api.py -q
 
 - [x] **Step 2: 运行前端测试确认失败**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer/frontend && npx vitest run src/App.test.tsx -t "类别删除"`，预期失败，因为没有 `deleteClass` API 和删除控件。
+运行 `cd ~/DevProjects/YOLO_Trainer/frontend && npx vitest run src/App.test.tsx -t "类别删除"`，预期失败，因为没有 `deleteClass` API 和删除控件。
 
 - [x] **Step 3: 增加前端删除 API 和状态**
 
@@ -70,7 +70,7 @@ pytest tests/test_class_annotation_api.py -q
 
 - [x] **Step 5: 增加样式并运行前端相关测试**
 
-增加删除按钮、保护提示和确认弹窗样式，沿用现有按钮与模态框视觉规范。运行 `cd /Users/peinan/DevProjects/YOLO_Trainer/frontend && npx vitest run src/App.test.tsx -t "类别删除|固定类别|编辑"`，预期全部通过。
+增加删除按钮、保护提示和确认弹窗样式，沿用现有按钮与模态框视觉规范。运行 `cd ~/DevProjects/YOLO_Trainer/frontend && npx vitest run src/App.test.tsx -t "类别删除|固定类别|编辑"`，预期全部通过。
 
 ### Task 3: 全量验证和提交
 
@@ -79,12 +79,12 @@ pytest tests/test_class_annotation_api.py -q
 
 - [x] **Step 1: 运行后端全量测试**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer/backend && pytest -q`，预期全量通过。
+运行 `cd ~/DevProjects/YOLO_Trainer/backend && pytest -q`，预期全量通过。
 
 - [x] **Step 2: 运行前端全量测试和构建**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer/frontend && npm test -- --run && npm run build`，预期 71 项既有测试加新增测试全部通过，Vite 构建成功。
+运行 `cd ~/DevProjects/YOLO_Trainer/frontend && npm test -- --run && npm run build`，预期 71 项既有测试加新增测试全部通过，Vite 构建成功。
 
 - [x] **Step 3: 检查差异并提交**
 
-运行 `cd /Users/peinan/DevProjects/YOLO_Trainer && git diff --check && git status --short`，确认只暂存本次类别删除相关文件和计划文档；提交信息使用 `feat: add safe class deletion`。
+运行 `cd ~/DevProjects/YOLO_Trainer && git diff --check && git status --short`，确认只暂存本次类别删除相关文件和计划文档；提交信息使用 `feat: add safe class deletion`。
