@@ -1,5 +1,9 @@
 # YOLO Trainer
 
+<p align="center">
+  <img src="docs/assets/github-banner.png" alt="YOLO Trainer — Local annotation and training workbench" width="100%">
+</p>
+
 [English](#english) · [中文](#中文)
 
 <a id="english"></a>

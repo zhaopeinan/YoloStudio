@@ -25,3 +25,4 @@ artifacts/
 system_description/
 .playwright-cli/
 *.egg-info/
+generated/
