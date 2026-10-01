@@ -31,7 +31,7 @@ def _validate_zip_filename(filename: str) -> str:
 def _known_server_zips() -> list[Path]:
     candidates = [
         REPO_ROOT / "image_dataset.zip",
-        Path("/opt/YOLO_Trainer/image_dataset.zip"),
+        Path("/opt/YoloStudio/image_dataset.zip"),
     ]
     seen: set[Path] = set()
     result: list[Path] = []

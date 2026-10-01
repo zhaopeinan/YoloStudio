@@ -1,7 +1,12 @@
-# YOLO Trainer
+# YoloStudio
 
 <p align="center">
-  <img src="docs/assets/github-banner.png" alt="YOLO Trainer — Local annotation and training workbench" width="100%">
+  <img src="docs/assets/github-banner.png" alt="YoloStudio — Local YOLO detection workbench" width="100%">
+</p>
+
+<p align="center">
+  <strong>Local YOLO detection workbench · 本地目标检测工作台</strong><br>
+  Annotate · Freeze · Train · Review　｜　标注 · 冻结 · 训练 · 复核
 </p>
 
 [English](#english) · [中文](#中文)
@@ -10,7 +15,7 @@
 
 ## English
 
-YOLO Trainer is a local workbench for object detection. It takes a folder or zip of images through class definition, bounding-box annotation, dataset freeze, Ultralytics training, visual review, and model export. Images, labels, runs, and exports stay in a workspace on the machine that runs the app.
+YoloStudio is a local workbench for object detection. It takes a folder or zip of images through class definition, bounding-box annotation, dataset freeze, Ultralytics training, visual review, and model export. Images, labels, runs, and exports stay in a workspace on the machine that runs the app.
 
 The interface is in Chinese. Two roles share one database: an administrator runs the full workflow, and annotators label images in datasets an administrator has already imported.
 
@@ -92,21 +97,21 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
 ### Configuration
 
-Settings use the `YOLO_TRAINER_` prefix.
+Settings use the `YOLOSTUDIO_` prefix.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `YOLO_TRAINER_WORKSPACE_ROOT` | `<repo>/workspace` | Database, imported images, versions, runs, exports |
-| `YOLO_TRAINER_JWT_SECRET` | a development placeholder | Signing key for session tokens |
-| `YOLO_TRAINER_DEFAULT_ADMIN_USERNAME` | `admin` | First administrator, created once |
-| `YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD` | `admin123` | Password for that first account |
-| `YOLO_TRAINER_ACCESS_TOKEN_EXPIRE_MINUTES` | 7 days | Session lifetime |
+| `YOLOSTUDIO_WORKSPACE_ROOT` | `<repo>/workspace` | Database, imported images, versions, runs, exports |
+| `YOLOSTUDIO_JWT_SECRET` | a development placeholder | Signing key for session tokens |
+| `YOLOSTUDIO_DEFAULT_ADMIN_USERNAME` | `admin` | First administrator, created once |
+| `YOLOSTUDIO_DEFAULT_ADMIN_PASSWORD` | `admin123` | Password for that first account |
+| `YOLOSTUDIO_ACCESS_TOKEN_EXPIRE_MINUTES` | 7 days | Session lifetime |
 
 Example:
 
 ```bash
-export YOLO_TRAINER_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD='choose-a-long-password'
+export YOLOSTUDIO_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export YOLOSTUDIO_DEFAULT_ADMIN_PASSWORD='choose-a-long-password'
 ```
 
 ### Layout
@@ -128,7 +133,7 @@ cd frontend && npm test -- --run && npm run build
 
 ### Security
 
-YOLO Trainer is a single-machine tool. The development password and signing key are there so a checkout can boot. Replace both before the port is reachable by anyone else. Do not commit `workspace/`, datasets, or weight files.
+YoloStudio is a single-machine tool. The development password and signing key are there so a checkout can boot. Replace both before the port is reachable by anyone else. Do not commit `workspace/`, datasets, or weight files.
 
 ---
 
@@ -136,7 +141,7 @@ YOLO Trainer is a single-machine tool. The development password and signing key 
 
 ## 中文
 
-YOLO Trainer 是一套本地目标检测工作台。它把图像目录或压缩包一路送到类别定义、边界框标注、数据版本冻结、Ultralytics 训练、结果复查和模型导出。图像、标注、训练记录和导出文件都留在运行这套程序的那台机器上。
+YoloStudio 是一套本地目标检测工作台。它把图像目录或压缩包一路送到类别定义、边界框标注、数据版本冻结、Ultralytics 训练、结果复查和模型导出。图像、标注、训练记录和导出文件都留在运行这套程序的那台机器上。
 
 界面语言是中文。同一套数据库里有两种角色：管理员走完整流程，标注员只在管理员已经导入的数据集上标注。
 
@@ -218,21 +223,21 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ### 配置
 
-配置项使用 `YOLO_TRAINER_` 前缀。
+配置项使用 `YOLOSTUDIO_` 前缀。
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
-| `YOLO_TRAINER_WORKSPACE_ROOT` | `<仓库>/workspace` | 数据库、导入图像、版本、训练和导出 |
-| `YOLO_TRAINER_JWT_SECRET` | 开发用占位密钥 | 登录令牌的签名密钥 |
-| `YOLO_TRAINER_DEFAULT_ADMIN_USERNAME` | `admin` | 首次创建的管理员，只创建一次 |
-| `YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD` | `admin123` | 该账号的初始密码 |
-| `YOLO_TRAINER_ACCESS_TOKEN_EXPIRE_MINUTES` | 7 天 | 登录有效期 |
+| `YOLOSTUDIO_WORKSPACE_ROOT` | `<仓库>/workspace` | 数据库、导入图像、版本、训练和导出 |
+| `YOLOSTUDIO_JWT_SECRET` | 开发用占位密钥 | 登录令牌的签名密钥 |
+| `YOLOSTUDIO_DEFAULT_ADMIN_USERNAME` | `admin` | 首次创建的管理员，只创建一次 |
+| `YOLOSTUDIO_DEFAULT_ADMIN_PASSWORD` | `admin123` | 该账号的初始密码 |
+| `YOLOSTUDIO_ACCESS_TOKEN_EXPIRE_MINUTES` | 7 天 | 登录有效期 |
 
 示例：
 
 ```bash
-export YOLO_TRAINER_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export YOLO_TRAINER_DEFAULT_ADMIN_PASSWORD='choose-a-long-password'
+export YOLOSTUDIO_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export YOLOSTUDIO_DEFAULT_ADMIN_PASSWORD='choose-a-long-password'
 ```
 
 ### 目录
@@ -254,4 +259,4 @@ cd frontend && npm test -- --run && npm run build
 
 ### 安全
 
-YOLO Trainer 面向单机使用。开发用的密码和签名密钥是为了让一份新检出的代码能够直接启动。端口对其他人可达之前，请换掉这两项。不要把 `workspace/`、数据集或权重文件提交进仓库。
+YoloStudio 面向单机使用。开发用的密码和签名密钥是为了让一份新检出的代码能够直接启动。端口对其他人可达之前，请换掉这两项。不要把 `workspace/`、数据集或权重文件提交进仓库。

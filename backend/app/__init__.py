@@ -1,1 +1,1 @@
-"""YOLO Trainer backend package."""
+"""YoloStudio backend package."""

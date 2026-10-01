@@ -1008,7 +1008,7 @@ export function deleteDatasetSource(sourceId: number): Promise<void> {
 
 export function importDataset(
   sourcePath: string,
-  projectName = "YOLO Trainer Project",
+  projectName = "YoloStudio Project",
   datasetName = "image_dataset",
 ): Promise<DatasetImportResponse> {
   return requestJson<DatasetImportResponse>("/api/datasets/import", {

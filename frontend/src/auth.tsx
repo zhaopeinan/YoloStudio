@@ -15,7 +15,7 @@ import {
   type UserRole,
 } from "./api";
 
-const TOKEN_KEY = "yolo_trainer_access_token";
+const TOKEN_KEY = "yolostudio_access_token";
 
 type AuthContextValue = {
   user: AuthUser | null;

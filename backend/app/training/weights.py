@@ -44,8 +44,8 @@ def _bundled_pretrained_dir() -> Path:
 def _bundled_model_path(ultralytics_name: str) -> Path | None:
     candidates = [
         _bundled_pretrained_dir() / ultralytics_name,
-        Path("/opt/YOLO_Trainer/backend") / ultralytics_name,
-        Path("/opt/YOLO_Trainer/pretrained") / ultralytics_name,
+        Path("/opt/YoloStudio/backend") / ultralytics_name,
+        Path("/opt/YoloStudio/pretrained") / ultralytics_name,
     ]
     for path in candidates:
         if path.is_file():

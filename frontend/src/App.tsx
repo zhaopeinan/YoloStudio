@@ -151,7 +151,7 @@ function resolveDefaultDatasetPath(): string {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host && host !== "localhost" && host !== "127.0.0.1") {
-      return "/opt/YOLO_Trainer/image_dataset.zip";
+      return "/opt/YoloStudio/image_dataset.zip";
     }
   }
   return "/tmp/image_dataset.zip";
@@ -2813,7 +2813,7 @@ export default function App() {
       <section className="topbar" aria-label="应用状态">
         <div>
           <p className="eyebrow">本地目标检测工作台</p>
-          <h1>YOLO Trainer</h1>
+          <h1>YoloStudio</h1>
         </div>
         <div className="topbar-actions">
           <div className="device-pill">
