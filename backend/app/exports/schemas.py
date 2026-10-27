@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class ExportCreate(BaseModel):
-    format: str = Field(pattern="^(pt|onnx|tensorrt)$")
+    format: str = Field(pattern="^(pt|onnx|tensorrt|rknn)$")
 
 
 class ExportArtifactRead(BaseModel):
@@ -33,5 +33,6 @@ class ExportCapabilities(BaseModel):
     pt_available: bool
     onnx_available: bool
     tensorrt_available: bool
+    rknn_available: bool
     weights_path: str | None
     reasons: dict[str, str]

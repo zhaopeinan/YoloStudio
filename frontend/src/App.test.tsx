@@ -817,6 +817,7 @@ const apiMock = vi.hoisted(() => {
     pt_available: true,
     onnx_available: false,
     tensorrt_available: false,
+    rknn_available: true,
     weights_path: "/tmp/workspace/projects/1/runs/1/ultralytics/weights/best.pt",
     reasons: {
       onnx: "Ultralytics is not installed",
@@ -1528,6 +1529,7 @@ describe("App", () => {
     expect(await screen.findByText(".pt 权重")).toBeInTheDocument();
     expect(screen.queryByText("ONNX")).not.toBeInTheDocument();
     expect(screen.queryByText("TensorRT")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "转换为 RKNN" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "导出 PT" }));
 
@@ -1537,9 +1539,22 @@ describe("App", () => {
       "href",
       "/api/training/runs/1/weights/best",
     );
-    expect(
-      within(screen.getByLabelText("导出产物")).getByRole("link", { name: /下载/ }),
-    ).toHaveAttribute("href", "/api/training/runs/1/exports/1/file");
+
+    await user.click(screen.getByRole("button", { name: "转换为 RKNN" }));
+    expect(apiMock.createRunExport).toHaveBeenCalledWith(1, "rknn");
+    expect(await screen.findByText("RKNN 导出任务 #2")).toBeInTheDocument();
+    const exportDownloads = within(screen.getByLabelText("导出产物")).getAllByRole(
+      "link",
+      { name: /下载/ },
+    );
+    expect(exportDownloads[0]).toHaveAttribute(
+      "href",
+      "/api/training/runs/1/exports/2/file",
+    );
+    expect(exportDownloads[1]).toHaveAttribute(
+      "href",
+      "/api/training/runs/1/exports/1/file",
+    );
 
     await user.click(within(screen.getByLabelText("预测样本")).getAllByRole("button")[0]);
 

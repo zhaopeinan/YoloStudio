@@ -747,6 +747,7 @@ export type ExportCapabilities = {
   pt_available: boolean;
   onnx_available: boolean;
   tensorrt_available: boolean;
+  rknn_available: boolean;
   weights_path: string | null;
   reasons: Record<string, string>;
 };
