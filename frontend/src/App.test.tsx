@@ -1543,6 +1543,10 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "转换为 RKNN" }));
     expect(apiMock.createRunExport).toHaveBeenCalledWith(1, "rknn");
     expect(await screen.findByText("RKNN 导出任务 #2")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /下载 RKNN/ })).toHaveAttribute(
+      "href",
+      "/api/training/runs/1/exports/2/file",
+    );
     const exportDownloads = within(screen.getByLabelText("导出产物")).getAllByRole(
       "link",
       { name: /下载/ },
