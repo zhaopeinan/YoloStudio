@@ -691,6 +691,13 @@ export default function App() {
     () => runs.find((run) => run.id === selectedEvalRunId) ?? null,
     [runs, selectedEvalRunId],
   );
+  const latestRknnExport = useMemo(
+    () =>
+      exports.find(
+        (artifact) => artifact.format === "rknn" && artifact.status === "completed",
+      ) ?? null,
+    [exports],
+  );
   const completedEvalRuns = useMemo(
     () => runs.filter((run) => run.status === "completed"),
     [runs],
@@ -4360,6 +4367,19 @@ export default function App() {
               >
                 {isCreatingExport === "rknn" ? "正在转换为 RKNN…" : "转换为 RKNN"}
               </button>
+              {latestRknnExport ? (
+                <a
+                  className="secondary-button export-download-link"
+                  href={authedMediaUrl(
+                    latestRknnExport.download_url ||
+                      getExportDownloadUrl(latestRknnExport.run_id, latestRknnExport.id),
+                  )}
+                  download={`run-${latestRknnExport.run_id}.rknn`}
+                >
+                  <Download size={16} />
+                  下载 RKNN
+                </a>
+              ) : null}
             </div>
           ) : null}
         </div>
