@@ -2675,6 +2675,11 @@ input[type="color"] {
   min-height: 34px;
 }
 
+.export-weight-actions {
+  display: grid;
+  gap: 8px;
+}
+
 .export-download-link {
   display: inline-flex;
   align-items: center;
@@ -2682,6 +2687,11 @@ input[type="color"] {
   gap: 8px;
   min-height: 34px;
   text-decoration: none;
+}
+
+.export-weight-actions .secondary-button {
+  width: 100%;
+  min-height: 34px;
 }
 
 .export-row-actions {

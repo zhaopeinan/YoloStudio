@@ -82,7 +82,7 @@ def _artifact_category(relative_path: str) -> str:
         return "metrics"
     if path.startswith("ultralytics/weights/") or path.startswith("weights/"):
         return "weights"
-    if path.startswith("exports/") or suffix in {".onnx", ".engine"}:
+    if path.startswith("exports/") or suffix in {".onnx", ".engine", ".rknn"}:
         return "export"
     if path.startswith("predictions/"):
         return "prediction"

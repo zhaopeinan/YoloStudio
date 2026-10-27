@@ -4333,14 +4333,34 @@ export default function App() {
             onCreate={handleCreateExport}
           />
           {selectedEvalRunId && exportCapabilities?.pt_available ? (
-            <a
-              className="secondary-button export-download-link"
-              href={authedMediaUrl(getRunBestWeightsUrl(selectedEvalRunId))}
-              download={`run-${selectedEvalRunId}-best.pt`}
-            >
-              <Download size={16} />
-              下载训练权重 best.pt
-            </a>
+            <div className="export-weight-actions">
+              <a
+                className="secondary-button export-download-link"
+                href={authedMediaUrl(getRunBestWeightsUrl(selectedEvalRunId))}
+                download={`run-${selectedEvalRunId}-best.pt`}
+              >
+                <Download size={16} />
+                下载训练权重 best.pt
+              </a>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={
+                  !exportCapabilities?.rknn_available ||
+                  selectedEvalRun?.status !== "completed" ||
+                  isCreatingExport === "rknn"
+                }
+                title={
+                  exportCapabilities?.rknn_available
+                    ? "将 best.pt 转为 rk3588 INT8 .rknn"
+                    : formatExportReason(exportCapabilities?.reasons.rknn) ||
+                      "RKNN 转换暂不可用"
+                }
+                onClick={() => handleCreateExport("rknn")}
+              >
+                {isCreatingExport === "rknn" ? "正在转换为 RKNN…" : "转换为 RKNN"}
+              </button>
+            </div>
           ) : null}
         </div>
 
@@ -6252,6 +6272,7 @@ function formatExportReason(reason?: string) {
   const labels: Record<string, string> = {
     "Ultralytics is not installed": "未安装 Ultralytics",
     "TensorRT Python package is not installed": "未安装 TensorRT Python 包",
+    "rknn-toolkit2 is not installed": "未安装 rknn-toolkit2",
   };
   return labels[reason] ?? reason;
 }

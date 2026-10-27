@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(default=60 * 24 * 7)
     default_admin_username: str = Field(default="admin")
     default_admin_password: str = Field(default="admin123")
+    rknn_python: Path | None = Field(
+        default=None,
+        description="Python executable that has rknn-toolkit2 installed",
+    )
+    rknn_target_platform: str = Field(default="rk3588")
 
     @property
     def database_path(self) -> Path:

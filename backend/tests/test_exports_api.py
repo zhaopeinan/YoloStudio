@@ -143,6 +143,80 @@ def test_tensorrt_export_reports_unsupported_environment(tmp_path: Path, monkeyp
         assert "TensorRT export is not supported" in artifact["error_message"]
 
 
+def test_rknn_export_reports_unsupported_environment(tmp_path: Path, monkeypatch):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    monkeypatch.setattr("app.exports.runner.rknn_available", lambda: False)
+    monkeypatch.setattr("app.exports.runner.resolve_rknn_python", lambda: None)
+
+    with isolated_client(tmp_path) as client:
+        run = _create_completed_run(client, zip_path, monkeypatch)
+        _write_best_weights(run)
+
+        capabilities_response = client.get(f"/api/training/runs/{run['id']}/exports/capabilities")
+
+        assert capabilities_response.status_code == 200
+        capabilities = capabilities_response.json()
+        assert capabilities["rknn_available"] is False
+        assert "rknn" in capabilities["reasons"]
+
+        export_response = client.post(
+            f"/api/training/runs/{run['id']}/exports",
+            json={"format": "rknn"},
+        )
+
+        assert export_response.status_code == 200
+        artifact = export_response.json()
+        assert artifact["format"] == "rknn"
+        assert artifact["status"] == "failed"
+        assert "rknn-toolkit2 is not installed" in artifact["error_message"]
+
+
+def test_rknn_export_can_complete_through_adapter(tmp_path: Path, monkeypatch):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    def fake_execute_export(db, artifact, run):
+        from app.exports.runner import complete_export, export_root
+
+        destination = export_root(run) / f"run-{run.id}.rknn"
+        destination.write_bytes(b"fake rknn")
+        return complete_export(
+            db,
+            artifact,
+            destination,
+            {
+                "source": "fake-best.pt",
+                "format": "rknn",
+                "target_platform": "rk3588",
+                "quantization": "int8",
+            },
+        )
+
+    monkeypatch.setattr("app.exports.router.execute_export", fake_execute_export)
+    monkeypatch.setattr("app.exports.runner.rknn_available", lambda: True)
+
+    with isolated_client(tmp_path) as client:
+        run = _create_completed_run(client, zip_path, monkeypatch)
+        _write_best_weights(run)
+
+        export_response = client.post(
+            f"/api/training/runs/{run['id']}/exports",
+            json={"format": "rknn"},
+        )
+
+        assert export_response.status_code == 200
+        artifact = export_response.json()
+        assert artifact["format"] == "rknn"
+        assert artifact["status"] == "completed"
+        assert artifact["metadata"]["target_platform"] == "rk3588"
+        assert Path(artifact["artifact_path"]).exists()
+        assert artifact["download_url"] == (
+            f"/api/training/runs/{run['id']}/exports/{artifact['id']}/file"
+        )
+
+
 def test_export_rejects_non_completed_runs(tmp_path: Path, monkeypatch):
     zip_path = tmp_path / "sample.zip"
     create_import_zip(zip_path)
