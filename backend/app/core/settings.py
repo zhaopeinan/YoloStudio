@@ -22,6 +22,13 @@ class Settings(BaseSettings):
         description="Python executable that has rknn-toolkit2 installed",
     )
     rknn_target_platform: str = Field(default="rk3588")
+    rknn_quant_mode: str = Field(
+        default="fp16",
+        description=(
+            "RKNN quant mode: fp16 (default, avoids YOLOv8 score collapse), "
+            "hybrid (INT8 body + FP16 outputs), or int8 (often breaks class scores)"
+        ),
+    )
 
     @property
     def database_path(self) -> Path:

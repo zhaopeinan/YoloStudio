@@ -300,18 +300,26 @@ def _export_rknn(db: Session, artifact: ExportArtifact, run: TrainingRun) -> Exp
 
     settings = get_settings()
     target_platform = settings.rknn_target_platform or "rk3588"
+    quant_mode = (settings.rknn_quant_mode or "fp16").lower()
+    if quant_mode not in {"hybrid", "fp16", "int8"}:
+        quant_mode = "fp16"
+
     onnx_path = _ensure_onnx(run)
     destination = export_root(run) / f"run-{run.id}.rknn"
 
     images = collect_calibration_images(_calibration_image_roots(db, run), limit=100)
-    do_quantization = bool(images)
+    needs_dataset = quant_mode in {"hybrid", "int8"}
+    if needs_dataset and not images:
+        # Without calibration images, fall back to full FP16 rather than a broken INT8 head.
+        quant_mode = "fp16"
 
     with tempfile.TemporaryDirectory(prefix=f"rknn-export-{run.id}-") as tmp:
         tmp_root = Path(tmp)
         dataset_txt = None
-        if do_quantization:
+        if quant_mode in {"hybrid", "int8"}:
             dataset_txt = _write_calibration_dataset(images, tmp_root / "dataset.txt")
 
+        # Hybrid step1 writes intermediate files next to the output; use exports/.
         convert_module = Path(__file__).with_name("rknn_convert.py")
         command = [
             str(python_path),
@@ -322,11 +330,11 @@ def _export_rknn(db: Session, artifact: ExportArtifact, run: TrainingRun) -> Exp
             str(destination),
             "--target-platform",
             target_platform,
+            "--quant-mode",
+            quant_mode,
         ]
         if dataset_txt is not None:
             command.extend(["--dataset", str(dataset_txt)])
-        else:
-            command.append("--no-quantization")
 
         completed = subprocess.run(
             command,
@@ -348,8 +356,12 @@ def _export_rknn(db: Session, artifact: ExportArtifact, run: TrainingRun) -> Exp
             "onnx": str(onnx_path),
             "format": "rknn",
             "target_platform": target_platform,
-            "quantization": "int8" if do_quantization else "none",
+            "quantization": quant_mode,
             "calibration_images": len(images),
             "rknn_python": str(python_path),
+            "note": (
+                "YOLOv8 packs box coords and class scores in one tensor; "
+                "full INT8 zeros class scores. hybrid/fp16 keeps outputs usable."
+            ),
         },
     )
