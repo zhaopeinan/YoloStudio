@@ -10,27 +10,31 @@
     导入后 group 名进入图片 platform 字段；meta.jsonl 中 t（epoch 秒）与
     z（相对起飞点高度，米）分别进入 timestamp / altitude 字段。
   * 输入视频若带 DJI 遥测字幕流（mov_text SRT），按帧时间对齐解析
-    GPS / 高度 / 水平速度 / 垂直速度 / 相机参数写入 meta.jsonl。
+    GPS / 高度 / 水平速度 / 垂直速度 / 相机参数写入 meta.jsonl。注意：剪辑导出的
+    视频是重编码产物，会丢掉字幕流与拍摄时间，此时 meta 只有帧号与相对时间；
+    需要找回 t/z 时用 scripts/align_dataset_to_reference.py 对回旧数据集。
   * 抽帧按源视频真实时间轴逐帧取样（ffmpeg select + showinfo），文件名带
     源帧号，可精确回溯到原视频。
   * 同一 group 目录已存在时默认拒绝覆盖，避免不同密度混抽。
 
 用法示例：
 
-    # 抽 1.MP4 的前 331 秒，每秒 1 帧，输出到 video_frames/
-    python3 scripts/extract_video_frames.py raw_video/1.MP4 \
-        --out-root video_frames --fps 1 --end 331
+    # 抽 1.mp4 全程，每秒 1 帧，输出到 video_frames/
+    python3 scripts/extract_video_frames.py raw_video/1.mp4 \
+        --out-root video_frames --fps 1 --group 20261113_1739
 
     # 只打印抽帧计划（探测视频与遥测，不写文件）
-    python3 scripts/extract_video_frames.py raw_video/1.MP4 \
-        --out-root video_frames --fps 1 --end 331 --dry-run
+    python3 scripts/extract_video_frames.py raw_video/1.mp4 \
+        --out-root video_frames --fps 1 --group 20261113_1739 --dry-run
 
-已抽取的数据记录（2026-11-15，每 1 秒 1 帧）：
+已抽取的数据记录（2026-11-15，每 1 秒 1 帧；均为剪辑后的新版本全程航拍）：
 
-    raw_video/1.MP4 -> video_frames/images/20261113_1739/   331 张（取 [0, 331)s）
-    raw_video/2.MP4 -> video_frames/images/20261114_1033/   616 张（取 [0, 616)s）
+    raw_video/1.mp4 -> video_frames/images/20261113_1739/   194 张（全程 193.9s）
+    raw_video/2.mp4 -> video_frames/images/20261114_1033/   384 张（全程 383.8s）
 
-    两段视频的尾部均为落地后的地面镜头，不取；其余全程为航拍画面。
+    这两段 30fps 视频是重新剪辑导出的，已无遥测字幕与拍摄时间，因此分组名用
+    --group 显式指定为原拍摄场次；meta 里的 t/z 等字段由
+    scripts/align_dataset_to_reference.py 从上一版数据集逐帧对回后回填。
     video_frames/ 是导入 YoloStudio 的位置数据，已在 .gitignore 中忽略。
 """
 
