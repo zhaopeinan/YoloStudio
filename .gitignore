@@ -6,8 +6,10 @@
 *.onnx
 *.pt
 *.py[cod]
+*.rknn
 *.sqlite
 *.zip
+.aris/
 .DS_Store
 .coverage
 .playwright-cli/
@@ -20,6 +22,7 @@ coverage/
 dist/
 downloads/
 generated/
+guidelines/
 image_dataset.zip
 image_dataset/
 node_modules/
