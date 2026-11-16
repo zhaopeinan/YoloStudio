@@ -11,7 +11,7 @@ def test_health_endpoint_reports_local_app_state():
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["app"] == "YoloStudio"
+    assert payload["app"] == "智航杯标注台"
     assert payload["workspace_root"]
     assert payload["database_path"].endswith("app.db")
     assert payload["devices"]["selected"] in {"cuda", "mps", "cpu"}

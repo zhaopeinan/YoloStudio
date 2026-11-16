@@ -999,7 +999,7 @@ const apiMock = vi.hoisted(() => {
 vi.mock("./api", () => ({
   getHealth: async () => ({
     status: "ok",
-    app: "YoloStudio",
+    app: "智航杯标注台",
     workspace_root: "/tmp/workspace",
     database_path: "/tmp/workspace/app.db",
     devices: { selected: "cpu", available: ["cpu"], details: {} },
@@ -1315,7 +1315,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByText("YoloStudio")).toBeInTheDocument();
+    expect(await screen.findByText("智航杯标注台")).toBeInTheDocument();
     expect(await screen.findByText("cpu")).toBeInTheDocument();
     expect(screen.getByTitle("/tmp/workspace")).toHaveTextContent("/tmp/workspace");
     expect(screen.getByTitle("/tmp/workspace/app.db")).toHaveTextContent(
@@ -1752,7 +1752,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByText("YoloStudio")).toBeInTheDocument();
+    expect(await screen.findByText("智航杯标注台")).toBeInTheDocument();
     await navigateToStep(user, "图像标注");
     expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
     expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
