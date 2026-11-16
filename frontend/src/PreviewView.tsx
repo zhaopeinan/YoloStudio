@@ -428,7 +428,8 @@ export function PreviewView({ projectId, datasets, runs, classes }: PreviewViewP
               <option value="">请选择数据集</option>
               {datasets.map((dataset) => (
                 <option key={dataset.id} value={dataset.id}>
-                  {dataset.name}（{dataset.image_count} 张图像 · 已标注 {dataset.annotated_image_count ?? 0} 张）
+                  {dataset.name}（{dataset.image_count} 张图像 · 已标注 {dataset.annotated_image_count ?? 0} 张 · 未标注{" "}
+                  {Math.max(0, dataset.image_count - (dataset.annotated_image_count ?? 0))} 张）
                 </option>
               ))}
             </select>

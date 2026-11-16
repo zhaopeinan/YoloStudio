@@ -298,7 +298,7 @@ h2 {
 }
 
 .storage-table {
-  min-width: 940px;
+  min-width: 1080px;
   table-layout: fixed;
 }
 
@@ -334,7 +334,7 @@ h2 {
 }
 
 .storage-table th:nth-child(4) {
-  width: 18%;
+  width: 26%;
 }
 
 .storage-table th:nth-child(6) {

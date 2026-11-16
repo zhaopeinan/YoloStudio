@@ -783,6 +783,7 @@ export type StorageItem = {
   artifact_path: string;
   size_bytes: number;
   image_count: number | null;
+  annotated_image_count: number | null;
   annotation_count: number | null;
   split_counts: StorageSplitCounts | null;
   created_at: string;
@@ -813,6 +814,7 @@ export type StorageItemDetail = StorageItem & {
 export type TrashItemSummary = {
   name?: string;
   image_count?: number;
+  annotated_image_count?: number;
   annotation_count?: number;
   split_counts?: StorageSplitCounts;
   class_names?: string[];

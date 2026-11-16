@@ -1363,7 +1363,7 @@ describe("App", () => {
     expect(await screen.findByLabelText("已保存数据集")).toBeInTheDocument();
     expect(
       within(screen.getByLabelText("已保存数据集")).getByRole("option", {
-        name: "Drone QA Project / camouflage-set（2 张图像 · 已标注 1 张 · 3 个边界框）",
+        name: "Drone QA Project / camouflage-set（2 张图像 · 已标注 1 张 · 未标注 1 张 · 3 个边界框）",
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "加载数据集" })).toBeInTheDocument();

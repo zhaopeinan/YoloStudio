@@ -3144,7 +3144,9 @@ export default function App() {
                       value={savedDatasetValue(project.id, dataset.id)}
                     >
                       {project.name} / {dataset.name}（{dataset.image_count} 张图像 · 已标注{" "}
-                      {dataset.annotated_image_count ?? 0} 张 · {dataset.annotation_count ?? 0} 个边界框）
+                      {dataset.annotated_image_count ?? 0} 张 · 未标注{" "}
+                      {Math.max(0, dataset.image_count - (dataset.annotated_image_count ?? 0))} 张 ·{" "}
+                      {dataset.annotation_count ?? 0} 个边界框）
                     </option>
                   )),
                 )}
@@ -3436,7 +3438,8 @@ export default function App() {
                           {dataset.name}
                           {isCurrent ? "（当前）" : ""}
                           {" · "}
-                          {dataset.image_count} 张 / 已标注 {dataset.annotated_image_count ?? 0}
+                          {dataset.image_count} 张 / 已标注 {dataset.annotated_image_count ?? 0} / 未标注{" "}
+                          {Math.max(0, dataset.image_count - (dataset.annotated_image_count ?? 0))}
                         </span>
                       </label>
                     );

@@ -91,8 +91,23 @@ function runStatusLabel(status: string): string {
   return labels[status] ?? status;
 }
 
-function contentSummary(item: StorageItem): string {
-  return `${item.image_count ?? 0} 张图像 / ${item.annotation_count ?? 0} 个标注`;
+function contentSummary(item: Pick<StorageItem, "image_count" | "annotated_image_count" | "annotation_count">): string {
+  const imageCount = item.image_count ?? 0;
+  const annotatedCount = item.annotated_image_count ?? 0;
+  const unannotatedCount = Math.max(0, imageCount - annotatedCount);
+  const annotationCount = item.annotation_count ?? 0;
+  return `${imageCount} 张图像 · 已标注 ${annotatedCount} · 未标注 ${unannotatedCount} · ${annotationCount} 个边界框`;
+}
+
+function trashContentSummary(summary: TrashItem["summary"]): string {
+  if (summary.image_count === undefined) {
+    return summary.model || runStatusLabel(summary.status ?? "");
+  }
+  return contentSummary({
+    image_count: summary.image_count,
+    annotated_image_count: summary.annotated_image_count ?? null,
+    annotation_count: summary.annotation_count ?? 0,
+  });
 }
 
 function resolveOpenableDataset(item: StorageItem, siblingItems: StorageItem[] = []): OpenableDatasetRef | null {
@@ -770,11 +785,7 @@ function TrashTable({
             <tr key={item.id} className={`trash-row ${status.className}`}>
               <th scope="row">{item.display_name}</th>
               <td>{entityLabel(item.entity_type)}</td>
-              <td>
-                {item.summary.image_count !== undefined
-                  ? `${item.summary.image_count} 张图像 / ${item.summary.annotation_count ?? 0} 个标注`
-                  : item.summary.model || runStatusLabel(item.summary.status ?? "")}
-              </td>
+              <td>{trashContentSummary(item.summary)}</td>
               <td>{formatBytes(item.size_bytes)}</td>
               <td>{formatDate(item.deleted_at)}</td>
               <td>{daysUntil(item.purge_after)} 天后清理</td>

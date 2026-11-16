@@ -23,6 +23,7 @@ class StorageItemRead(BaseModel):
     artifact_path: str
     size_bytes: int
     image_count: int | None
+    annotated_image_count: int | None = None
     annotation_count: int | None
     split_counts: dict[str, int] | None
     created_at: datetime
