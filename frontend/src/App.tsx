@@ -2819,8 +2819,8 @@ export default function App() {
     <main className="app-shell">
       <section className="topbar" aria-label="应用状态">
         <div>
-          <p className="eyebrow">本地目标检测工作台</p>
-          <h1>YoloStudio</h1>
+          <p className="eyebrow">第四届智航杯 · 实物赛</p>
+          <h1>智航杯标注台</h1>
         </div>
         <div className="topbar-actions">
           <div className="device-pill">

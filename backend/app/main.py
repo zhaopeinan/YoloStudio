@@ -62,7 +62,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="YoloStudio API", lifespan=lifespan)
+app = FastAPI(title="智航杯标注台 API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,7 +100,7 @@ def health() -> dict:
     device_info = detect_devices()
     return {
         "status": "ok",
-        "app": "YoloStudio",
+        "app": "智航杯标注台",
         "workspace_root": str(settings.workspace_root),
         "database_path": str(settings.database_path),
         "devices": {

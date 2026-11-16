@@ -27,8 +27,8 @@ export function LoginView() {
       <section className="login-card" aria-label="用户登录">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">YoloStudio</p>
-            <h1>登录工作台</h1>
+            <p className="eyebrow">第四届智航杯 · 实物赛</p>
+            <h1>智航杯标注台</h1>
             <p className="muted">使用管理员或标注员账号进入系统</p>
           </div>
           <LogIn size={22} />
