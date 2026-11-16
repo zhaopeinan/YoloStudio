@@ -7,7 +7,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.classes.schemas import ClassCreate, ClassList, ClassRead, ClassUpdate
+from app.classes.schemas import (
+    ClassActiveScopeUpdate,
+    ClassCreate,
+    ClassList,
+    ClassRead,
+    ClassUpdate,
+)
 from app.db.models import Annotation, ClassDef, DatasetVersion, Project
 from app.db.session import get_db
 
@@ -154,6 +160,8 @@ def update_project_class(
         class_def.color = request.color
     if "description" in request.model_fields_set:
         class_def.description = request.description
+    if request.active is not None:
+        class_def.active = 1 if request.active else 0
 
     try:
         db.commit()
@@ -166,6 +174,49 @@ def update_project_class(
         class_def,
         annotation_counts.get(class_def.id, 0),
         version_counts.get(class_def.id, 0),
+    )
+
+
+@router.put("/{project_id}/classes/active-scope", response_model=ClassList)
+def set_active_class_scope(
+    project_id: int,
+    request: ClassActiveScopeUpdate,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin),
+) -> ClassList:
+    if db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project was not found")
+
+    classes = list(
+        db.scalars(select(ClassDef).where(ClassDef.project_id == project_id).order_by(ClassDef.id)).all()
+    )
+    known_ids = {class_def.id for class_def in classes}
+    requested_ids = list(dict.fromkeys(request.class_ids))
+    unknown_ids = [class_id for class_id in requested_ids if class_id not in known_ids]
+    if unknown_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown class ids for project: {unknown_ids}",
+        )
+
+    active_ids = set(requested_ids)
+    for class_def in classes:
+        class_def.active = 1 if class_def.id in active_ids else 0
+    db.commit()
+
+    annotation_counts, version_counts = _class_usage_counts(db, project_id)
+    refreshed = list(
+        db.scalars(select(ClassDef).where(ClassDef.project_id == project_id).order_by(ClassDef.id)).all()
+    )
+    return ClassList(
+        items=[
+            _read_class(
+                class_def,
+                annotation_counts.get(class_def.id, 0),
+                version_counts.get(class_def.id, 0),
+            )
+            for class_def in refreshed
+        ]
     )
 
 

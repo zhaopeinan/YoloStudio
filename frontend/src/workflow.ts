@@ -42,7 +42,7 @@ export const workflowStepOrder: WorkflowStep[] = [
 
 const stepCopy: Record<WorkflowStep, Pick<WorkflowStepItem, "label" | "description">> = {
   dataset: { label: "项目与数据", description: "扫描、导入或加载数据集" },
-  classes: { label: "类别管理", description: "维护项目级检测类别" },
+  classes: { label: "本轮类别", description: "勾选本轮标注可用的类别" },
   annotation: { label: "图像标注", description: "绘制、修正并保存边界框" },
   quality: { label: "质量与版本", description: "审查数据并冻结训练版本" },
   training: { label: "模型训练", description: "配置、启动和监控训练" },
@@ -89,7 +89,11 @@ export function buildWorkflowSteps(
         : progress.hasDataset && hasClasses
           ? "in_progress"
           : "not_started",
-      !progress.hasDataset ? "请先导入或加载数据集" : !hasClasses ? "请先创建至少一个类别" : undefined,
+      !progress.hasDataset
+        ? "请先导入或加载数据集"
+        : !hasClasses
+          ? "请先勾选至少一个本轮可用类别"
+          : undefined,
     ),
     item(
       "quality",

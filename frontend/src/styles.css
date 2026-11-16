@@ -1436,6 +1436,29 @@ th {
   background: #f8fafb;
 }
 
+.class-library-tools {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px dashed #c9d6df;
+  border-radius: 8px;
+  background: #fcfdfd;
+}
+
+.class-library-tools > summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.class-library-tools[open] > summary {
+  margin-bottom: 10px;
+}
+
+.class-library-tools .fixed-class-management {
+  margin-top: 0;
+}
+
 .fixed-class-heading {
   display: flex;
   align-items: flex-start;

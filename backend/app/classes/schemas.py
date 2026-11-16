@@ -13,6 +13,11 @@ class ClassUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     color: str | None = Field(default=None, max_length=24)
     description: str | None = None
+    active: bool | None = None
+
+
+class ClassActiveScopeUpdate(BaseModel):
+    class_ids: list[int] = Field(default_factory=list)
 
 
 class ClassRead(BaseModel):

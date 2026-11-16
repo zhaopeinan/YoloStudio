@@ -338,3 +338,47 @@ def test_annotation_replace_accepts_edge_box_rounding_overshoot(tmp_path: Path):
         saved = response.json()["items"][0]
         assert saved["x_center"] - saved["width"] / 2 >= -1e-9
         assert saved["x_center"] + saved["width"] / 2 <= 1 + 1e-9
+
+
+def test_set_active_class_scope_updates_project_classes(tmp_path: Path):
+    zip_path = tmp_path / "sample.zip"
+    create_import_zip(zip_path)
+
+    with isolated_client(tmp_path) as client:
+        dataset = import_dataset(client, zip_path)
+        project_id = dataset["project_id"]
+        first = client.post(
+            f"/api/projects/{project_id}/classes",
+            json={"name": "车辆", "color": "#2563eb"},
+        ).json()
+        second = client.post(
+            f"/api/projects/{project_id}/classes",
+            json={"name": "帐篷", "color": "#10b981"},
+        ).json()
+        third = client.post(
+            f"/api/projects/{project_id}/classes",
+            json={"name": "假人", "color": "#ef4444"},
+        ).json()
+
+        response = client.put(
+            f"/api/projects/{project_id}/classes/active-scope",
+            json={"class_ids": [first["id"], third["id"]]},
+        )
+        assert response.status_code == 200, response.text
+        items = {item["id"]: item for item in response.json()["items"]}
+        assert items[first["id"]]["active"] is True
+        assert items[second["id"]]["active"] is False
+        assert items[third["id"]]["active"] is True
+
+        patch_response = client.patch(
+            f"/api/projects/{project_id}/classes/{second['id']}",
+            json={"active": True},
+        )
+        assert patch_response.status_code == 200
+        assert patch_response.json()["active"] is True
+
+        unknown = client.put(
+            f"/api/projects/{project_id}/classes/active-scope",
+            json={"class_ids": [first["id"], 99999]},
+        )
+        assert unknown.status_code == 400
