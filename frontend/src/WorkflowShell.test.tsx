@@ -41,7 +41,7 @@ describe("WorkflowShell", () => {
       "step",
     );
 
-    const lockedStep = screen.getByRole("button", { name: /2 类别管理/ });
+    const lockedStep = screen.getByRole("button", { name: /2 本轮类别/ });
     expect(lockedStep).toHaveAttribute("data-availability", "locked");
     expect(lockedStep).toBeEnabled();
     expect(lockedStep).toHaveTextContent("暂不可用");

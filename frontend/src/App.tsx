@@ -107,6 +107,7 @@ import {
   replaceAnnotations,
   refreshImageDimensions,
   scanDataset,
+  setActiveClassScope,
   setUnauthorizedHandler,
   updateClass,
   uploadDatasetSource,
@@ -331,6 +332,7 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [classes, setClasses] = useState<ProjectClass[]>([]);
+  const [roundSelectedClassIds, setRoundSelectedClassIds] = useState<number[]>([]);
   const [detectedClasses, setDetectedClasses] = useState<DetectedClassSuggestion[]>([]);
   const [selectedDetectedClassNames, setSelectedDetectedClassNames] = useState<string[]>([]);
   const [isLoadingDetectedClasses, setIsLoadingDetectedClasses] = useState(false);
@@ -338,6 +340,7 @@ export default function App() {
   const [versionClassIds, setVersionClassIds] = useState<number[]>([]);
   const [classError, setClassError] = useState<string | null>(null);
   const [isEnablingDetectedClasses, setIsEnablingDetectedClasses] = useState(false);
+  const [isSavingRoundScope, setIsSavingRoundScope] = useState(false);
   const [classDeleteTarget, setClassDeleteTarget] = useState<ProjectClass | null>(null);
   const [isDeletingClass, setIsDeletingClass] = useState(false);
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
@@ -471,17 +474,23 @@ export default function App() {
     [images, selectedImageId],
   );
 
+  const activeClasses = useMemo(
+    () => classes.filter((classItem) => classItem.active),
+    [classes],
+  );
   const selectedClass = useMemo(
-    () => classes.find((classItem) => classItem.id === selectedClassId) ?? null,
-    [classes, selectedClassId],
+    () => activeClasses.find((classItem) => classItem.id === selectedClassId) ?? null,
+    [activeClasses, selectedClassId],
   );
 
   const filenameSuggestion = useMemo<FilenameSuggestion>(
-    () => suggestClassFromFilename(selectedImage?.relative_path ?? "", classes),
-    [classes, selectedImage?.relative_path],
+    () => suggestClassFromFilename(selectedImage?.relative_path ?? "", activeClasses),
+    [activeClasses, selectedImage?.relative_path],
   );
 
-  const annotationReady = Boolean(importedDataset && classes.length > 0 && selectedImage && selectedClass);
+  const annotationReady = Boolean(
+    importedDataset && activeClasses.length > 0 && selectedImage && selectedClass,
+  );
   const projectDatasets = useMemo(() => {
     if (!importedDataset) {
       return [];
@@ -723,7 +732,7 @@ export default function App() {
       buildWorkflowSteps(
         {
           hasDataset: Boolean(importedDataset),
-          classCount: classes.length,
+          classCount: activeClasses.length,
           annotatedImageCount: quality?.annotated_image_count ?? 0,
           versionCount: versions.length,
           runCount: runs.length,
@@ -733,7 +742,7 @@ export default function App() {
         { isAdmin },
       ),
     [
-      classes.length,
+      activeClasses.length,
       exports.length,
       importedDataset,
       isAdmin,
@@ -783,6 +792,7 @@ export default function App() {
     isSpacePressedRef.current = false;
     setImportedDataset(null);
     setClasses([]);
+    setRoundSelectedClassIds([]);
     setDetectedClasses([]);
     setSelectedDetectedClassNames([]);
     setIsLoadingDetectedClasses(false);
@@ -790,6 +800,7 @@ export default function App() {
     setVersionClassIds([]);
     setClassError(null);
     setIsEnablingDetectedClasses(false);
+    setIsSavingRoundScope(false);
     setClassDeleteTarget(null);
     setIsDeletingClass(false);
     setEditingClassId(null);
@@ -1229,7 +1240,9 @@ export default function App() {
     const runResponse = await listTrainingRuns(dataset.project_id);
 
     setClasses(classResponse.items);
-    setSelectedClassId(classResponse.items[0]?.id ?? null);
+    const activeItems = classResponse.items.filter((classItem) => classItem.active);
+    setRoundSelectedClassIds(activeItems.map((classItem) => classItem.id));
+    setSelectedClassId(activeItems[0]?.id ?? classResponse.items[0]?.id ?? null);
     setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
     setVersionDatasetIds([dataset.dataset_id]);
     await refreshDetectedClasses(dataset.dataset_id);
@@ -1292,7 +1305,7 @@ export default function App() {
       setRunSummary(null);
       setProjectExperimentSummary(null);
     }
-    return { classCount: classResponse.items.length };
+    return { classCount: activeItems.length };
   }
 
   async function handleOpenDatasetFromStorage(dataset: {
@@ -1852,7 +1865,6 @@ export default function App() {
 
     setIsEnablingDetectedClasses(true);
     setClassError(null);
-    const isFirstClass = classes.length === 0;
     const existingNames = new Set(classes.map((classItem) => classItem.name));
     const classesToCreate = detectedClasses.filter(
       (preset) => selectedDetectedClassNames.includes(preset.name) && !existingNames.has(preset.name),
@@ -1870,16 +1882,51 @@ export default function App() {
         setVersionClassIds((current) => [...current, created.id]);
       }
 
-      const firstAvailableClassId = classes[0]?.id ?? createdClasses[0]?.id ?? null;
-      setSelectedClassId((current) => current ?? firstAvailableClassId);
-      void refreshTrainingPrep();
-      if (isFirstClass && createdClasses.length > 0) {
-        commitWorkflowStep("annotation");
+      if (createdClasses.length > 0) {
+        setRoundSelectedClassIds((current) => [
+          ...current,
+          ...createdClasses.map((classItem) => classItem.id),
+        ]);
+        setSelectedClassId((current) => current ?? createdClasses[0]?.id ?? null);
       }
+      void refreshTrainingPrep();
     } catch (error) {
       setClassError(error instanceof Error ? error.message : "类别启用失败");
     } finally {
       setIsEnablingDetectedClasses(false);
+    }
+  }
+
+  async function handleConfirmRoundClassScope() {
+    if (!importedDataset || isSavingRoundScope) {
+      return;
+    }
+    if (roundSelectedClassIds.length === 0) {
+      setClassError("请至少勾选一个本轮可用类别");
+      return;
+    }
+
+    setIsSavingRoundScope(true);
+    setClassError(null);
+    try {
+      const response = await setActiveClassScope(
+        importedDataset.project_id,
+        roundSelectedClassIds,
+      );
+      setClasses(response.items);
+      const activeItems = response.items.filter((classItem) => classItem.active);
+      setRoundSelectedClassIds(activeItems.map((classItem) => classItem.id));
+      setSelectedClassId((current) =>
+        activeItems.some((classItem) => classItem.id === current)
+          ? current
+          : activeItems[0]?.id ?? null,
+      );
+      void refreshTrainingPrep();
+      commitWorkflowStep("annotation");
+    } catch (error) {
+      setClassError(error instanceof Error ? error.message : "保存本轮类别失败");
+    } finally {
+      setIsSavingRoundScope(false);
     }
   }
 
@@ -1896,8 +1943,15 @@ export default function App() {
     try {
       await deleteClass(importedDataset.project_id, deletedClassId);
       setClasses(remainingClasses);
+      setRoundSelectedClassIds((current) => current.filter((classId) => classId !== deletedClassId));
       setVersionClassIds((current) => current.filter((classId) => classId !== deletedClassId));
-      setSelectedClassId((current) => (current === deletedClassId ? remainingClasses[0]?.id ?? null : current));
+      setSelectedClassId((current) =>
+        current === deletedClassId
+          ? remainingClasses.find((classItem) => classItem.active)?.id
+            ?? remainingClasses[0]?.id
+            ?? null
+          : current,
+      );
       setSelectedDetectedClassNames((current) => current.filter((name) => name !== classDeleteTarget.name));
       setClassDeleteTarget(null);
       void refreshTrainingPrep();
@@ -4438,208 +4492,310 @@ export default function App() {
       </section>
       </> : null}
 
-      {currentStep === "classes" ? <section className="panel class-management-panel" aria-label="类别管理">
+      {currentStep === "classes" ? <section className="panel class-management-panel" aria-label="本轮类别">
           <div className="panel-heading compact-heading">
             <div>
-              <p className="eyebrow">项目标签</p>
-              <h2>类别库</h2>
+              <p className="eyebrow">本项目 · 对所有标注员生效</p>
+              <h2>本轮可用类别</h2>
             </div>
             <Library size={20} />
           </div>
 
           <div className="fixed-class-management">
-            {isAdmin ? (
-            <>
             <div className="fixed-class-heading">
               <div>
-                <h3>从数据集文件名识别到的类别</h3>
+                <h3>勾选本轮标注可用类别</h3>
                 <p>
-                  已根据 ZIP 中重复的文件名前缀自动扫描类别。默认全部勾选，可取消不需要的项后确认启用。
+                  勾选后进入标注；未勾选的类别仍保留在项目库中，但本轮不能用来画框。
                 </p>
               </div>
               <span className="fixed-class-count">
-                已选 {selectedDetectedClassNames.length} / {detectedClasses.length}
+                已选 {roundSelectedClassIds.length} / {classes.length}
               </span>
             </div>
-            {isLoadingDetectedClasses ? (
-              <p className="empty-state">正在扫描文件名类别...</p>
-            ) : detectedClasses.length === 0 ? (
-              <p className="empty-state">
-                未能从文件名识别出重复前缀类别。请确认图像命名类似
-                <code>fire_truck_h20_a045.jpg</code>，或稍后手动添加类别。
-              </p>
+
+            {classes.length === 0 ? (
+              <p className="empty-state">项目类别库为空。请先在下方把类别加入项目库。</p>
             ) : (
               <fieldset
                 className="fixed-class-picker"
-                disabled={!importedDataset || isEnablingDetectedClasses}
+                disabled={!importedDataset || isSavingRoundScope || !isAdmin}
               >
-                <legend className="sr-only">扫描到的目标类别</legend>
-                {detectedClasses.map((preset) => {
-                  const isSelected = selectedDetectedClassNames.includes(preset.name);
-                  const isExisting = classes.some((classItem) => classItem.name === preset.name);
+                <legend className="sr-only">本轮可用类别</legend>
+                {classes.map((classItem) => {
+                  const isSelected = roundSelectedClassIds.includes(classItem.id);
                   return (
                     <label
                       className={isSelected ? "fixed-class-option selected" : "fixed-class-option"}
-                      key={preset.name}
+                      key={classItem.id}
                     >
                       <input
                         type="checkbox"
-                        aria-label={preset.name}
+                        aria-label={classItem.name}
                         checked={isSelected}
                         onChange={() => {
-                          setSelectedDetectedClassNames((current) =>
-                            current.includes(preset.name)
-                              ? current.filter((name) => name !== preset.name)
-                              : [...current, preset.name],
+                          setRoundSelectedClassIds((current) =>
+                            current.includes(classItem.id)
+                              ? current.filter((classId) => classId !== classItem.id)
+                              : [...current, classItem.id],
                           );
                         }}
                       />
                       <span
                         className="fixed-class-option-color"
-                        style={{ background: preset.color }}
+                        style={{ background: classItem.color }}
                         aria-hidden="true"
                       />
-                      <span className="fixed-class-option-name">{preset.name}</span>
-                      <span className="fixed-class-option-meta">{preset.image_count} 张</span>
+                      <span className="fixed-class-option-name">{classItem.name}</span>
+                      <span className="fixed-class-option-meta">
+                        {classItem.annotation_count ?? 0} 条标注
+                      </span>
                       <span className="fixed-class-option-status">
-                        {isExisting ? "已在类别库" : isSelected ? "待启用" : "未选择"}
+                        {isSelected ? "本轮可用" : "本轮不用"}
                       </span>
                     </label>
                   );
                 })}
               </fieldset>
             )}
-            <div className="fixed-class-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() =>
-                  setSelectedDetectedClassNames(detectedClasses.map((item) => item.name))
-                }
-                disabled={
-                  !importedDataset
-                  || isEnablingDetectedClasses
-                  || detectedClasses.length === 0
-                  || isLoadingDetectedClasses
-                }
-              >
-                全选
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setSelectedDetectedClassNames([])}
-                disabled={
-                  !importedDataset
-                  || isEnablingDetectedClasses
-                  || selectedDetectedClassNames.length === 0
-                }
-              >
-                全不选
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleEnableDetectedClasses()}
-                disabled={
-                  !importedDataset
-                  || isEnablingDetectedClasses
-                  || selectedDetectedClassNames.length === 0
-                  || isLoadingDetectedClasses
-                }
-              >
-                <CheckCircle2 size={16} />
-                {isEnablingDetectedClasses ? "正在启用..." : "确认启用所选类别"}
-              </button>
-            </div>
-            </>
+
+            {isAdmin ? (
+              <div className="fixed-class-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setRoundSelectedClassIds(classes.map((item) => item.id))}
+                  disabled={!importedDataset || isSavingRoundScope || classes.length === 0}
+                >
+                  全选
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setRoundSelectedClassIds([])}
+                  disabled={!importedDataset || isSavingRoundScope || roundSelectedClassIds.length === 0}
+                >
+                  全不选
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmRoundClassScope()}
+                  disabled={
+                    !importedDataset
+                    || isSavingRoundScope
+                    || roundSelectedClassIds.length === 0
+                  }
+                >
+                  <CheckCircle2 size={16} />
+                  {isSavingRoundScope ? "正在保存..." : "确认并进入标注"}
+                </button>
+              </div>
             ) : (
-              <p className="muted">标注员可查看类别列表，类别启用与编辑由管理员负责。</p>
+              <p className="muted">
+                {activeClasses.length > 0
+                  ? `管理员已为本轮启用 ${activeClasses.length} 个类别。可直接进入「图像标注」。`
+                  : "管理员尚未勾选本轮可用类别，请稍候。"}
+              </p>
             )}
           </div>
 
           {classError ? <div className="error-banner">{classError}</div> : null}
 
-          <div className="class-list" aria-label="可用类别">
-            {classes.length === 0 ? (
-              <p className="empty-state">请先启用至少一个类别以绘制边界框。</p>
-            ) : (
-              classes.map((classItem) =>
-                editingClassId === classItem.id ? (
-                  <div className="class-edit-row" key={classItem.id}>
-                    <input
-                      value={classEditName}
-                      onChange={(event) => setClassEditName(event.target.value)}
-                      aria-label={`编辑类别名称 ${classItem.name}`}
-                    />
-                    <input
-                      type="color"
-                      value={classEditColor}
-                      onChange={(event) => setClassEditColor(event.target.value)}
-                      aria-label={`编辑类别颜色 ${classItem.name}`}
-                    />
-                    <div className="class-row-actions">
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateClass(classItem.id)}
-                        disabled={isUpdatingClass || classEditName.trim().length === 0}
-                      >
-                        <Save size={15} />
-                        保存
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={cancelEditClass}
-                        disabled={isUpdatingClass}
-                      >
-                        取消
-                      </button>
-                    </div>
+          {isAdmin ? (
+            <details className="class-library-tools">
+              <summary>补充 / 维护项目类别库</summary>
+              <div className="fixed-class-management">
+                <div className="fixed-class-heading">
+                  <div>
+                    <h3>从数据集文件名识别到的类别</h3>
+                    <p>
+                      根据 ZIP/目录中重复的文件名前缀扫描，勾选后加入项目类别库，再回到上方勾选本轮可用项。
+                    </p>
                   </div>
+                  <span className="fixed-class-count">
+                    已选 {selectedDetectedClassNames.length} / {detectedClasses.length}
+                  </span>
+                </div>
+                {isLoadingDetectedClasses ? (
+                  <p className="empty-state">正在扫描文件名类别...</p>
+                ) : detectedClasses.length === 0 ? (
+                  <p className="empty-state">
+                    未能从文件名识别出重复前缀类别。请确认图像命名类似
+                    <code>fire_truck_h20_a045.jpg</code>，或在下方编辑已有类别。
+                  </p>
                 ) : (
-                  <div className="class-row" key={classItem.id}>
-                    <button
-                      type="button"
-                      className={
-                        classItem.id === selectedClassId ? "class-chip selected" : "class-chip"
-                      }
-                      onClick={() => setSelectedClassId(classItem.id)}
-                    >
-                      <span style={{ background: classItem.color }} />
-                      {classItem.name}
-                    </button>
-                    {isAdmin ? (
-                    <>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label={`编辑 ${classItem.name}`}
-                      title={`编辑 ${classItem.name}`}
-                      onClick={() => beginEditClass(classItem)}
-                    >
-                      <Edit3 size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button class-delete-button"
-                      aria-label={`删除 ${classItem.name}`}
-                      title={
-                        (classItem.annotation_count ?? 0) > 0 || (classItem.version_count ?? 0) > 0
-                          ? `已被 ${classItem.annotation_count ?? 0} 条标注或 ${classItem.version_count ?? 0} 个数据集版本使用，不能删除`
-                          : `删除 ${classItem.name}`
-                      }
-                      disabled={(classItem.annotation_count ?? 0) > 0 || (classItem.version_count ?? 0) > 0}
-                      onClick={() => setClassDeleteTarget(classItem)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                    </>
-                    ) : null}
-                  </div>
-                ),
-              )
-            )}
-          </div>
+                  <fieldset
+                    className="fixed-class-picker"
+                    disabled={!importedDataset || isEnablingDetectedClasses}
+                  >
+                    <legend className="sr-only">扫描到的目标类别</legend>
+                    {detectedClasses.map((preset) => {
+                      const isSelected = selectedDetectedClassNames.includes(preset.name);
+                      const isExisting = classes.some((classItem) => classItem.name === preset.name);
+                      return (
+                        <label
+                          className={isSelected ? "fixed-class-option selected" : "fixed-class-option"}
+                          key={preset.name}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`扫描类别 ${preset.name}`}
+                            checked={isSelected}
+                            onChange={() => {
+                              setSelectedDetectedClassNames((current) =>
+                                current.includes(preset.name)
+                                  ? current.filter((name) => name !== preset.name)
+                                  : [...current, preset.name],
+                              );
+                            }}
+                          />
+                          <span
+                            className="fixed-class-option-color"
+                            style={{ background: preset.color }}
+                            aria-hidden="true"
+                          />
+                          <span className="fixed-class-option-name">{preset.name}</span>
+                          <span className="fixed-class-option-meta">{preset.image_count} 张</span>
+                          <span className="fixed-class-option-status">
+                            {isExisting ? "已在类别库" : isSelected ? "待加入" : "未选择"}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                )}
+                <div className="fixed-class-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      setSelectedDetectedClassNames(detectedClasses.map((item) => item.name))
+                    }
+                    disabled={
+                      !importedDataset
+                      || isEnablingDetectedClasses
+                      || detectedClasses.length === 0
+                      || isLoadingDetectedClasses
+                    }
+                  >
+                    全选
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setSelectedDetectedClassNames([])}
+                    disabled={
+                      !importedDataset
+                      || isEnablingDetectedClasses
+                      || selectedDetectedClassNames.length === 0
+                    }
+                  >
+                    全不选
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleEnableDetectedClasses()}
+                    disabled={
+                      !importedDataset
+                      || isEnablingDetectedClasses
+                      || selectedDetectedClassNames.length === 0
+                      || isLoadingDetectedClasses
+                    }
+                  >
+                    <CheckCircle2 size={16} />
+                    {isEnablingDetectedClasses ? "正在加入..." : "加入项目类别库"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="class-list" aria-label="项目类别库">
+                {classes.length === 0 ? (
+                  <p className="empty-state">类别库为空。</p>
+                ) : (
+                  classes.map((classItem) =>
+                    editingClassId === classItem.id ? (
+                      <div className="class-edit-row" key={classItem.id}>
+                        <input
+                          value={classEditName}
+                          onChange={(event) => setClassEditName(event.target.value)}
+                          aria-label={`编辑类别名称 ${classItem.name}`}
+                        />
+                        <input
+                          type="color"
+                          value={classEditColor}
+                          onChange={(event) => setClassEditColor(event.target.value)}
+                          aria-label={`编辑类别颜色 ${classItem.name}`}
+                        />
+                        <div className="class-row-actions">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateClass(classItem.id)}
+                            disabled={isUpdatingClass || classEditName.trim().length === 0}
+                          >
+                            <Save size={15} />
+                            保存
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={cancelEditClass}
+                            disabled={isUpdatingClass}
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="class-row" key={classItem.id}>
+                        <button
+                          type="button"
+                          className={
+                            roundSelectedClassIds.includes(classItem.id)
+                              ? "class-chip selected"
+                              : "class-chip"
+                          }
+                          onClick={() => {
+                            setRoundSelectedClassIds((current) =>
+                              current.includes(classItem.id)
+                                ? current.filter((classId) => classId !== classItem.id)
+                                : [...current, classItem.id],
+                            );
+                          }}
+                        >
+                          <span style={{ background: classItem.color }} />
+                          {classItem.name}
+                          {classItem.active ? "" : " · 未启用"}
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`编辑 ${classItem.name}`}
+                          title={`编辑 ${classItem.name}`}
+                          onClick={() => beginEditClass(classItem)}
+                        >
+                          <Edit3 size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button class-delete-button"
+                          aria-label={`删除 ${classItem.name}`}
+                          title={
+                            (classItem.annotation_count ?? 0) > 0 || (classItem.version_count ?? 0) > 0
+                              ? `已被 ${classItem.annotation_count ?? 0} 条标注或 ${classItem.version_count ?? 0} 个数据集版本使用，不能删除`
+                              : `删除 ${classItem.name}`
+                          }
+                          disabled={(classItem.annotation_count ?? 0) > 0 || (classItem.version_count ?? 0) > 0}
+                          onClick={() => setClassDeleteTarget(classItem)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ),
+                  )
+                )}
+              </div>
+            </details>
+          ) : null}
       </section> : null}
 
       {classDeleteTarget ? (
@@ -4676,7 +4832,7 @@ export default function App() {
       {currentStep === "annotation" ? (
       <section className="annotation-workspace" aria-label="标注工作台">
         <AnnotationToolbar
-          classes={classes}
+          classes={activeClasses}
           selectedClassId={selectedClassId}
           selectedImageIndex={images.findIndex((image) => image.id === selectedImageId)}
           imageCount={images.length}
@@ -4978,7 +5134,7 @@ export default function App() {
             </div>
           ) : (
             <p className="empty-state annotation-canvas-empty">
-              {annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
+              {annotationGuidance(importedDataset, activeClasses.length, selectedImage, selectedClass)}
             </p>
           )}
         </section>
@@ -4999,7 +5155,7 @@ export default function App() {
               <p className="empty-state">
                 {annotationReady
                   ? "在图像上拖动以添加边界框。"
-                  : annotationGuidance(importedDataset, classes.length, selectedImage, selectedClass)}
+                  : annotationGuidance(importedDataset, activeClasses.length, selectedImage, selectedClass)}
               </p>
             ) : (
               annotations.map((annotation, index) => {
@@ -5057,9 +5213,18 @@ export default function App() {
                   onChange={(event) =>
                     updateAnnotationClass(selectedAnnotation.local_id, Number(event.target.value))
                   }
-                  disabled={classes.length === 0}
+                  disabled={activeClasses.length === 0 && !classById.has(selectedAnnotation.class_id)}
                 >
-                  {classes.map((classItem) => (
+                  {(
+                    activeClasses.some((classItem) => classItem.id === selectedAnnotation.class_id)
+                      ? activeClasses
+                      : [
+                          ...(classById.has(selectedAnnotation.class_id)
+                            ? [classById.get(selectedAnnotation.class_id)!]
+                            : []),
+                          ...activeClasses,
+                        ]
+                  ).map((classItem) => (
                     <option key={classItem.id} value={classItem.id}>{classItem.name}</option>
                   ))}
                 </select>
@@ -6315,7 +6480,7 @@ function annotationGuidance(
     return "请加载或导入数据集后开始标注。";
   }
   if (classCount === 0) {
-    return "绘制边界框前，请先创建项目类别。";
+    return "绘制边界框前，请先在「本轮类别」勾选至少一个可用类别。";
   }
   if (!selectedImage) {
     return "请在图像浏览器中选择一张图像后开始标注。";

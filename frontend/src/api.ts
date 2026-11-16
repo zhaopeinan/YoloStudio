@@ -1090,11 +1090,21 @@ export function createClass(
 export function updateClass(
   projectId: number,
   classId: number,
-  body: { name?: string; color?: string; description?: string | null },
+  body: { name?: string; color?: string; description?: string | null; active?: boolean },
 ): Promise<ProjectClass> {
   return requestJson<ProjectClass>(`/api/projects/${projectId}/classes/${classId}`, {
     method: "PATCH",
     body: JSON.stringify(body),
+  });
+}
+
+export function setActiveClassScope(
+  projectId: number,
+  classIds: number[],
+): Promise<ClassListResponse> {
+  return requestJson<ClassListResponse>(`/api/projects/${projectId}/classes/active-scope`, {
+    method: "PUT",
+    body: JSON.stringify({ class_ids: classIds }),
   });
 }
 
