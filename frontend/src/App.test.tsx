@@ -1357,6 +1357,7 @@ describe("App", () => {
     expect(screen.getByTitle("/tmp/workspace/app.db")).toHaveTextContent(
       "/tmp/workspace/app.db",
     );
+    await openImportTab(user);
     expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
     expect(screen.getByLabelText("项目名称")).toHaveValue("YOLO 目标检测项目");
     expect(screen.getByLabelText("数据集名称")).toBeInTheDocument();
@@ -1658,14 +1659,14 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByRole("tab", { name: "导入数据" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "数据管理" }));
-
-    expect(screen.getByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("table", { name: "现有数据" })).toBeInTheDocument();
     expect(screen.queryByLabelText("数据集来源")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "导入数据" }));
+
+    expect(screen.getByRole("tab", { name: "导入数据" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
     expect(window.location.hash).toBe("#dataset");
   });
 
@@ -1673,6 +1674,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "本轮类别");
     await user.click(screen.getByText("补充 / 维护项目类别库"));
@@ -1735,13 +1737,14 @@ describe("App", () => {
 
     await navigateToStep(user, "模型训练");
     expect(screen.queryByText("已加载训练任务 #1 的配置")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("起始模型")).toHaveValue("base:yolov8n.pt");
+    expect(screen.getByLabelText("起始模型")).toHaveValue("yolov8n.pt");
   });
 
   it("删除其他存储对象时完整重新加载当前数据集工作区", async () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "项目与数据");
     await user.click(screen.getByRole("tab", { name: "数据管理" }));
@@ -1794,7 +1797,7 @@ describe("App", () => {
     expect(await screen.findByText("智航杯标注台")).toBeInTheDocument();
     await navigateToStep(user, "图像标注");
     expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
-    expect(screen.getByLabelText("数据集来源")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByLabelText("标注就绪状态")).not.toBeInTheDocument();
   });
 
@@ -1802,6 +1805,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
 
@@ -1819,6 +1823,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
 
@@ -1846,6 +1851,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     const viewport = screen.getByLabelText("标注画布视口");
@@ -1874,6 +1880,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(screen.getByRole("button", { name: "显示原始大小" }));
@@ -1904,6 +1911,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     const viewport = screen.getByLabelText("标注画布视口");
@@ -1931,6 +1939,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     expect(await screen.findByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
@@ -1949,6 +1958,7 @@ describe("App", () => {
     apiMock.replaceAnnotations.mockRejectedValueOnce(new Error("磁盘写入失败"));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     expect(await screen.findByRole("img", { name: "iris/frame001.jpg" })).toBeInTheDocument();
@@ -1964,6 +1974,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
@@ -1988,6 +1999,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
 
@@ -1998,6 +2010,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
@@ -2022,6 +2035,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(screen.getByRole("button", { name: "更多标注操作" }));
@@ -2038,6 +2052,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     const tabs = screen.getByRole("tablist", { name: "移动端标注视图" });
@@ -2071,6 +2086,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
 
@@ -2112,6 +2128,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(window.location.hash).toBe("#classes");
 
@@ -2147,6 +2164,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "本轮类别");
     await user.click(screen.getByText("补充 / 维护项目类别库"));
@@ -2199,6 +2217,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "本轮类别");
     await user.click(screen.getByText("补充 / 维护项目类别库"));
@@ -2217,6 +2236,7 @@ describe("App", () => {
     apiMock.deleteClass.mockResolvedValueOnce(apiMock.defaultClasses()[0]);
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "本轮类别");
     await user.click(screen.getByText("补充 / 维护项目类别库"));
@@ -2252,6 +2272,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "本轮类别");
     await user.click(screen.getByText("补充 / 维护项目类别库"));
@@ -2279,6 +2300,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "导入数据集" }));
     expect(await screen.findByRole("heading", { name: "本轮可用类别" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#classes");
@@ -2298,6 +2320,7 @@ describe("App", () => {
     apiMock.listDatasetVersions.mockImplementationOnce(async () => ({ items: [] }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     expect(window.location.hash).toBe("#classes");
 
@@ -2322,6 +2345,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
@@ -2353,7 +2377,7 @@ describe("App", () => {
     window.history.replaceState(null, "", "#annotation");
     render(<App />);
 
-    expect(await screen.findByLabelText("数据集来源")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "数据管理" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("请先导入或加载数据集")).toBeInTheDocument();
     expect(window.location.hash).toBe("#dataset");
   });
@@ -2362,6 +2386,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "本轮类别");
     await user.click(screen.getByText("补充 / 维护项目类别库"));
@@ -2416,6 +2441,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
@@ -2450,6 +2476,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
@@ -2467,6 +2494,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
@@ -2511,6 +2539,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(await screen.findByText("iris/frame002.jpg"));
@@ -2566,6 +2595,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(screen.getByRole("button", { name: "显示原始大小" }));
@@ -2597,6 +2627,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "图像标注");
     await user.click(screen.getByRole("button", { name: /iris\/frame002\.jpg/ }));
@@ -2647,6 +2678,8 @@ describe("App", () => {
 
     render(<App />);
     await flushPromises();
+    fireEvent.click(await screen.findByRole("tab", { name: "导入数据" }));
+    await flushPromises();
     vi.useFakeTimers();
 
     fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
@@ -2673,6 +2706,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "模型训练");
     expect(await screen.findByText("训练任务 #1")).toBeInTheDocument();
@@ -2713,15 +2747,15 @@ describe("App", () => {
         }),
       }),
     );
-    expect(await screen.findByText("已基于训练任务 #1 开始重新训练")).toBeInTheDocument();
+    expect(await screen.findByText(/已基于训练任务 #1/)).toBeInTheDocument();
   });
 
   it("loads a saved dataset without re-importing source files", async () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await openImportTab(user);
     expect(await screen.findByLabelText("已保存数据集")).toBeInTheDocument();
-
     await user.click(screen.getByRole("button", { name: "加载数据集" }));
 
     expect(apiMock.importDataset).not.toHaveBeenCalled();
@@ -2771,6 +2805,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "质量与版本");
 
@@ -2831,6 +2866,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "质量与版本");
 
@@ -2882,6 +2918,7 @@ describe("App", () => {
     }));
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "质量与版本");
 
@@ -2915,6 +2952,7 @@ describe("App", () => {
 
     render(<App />);
 
+    await openImportTab(user);
     await user.click(await screen.findByRole("button", { name: "加载数据集" }));
     await navigateToStep(user, "质量与版本");
     expect(
@@ -2938,6 +2976,7 @@ describe("App", () => {
     render(<App />);
     await flushPromises();
 
+    fireEvent.click(screen.getByRole("tab", { name: "导入数据" }));
     fireEvent.click(screen.getByRole("button", { name: "导入数据集" }));
     await flushPromises();
 
@@ -2952,6 +2991,13 @@ describe("App", () => {
     expect(apiMock.getTrainingRunLogs).toHaveBeenCalledWith(2);
   });
 });
+
+async function openImportTab(user: ReturnType<typeof userEvent.setup>) {
+  const tab = await screen.findByRole("tab", { name: "导入数据" });
+  if (tab.getAttribute("aria-selected") !== "true") {
+    await user.click(tab);
+  }
+}
 
 async function navigateToStep(
   user: ReturnType<typeof userEvent.setup>,

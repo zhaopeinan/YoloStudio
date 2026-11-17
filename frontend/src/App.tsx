@@ -286,7 +286,7 @@ export default function App() {
   const { user, loading: authLoading, isAdmin, logout } = useAuth();
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("dataset");
-  const [datasetPageTab, setDatasetPageTab] = useState<"import" | "management">("import");
+  const [datasetPageTab, setDatasetPageTab] = useState<"import" | "management">("management");
   const currentStepRef = useRef<WorkflowStep>("dataset");
   const workflowStepsRef = useRef<ReturnType<typeof buildWorkflowSteps>>([]);
 
@@ -2953,20 +2953,20 @@ export default function App() {
           <button
             type="button"
             role="tab"
-            aria-selected={datasetPageTab === "import"}
-            onClick={() => setDatasetPageTab("import")}
-          >
-            <Upload size={16} />
-            导入数据
-          </button>
-          <button
-            type="button"
-            role="tab"
             aria-selected={datasetPageTab === "management"}
             onClick={() => setDatasetPageTab("management")}
           >
             <Database size={16} />
             数据管理
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={datasetPageTab === "import"}
+            onClick={() => setDatasetPageTab("import")}
+          >
+            <Upload size={16} />
+            导入数据
           </button>
         </div>
         ) : null}
