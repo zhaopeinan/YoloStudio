@@ -298,6 +298,11 @@ export default function App() {
   }, [logout]);
 
   useEffect(() => {
+    // Wait until auth finishes; during bootstrap user is null so isAdmin is false.
+    // Without this guard the default "management" tab gets forced back to "import".
+    if (authLoading) {
+      return;
+    }
     if (!isAdmin && showUserManagement) {
       setShowUserManagement(false);
     }
@@ -308,7 +313,7 @@ export default function App() {
         window.history.replaceState(null, "", "#dataset");
       }
     }
-  }, [isAdmin, showUserManagement, datasetPageTab, currentStep]);
+  }, [authLoading, isAdmin, showUserManagement, datasetPageTab, currentStep]);
   const skipNextStorageWorkspaceRefreshRef = useRef(false);
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
