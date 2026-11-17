@@ -29,6 +29,8 @@ const dataset = {
   size_bytes: 2048,
   image_count: 2,
   annotated_image_count: 1,
+  negative_image_count: 0,
+  unannotated_image_count: 1,
   annotation_count: 2,
   split_counts: null,
   created_at: "2026-07-15T08:00:00Z",
@@ -55,6 +57,8 @@ const version = {
   size_bytes: 4096,
   image_count: 2,
   annotated_image_count: 2,
+  negative_image_count: 0,
+  unannotated_image_count: 0,
   annotation_count: 2,
   split_counts: { train: 1, val: 1, test: 0 },
   created_at: "2026-07-15T09:00:00Z",
@@ -215,9 +219,10 @@ describe("StorageManagementView", () => {
 
     const table = await screen.findByRole("table", { name: "现有数据" });
     expect(within(table).getByText("camouflage-set")).toBeInTheDocument();
-    expect(within(table).getByText("2张图像 / 1张已标注")).toBeInTheDocument();
-    expect(within(table).getByText("2张图像 / 2张已标注")).toBeInTheDocument();
-    expect(within(table).getAllByText("2个标注")).toHaveLength(2);
+    expect(within(table).getByText("2张图像 / 1张已标注 / 0张无目标")).toBeInTheDocument();
+    expect(within(table).getByText("2张图像 / 2张已标注 / 0张无目标")).toBeInTheDocument();
+    expect(within(table).getByText("2个标注 / 1张未标注")).toBeInTheDocument();
+    expect(within(table).getByText("2个标注 / 0张未标注")).toBeInTheDocument();
     expect(within(table).getAllByText("受保护")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "移入回收站 camouflage-set" })).toBeDisabled();
     expect(screen.getAllByText("标注版本 4")).toHaveLength(2);

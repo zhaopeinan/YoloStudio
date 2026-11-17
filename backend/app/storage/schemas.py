@@ -24,6 +24,8 @@ class StorageItemRead(BaseModel):
     size_bytes: int
     image_count: int | None
     annotated_image_count: int | None = None
+    negative_image_count: int | None = None
+    unannotated_image_count: int | None = None
     annotation_count: int | None
     split_counts: dict[str, int] | None
     created_at: datetime

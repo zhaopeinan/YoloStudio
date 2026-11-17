@@ -205,7 +205,7 @@ def _active_runs(db: Session, version_ids: list[int]) -> list[TrainingRun]:
     )
 
 
-def _dataset_counts(db: Session, dataset_id: int) -> tuple[int, int, int]:
+def _dataset_counts(db: Session, dataset_id: int) -> tuple[int, int, int, int, int]:
     image_count = db.scalar(
         select(func.count(Image.id)).where(Image.dataset_id == dataset_id)
     ) or 0
@@ -215,15 +215,34 @@ def _dataset_counts(db: Session, dataset_id: int) -> tuple[int, int, int]:
         .join(Image, Annotation.image_id == Image.id)
         .where(Image.dataset_id == dataset_id)
     ) or 0
+    has_annotation = select(Annotation.id).where(Annotation.image_id == Image.id).exists()
+    negative_image_count = db.scalar(
+        select(func.count(Image.id)).where(
+            Image.dataset_id == dataset_id,
+            ~has_annotation,
+            func.json_extract(Image.metadata_, "$.annotation_status") == "negative",
+        )
+    ) or 0
     annotation_count = db.scalar(
         select(func.count(Annotation.id))
         .join(Image, Annotation.image_id == Image.id)
         .where(Image.dataset_id == dataset_id)
     ) or 0
-    return int(image_count), int(annotated_image_count), int(annotation_count)
+    unannotated_image_count = max(
+        0, int(image_count) - int(annotated_image_count) - int(negative_image_count)
+    )
+    return (
+        int(image_count),
+        int(annotated_image_count),
+        int(negative_image_count),
+        unannotated_image_count,
+        int(annotation_count),
+    )
 
 
-def _version_counts(version: DatasetVersion) -> tuple[int, int, int, dict[str, int]]:
+def _version_counts(
+    version: DatasetVersion,
+) -> tuple[int, int, int, int, int, dict[str, int]]:
     manifest = version.split_manifest or {}
     images = manifest.get("images") or []
     split_counts_source = manifest.get("split_counts") or {}
@@ -232,8 +251,25 @@ def _version_counts(version: DatasetVersion) -> tuple[int, int, int, dict[str, i
         for split in ("train", "val", "test")
     }
     annotated_image_count = sum(1 for item in images if item.get("annotations"))
+    negative_image_count = sum(
+        1
+        for item in images
+        if not item.get("annotations")
+        and (item.get("metadata") or {}).get("annotation_status") == "negative"
+    )
     annotation_count = sum(len(item.get("annotations") or []) for item in images)
-    return len(images), annotated_image_count, annotation_count, split_counts
+    image_count = len(images)
+    unannotated_image_count = max(
+        0, image_count - annotated_image_count - negative_image_count
+    )
+    return (
+        image_count,
+        annotated_image_count,
+        negative_image_count,
+        unannotated_image_count,
+        annotation_count,
+        split_counts,
+    )
 
 
 def _dataset_item(
@@ -251,7 +287,13 @@ def _dataset_item(
         )
         for version in versions
     ]
-    image_count, annotated_image_count, annotation_count = _dataset_counts(db, dataset.id)
+    (
+        image_count,
+        annotated_image_count,
+        negative_image_count,
+        unannotated_image_count,
+        annotation_count,
+    ) = _dataset_counts(db, dataset.id)
     artifact_path = _dataset_path(settings, dataset)
     return StorageItemRead(
         entity_type="dataset",
@@ -265,6 +307,8 @@ def _dataset_item(
         size_bytes=directory_size(artifact_path, settings.workspace_root),
         image_count=image_count,
         annotated_image_count=annotated_image_count,
+        negative_image_count=negative_image_count,
+        unannotated_image_count=unannotated_image_count,
         annotation_count=annotation_count,
         split_counts=None,
         created_at=dataset.created_at,
@@ -289,7 +333,14 @@ def _version_item(
         )
         for run in runs
     ]
-    image_count, annotated_image_count, annotation_count, split_counts = _version_counts(version)
+    (
+        image_count,
+        annotated_image_count,
+        negative_image_count,
+        unannotated_image_count,
+        annotation_count,
+        split_counts,
+    ) = _version_counts(version)
     artifact_path = _version_path(settings, version)
     return StorageItemRead(
         entity_type="dataset_version",
@@ -303,6 +354,8 @@ def _version_item(
         size_bytes=directory_size(artifact_path, settings.workspace_root),
         image_count=image_count,
         annotated_image_count=annotated_image_count,
+        negative_image_count=negative_image_count,
+        unannotated_image_count=unannotated_image_count,
         annotation_count=annotation_count,
         split_counts=split_counts,
         created_at=version.created_at,
@@ -570,22 +623,37 @@ def _trash_summary(
     entity: Dataset | DatasetVersion | TrainingRun,
 ) -> dict[str, Any]:
     if entity_type == "dataset" and isinstance(entity, Dataset):
-        image_count, annotated_image_count, annotation_count = _dataset_counts(db, entity.id)
+        (
+            image_count,
+            annotated_image_count,
+            negative_image_count,
+            unannotated_image_count,
+            annotation_count,
+        ) = _dataset_counts(db, entity.id)
         return {
             "name": entity.name,
             "image_count": image_count,
             "annotated_image_count": annotated_image_count,
+            "negative_image_count": negative_image_count,
+            "unannotated_image_count": unannotated_image_count,
             "annotation_count": annotation_count,
             "class_names": _class_names_for_dataset(db, entity.id),
         }
     if entity_type == "dataset_version" and isinstance(entity, DatasetVersion):
-        image_count, annotated_image_count, annotation_count, split_counts = _version_counts(
-            entity
-        )
+        (
+            image_count,
+            annotated_image_count,
+            negative_image_count,
+            unannotated_image_count,
+            annotation_count,
+            split_counts,
+        ) = _version_counts(entity)
         return {
             "name": entity.name,
             "image_count": image_count,
             "annotated_image_count": annotated_image_count,
+            "negative_image_count": negative_image_count,
+            "unannotated_image_count": unannotated_image_count,
             "annotation_count": annotation_count,
             "split_counts": split_counts,
             "class_names": _class_names_for_version(db, entity),

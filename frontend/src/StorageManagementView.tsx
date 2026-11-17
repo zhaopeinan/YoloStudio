@@ -93,16 +93,23 @@ function runStatusLabel(status: string): string {
 
 type ContentSummaryCounts = Pick<
   StorageItem,
-  "image_count" | "annotated_image_count" | "annotation_count"
+  | "image_count"
+  | "annotated_image_count"
+  | "negative_image_count"
+  | "unannotated_image_count"
+  | "annotation_count"
 >;
 
 function contentSummaryParts(item: ContentSummaryCounts): { primary: string; secondary: string } {
   const imageCount = item.image_count ?? 0;
   const annotatedCount = item.annotated_image_count ?? 0;
+  const negativeCount = item.negative_image_count ?? 0;
+  const unannotatedCount =
+    item.unannotated_image_count ?? Math.max(0, imageCount - annotatedCount - negativeCount);
   const annotationCount = item.annotation_count ?? 0;
   return {
-    primary: `${imageCount}张图像 / ${annotatedCount}张已标注`,
-    secondary: `${annotationCount}个标注`,
+    primary: `${imageCount}张图像 / ${annotatedCount}张已标注 / ${negativeCount}张无目标`,
+    secondary: `${annotationCount}个标注 / ${unannotatedCount}张未标注`,
   };
 }
 
@@ -125,6 +132,8 @@ function TrashContentSummary({ summary }: { summary: TrashItem["summary"] }) {
       item={{
         image_count: summary.image_count,
         annotated_image_count: summary.annotated_image_count ?? null,
+        negative_image_count: summary.negative_image_count ?? null,
+        unannotated_image_count: summary.unannotated_image_count ?? null,
         annotation_count: summary.annotation_count ?? 0,
       }}
     />

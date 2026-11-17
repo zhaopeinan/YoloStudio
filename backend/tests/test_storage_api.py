@@ -153,6 +153,8 @@ def test_storage_catalog_lists_active_datasets_and_versions(tmp_path: Path):
         assert dataset["project_name"] == "Storage Test Project"
         assert dataset["image_count"] == 2
         assert dataset["annotated_image_count"] == 2
+        assert dataset["negative_image_count"] == 0
+        assert dataset["unannotated_image_count"] == 0
         assert dataset["annotation_count"] == 2
         assert dataset["size_bytes"] > 0
         assert dataset["protected"] is True
@@ -176,6 +178,8 @@ def test_storage_catalog_lists_active_datasets_and_versions(tmp_path: Path):
         assert version["entity_id"] == fixture["version_id"]
         assert version["image_count"] == 2
         assert version["annotated_image_count"] == 2
+        assert version["negative_image_count"] == 0
+        assert version["unannotated_image_count"] == 0
         assert version["annotation_count"] == 2
         assert version["split_counts"] == {"train": 1, "val": 1, "test": 0}
         assert version["size_bytes"] > 0
