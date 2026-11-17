@@ -29,6 +29,7 @@ import type { CSSProperties, ChangeEvent, FormEvent, PointerEvent, ReactNode } f
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Annotation,
+  DatasetAnnotationClass,
   DatasetCoverageSummary,
   DatasetDimensionRefreshSummary,
   DatasetImageFilters,
@@ -94,6 +95,7 @@ import {
   listDatasetSources,
   listDatasetVersions,
   listProjectVersions,
+  listDatasetAnnotationClasses,
   listDetectedClasses,
   listImages,
   listModelWeights,
@@ -394,6 +396,7 @@ export default function App() {
   const [classEditColor, setClassEditColor] = useState(defaultClassColor);
   const [isUpdatingClass, setIsUpdatingClass] = useState(false);
   const [images, setImages] = useState<DatasetImage[]>([]);
+  const [datasetAnnotationClasses, setDatasetAnnotationClasses] = useState<DatasetAnnotationClass[]>([]);
   const [imagePage, setImagePage] = useState({ limit: imagePageSize, offset: 0, total: 0 });
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
   const [pendingAnnotationImageId, setPendingAnnotationImageId] = useState<number | null>(null);
@@ -855,6 +858,7 @@ export default function App() {
     setClassEditColor(defaultClassColor);
     setIsUpdatingClass(false);
     setImages([]);
+    setDatasetAnnotationClasses([]);
     setImagePage({ limit: imagePageSize, offset: 0, total: 0 });
     setSelectedImageId(null);
     setPendingAnnotationImageId(null);
@@ -1327,6 +1331,23 @@ export default function App() {
       setSelectedImageId(null);
       setImageFilterError(error instanceof Error ? error.message : "图像列表加载失败");
     }
+
+    const annotationClassResponse = await soft(
+      "annotation-classes",
+      listDatasetAnnotationClasses(dataset.dataset_id),
+    );
+    if (!isCurrent()) {
+      return { classCount: activeItems.length };
+    }
+    const annotationClassItems = annotationClassResponse?.items ?? [];
+    setDatasetAnnotationClasses(annotationClassItems);
+    setImageFilters((current) => {
+      if (!current.class_id) {
+        return current;
+      }
+      const stillValid = annotationClassItems.some((item) => String(item.id) === current.class_id);
+      return stillValid ? current : { ...current, class_id: "" };
+    });
 
     setPendingAnnotationImageId(null);
     setAnnotationNotice(null);
@@ -5125,14 +5146,13 @@ export default function App() {
             <select
               id="filter-annotation-class"
               value={imageFilters.class_id}
-              disabled={!importedDataset || classes.length === 0}
+              disabled={!importedDataset || datasetAnnotationClasses.length === 0}
               onChange={(event) => handleImageClassFilterChange(event.target.value)}
             >
               <option value="">全部类别</option>
-              {classes.map((classItem) => (
+              {datasetAnnotationClasses.map((classItem) => (
                 <option key={classItem.id} value={classItem.id}>
-                  {classItem.name}
-                  {classItem.annotation_count > 0 ? `（${classItem.annotation_count}）` : ""}
+                  {classItem.name}（{classItem.annotation_count}）
                 </option>
               ))}
             </select>
@@ -5570,7 +5590,7 @@ export default function App() {
       {isImageFilterDrawerOpen ? (
         <AnnotationFilterDrawer
           filters={advancedImageFilters}
-          classes={classes}
+          classes={datasetAnnotationClasses}
           failureOptions={predictionFailureOptions.map((option) => ({
             value: option.value,
             label: option.value === "all" ? "全部识别结果" : formatFailureType(option.value),

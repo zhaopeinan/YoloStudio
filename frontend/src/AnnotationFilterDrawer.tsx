@@ -1,12 +1,12 @@
 import { X } from "lucide-react";
-import type { ProjectClass } from "./api";
+import type { DatasetAnnotationClass } from "./api";
 import type { AdvancedImageFilters } from "./annotation-workbench";
 
 type FilterKey = keyof AdvancedImageFilters;
 
 type AnnotationFilterDrawerProps = {
   filters: AdvancedImageFilters;
-  classes: ProjectClass[];
+  classes: DatasetAnnotationClass[];
   failureOptions: Array<{ value: string; label: string }>;
   onChange: (key: FilterKey, value: string) => void;
   onReset: () => void;
@@ -45,16 +45,18 @@ export function AnnotationFilterDrawer({
         id="advanced-filter-class"
         value={filters.class_id}
         onChange={(event) => onChange("class_id", event.target.value)}
+        disabled={classes.length === 0}
       >
         <option value="">全部类别</option>
         {classes.map((item) => (
           <option key={item.id} value={item.id}>
-            {item.name}
-            {item.annotation_count > 0 ? `（${item.annotation_count}）` : ""}
+            {item.name}（{item.annotation_count}）
           </option>
         ))}
       </select>
-      <p className="filter-hint">只显示至少含有该类别标注框的图像，例如选 tricycle 可筛出所有标了三轮车的图。</p>
+      <p className="filter-hint">
+        选项仅含当前数据集中真实有标注框的类别；选中后只显示至少含有该类别框的图像。
+      </p>
 
       <label htmlFor="advanced-filter-result">识别结果</label>
       <select

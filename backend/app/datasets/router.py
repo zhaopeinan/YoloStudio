@@ -15,6 +15,8 @@ from app.datasets.scanner import scan_dataset_source
 from app.datasets.schemas import (
     ClassCoverageBucket,
     CoverageBucket,
+    DatasetAnnotationClass,
+    DatasetAnnotationClassList,
     DatasetCoverageSummary,
     DatasetImageList,
     DatasetImageRead,
@@ -358,6 +360,42 @@ def list_dataset_images(
         limit=limit,
         offset=offset,
         total=total,
+    )
+
+
+@router.get("/{dataset_id}/annotation-classes", response_model=DatasetAnnotationClassList)
+def list_dataset_annotation_classes(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+) -> DatasetAnnotationClassList:
+    """Return only classes that actually have boxes in this dataset."""
+    dataset = _get_active_dataset(db, dataset_id)
+    rows = db.execute(
+        select(
+            ClassDef.id,
+            ClassDef.name,
+            ClassDef.color,
+            func.count(func.distinct(Annotation.image_id)),
+            func.count(Annotation.id),
+        )
+        .join(Annotation, Annotation.class_id == ClassDef.id)
+        .join(Image, Annotation.image_id == Image.id)
+        .where(Image.dataset_id == dataset_id, ClassDef.project_id == dataset.project_id)
+        .group_by(ClassDef.id, ClassDef.name, ClassDef.color)
+        .having(func.count(Annotation.id) > 0)
+        .order_by(ClassDef.name, ClassDef.id)
+    ).all()
+    return DatasetAnnotationClassList(
+        items=[
+            DatasetAnnotationClass(
+                id=int(class_id),
+                name=str(name),
+                color=str(color),
+                image_count=int(image_count),
+                annotation_count=int(annotation_count),
+            )
+            for class_id, name, color, image_count, annotation_count in rows
+        ]
     )
 
 

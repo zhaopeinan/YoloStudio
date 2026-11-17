@@ -159,6 +159,18 @@ class ClassCoverageBucket(BaseModel):
     annotation_count: int
 
 
+class DatasetAnnotationClass(BaseModel):
+    id: int
+    name: str
+    color: str
+    image_count: int
+    annotation_count: int
+
+
+class DatasetAnnotationClassList(BaseModel):
+    items: list[DatasetAnnotationClass]
+
+
 class EdgeTagCoverageBucket(BaseModel):
     tag: str
     image_count: int

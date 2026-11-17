@@ -175,6 +175,18 @@ export type ClassCoverageBucket = {
   annotation_count: number;
 };
 
+export type DatasetAnnotationClass = {
+  id: number;
+  name: string;
+  color: string;
+  image_count: number;
+  annotation_count: number;
+};
+
+export type DatasetAnnotationClassList = {
+  items: DatasetAnnotationClass[];
+};
+
 export type EdgeTagCoverageBucket = {
   tag: string;
   image_count: number;
@@ -1100,6 +1112,12 @@ export function refreshImageDimensions(
 
 export function getDatasetCoverage(datasetId: number): Promise<DatasetCoverageSummary> {
   return requestJson<DatasetCoverageSummary>(`/api/datasets/${datasetId}/coverage`);
+}
+
+export function listDatasetAnnotationClasses(
+  datasetId: number,
+): Promise<DatasetAnnotationClassList> {
+  return requestJson<DatasetAnnotationClassList>(`/api/datasets/${datasetId}/annotation-classes`);
 }
 
 export function listClasses(projectId: number): Promise<ClassListResponse> {
