@@ -40,15 +40,21 @@ export function AnnotationFilterDrawer({
         placeholder="iris"
       />
 
-      <label htmlFor="advanced-filter-class">类别</label>
+      <label htmlFor="advanced-filter-class">标注类别</label>
       <select
         id="advanced-filter-class"
         value={filters.class_id}
         onChange={(event) => onChange("class_id", event.target.value)}
       >
         <option value="">全部类别</option>
-        {classes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        {classes.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name}
+            {item.annotation_count > 0 ? `（${item.annotation_count}）` : ""}
+          </option>
+        ))}
       </select>
+      <p className="filter-hint">只显示至少含有该类别标注框的图像，例如选 tricycle 可筛出所有标了三轮车的图。</p>
 
       <label htmlFor="advanced-filter-result">识别结果</label>
       <select

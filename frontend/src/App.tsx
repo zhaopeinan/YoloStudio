@@ -1663,6 +1663,12 @@ export default function App() {
     void refreshImages(importedDataset?.dataset_id, 0, nextFilters);
   }
 
+  function handleImageClassFilterChange(classId: string) {
+    const nextFilters = { ...imageFilters, class_id: classId };
+    setImageFilters(nextFilters);
+    void refreshImages(importedDataset?.dataset_id, 0, nextFilters);
+  }
+
   function handleAdvancedImageFilterChange(key: keyof AdvancedImageFilters, value: string) {
     setImageFilters((current) => ({ ...current, [key]: value }) as ImageFiltersState);
   }
@@ -5114,6 +5120,21 @@ export default function App() {
               <option value="all">全部</option>
               <option value="annotated">已标注</option>
               <option value="unannotated">未标注</option>
+            </select>
+            <label htmlFor="filter-annotation-class">标注类别</label>
+            <select
+              id="filter-annotation-class"
+              value={imageFilters.class_id}
+              disabled={!importedDataset || classes.length === 0}
+              onChange={(event) => handleImageClassFilterChange(event.target.value)}
+            >
+              <option value="">全部类别</option>
+              {classes.map((classItem) => (
+                <option key={classItem.id} value={classItem.id}>
+                  {classItem.name}
+                  {classItem.annotation_count > 0 ? `（${classItem.annotation_count}）` : ""}
+                </option>
+              ))}
             </select>
             <button
               type="button"

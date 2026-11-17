@@ -1692,6 +1692,14 @@ input[type="color"] {
   background: #f8fafb;
 }
 
+.filter-hint {
+  margin: -4px 0 0;
+  color: #62727e;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
 .image-pager {
   display: flex;
   align-items: center;

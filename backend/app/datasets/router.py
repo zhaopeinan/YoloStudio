@@ -272,13 +272,6 @@ def list_dataset_images(
 ) -> DatasetImageList:
     _get_active_dataset(db, dataset_id)
 
-    annotation_counts = (
-        select(Annotation.image_id, func.count(Annotation.id).label("annotation_count"))
-        .join(Image, Annotation.image_id == Image.id)
-        .where(Image.dataset_id == dataset_id)
-        .group_by(Annotation.image_id)
-        .subquery()
-    )
     conditions = [Image.dataset_id == dataset_id]
     if platform:
         conditions.append(Image.platform == platform)
@@ -291,8 +284,17 @@ def list_dataset_images(
     elif label_status == "unannotated":
         conditions.append(~exists().where(Annotation.image_id == Image.id))
     if class_id is not None:
+        # Prefer indexed class_id lookup over a correlated EXISTS on ~45万框.
+        dataset_image_ids = select(Image.id).where(Image.dataset_id == dataset_id)
         conditions.append(
-            exists().where(Annotation.image_id == Image.id, Annotation.class_id == class_id)
+            Image.id.in_(
+                select(Annotation.image_id)
+                .where(
+                    Annotation.class_id == class_id,
+                    Annotation.image_id.in_(dataset_image_ids),
+                )
+                .distinct()
+            )
         )
     if edge_tag:
         conditions.append(
@@ -314,14 +316,27 @@ def list_dataset_images(
         )
 
     total = db.scalar(select(func.count()).select_from(Image).where(*conditions)) or 0
-    rows = db.execute(
-        select(Image, func.coalesce(annotation_counts.c.annotation_count, 0))
-        .outerjoin(annotation_counts, Image.id == annotation_counts.c.image_id)
-        .where(*conditions)
-        .order_by(Image.id)
-        .limit(limit)
-        .offset(offset)
-    ).all()
+    page_ids = list(
+        db.scalars(
+            select(Image.id).where(*conditions).order_by(Image.id).limit(limit).offset(offset)
+        ).all()
+    )
+    if not page_ids:
+        return DatasetImageList(items=[], limit=limit, offset=offset, total=total)
+
+    # Count boxes only for the current page — not the whole dataset.
+    annotation_count_by_image = {
+        int(image_id): int(count)
+        for image_id, count in db.execute(
+            select(Annotation.image_id, func.count(Annotation.id))
+            .where(Annotation.image_id.in_(page_ids))
+            .group_by(Annotation.image_id)
+        ).all()
+    }
+    images_by_id = {
+        image.id: image
+        for image in db.scalars(select(Image).where(Image.id.in_(page_ids))).all()
+    }
 
     return DatasetImageList(
         items=[
@@ -333,11 +348,12 @@ def list_dataset_images(
                 platform=image.platform,
                 altitude=image.altitude,
                 timestamp=image.timestamp,
-                annotation_count=int(annotation_count),
+                annotation_count=annotation_count_by_image.get(image.id, 0),
                 annotation_status=get_annotation_status(image),
                 image_url=f"/api/images/{image.id}/file",
             )
-            for image, annotation_count in rows
+            for image_id in page_ids
+            if (image := images_by_id.get(image_id)) is not None
         ],
         limit=limit,
         offset=offset,
