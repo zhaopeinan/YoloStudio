@@ -131,6 +131,29 @@ class GpuStatus(BaseModel):
     queried_at: str
 
 
+class MemoryStatus(BaseModel):
+    used_mb: float | None = None
+    total_mb: float | None = None
+    percent: float | None = None
+
+
+class DiskStatus(BaseModel):
+    path: str
+    used_gb: float | None = None
+    total_gb: float | None = None
+    percent: float | None = None
+
+
+class SystemResources(BaseModel):
+    cpu_percent: float | None = None
+    load_average: list[float] | None = None
+    cpu_count: int | None = None
+    memory: MemoryStatus
+    disk: DiskStatus
+    gpu: GpuStatus
+    queried_at: str
+
+
 class TrainingLiveSnapshot(BaseModel):
     run_id: int
     project_id: int

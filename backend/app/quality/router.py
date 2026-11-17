@@ -153,21 +153,72 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
         or 0
     )
 
-    rows = db.execute(
-        select(Annotation, Image)
-        .join(Image, Annotation.image_id == Image.id)
-        .where(Image.dataset_id == dataset_id)
+    # VisDrone-scale datasets (100k+ boxes) cannot afford loading every annotation
+    # into Python for O(n)/O(n²) scans on every page open.
+    detailed_scan_limit = 50_000
+    if annotation_count <= detailed_scan_limit:
+        rows = db.execute(
+            select(Annotation, Image)
+            .join(Image, Annotation.image_id == Image.id)
+            .where(Image.dataset_id == dataset_id)
+        ).all()
+        invalid_box_count = sum(1 for annotation, _ in rows if is_invalid_box(annotation))
+        tiny_box_count = sum(1 for annotation, image in rows if is_tiny_box(annotation, image))
+        duplicate_box_count = _duplicate_box_count([annotation for annotation, _ in rows])
+    else:
+        invalid_box_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Annotation)
+                .join(Image, Annotation.image_id == Image.id)
+                .where(
+                    Image.dataset_id == dataset_id,
+                    (
+                        (Annotation.width <= 0)
+                        | (Annotation.height <= 0)
+                        | (Annotation.x_center < 0)
+                        | (Annotation.y_center < 0)
+                        | (Annotation.x_center > 1)
+                        | (Annotation.y_center > 1)
+                        | (Annotation.width > 1)
+                        | (Annotation.height > 1)
+                    ),
+                )
+            )
+            or 0
+        )
+        tiny_box_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Annotation)
+                .join(Image, Annotation.image_id == Image.id)
+                .where(
+                    Image.dataset_id == dataset_id,
+                    Image.width.is_not(None),
+                    Image.height.is_not(None),
+                    (
+                        (Annotation.width * Image.width < 10)
+                        | (Annotation.height * Image.height < 10)
+                    ),
+                )
+            )
+            or 0
+        )
+        duplicate_box_count = 0
+
+    has_annotation = select(Annotation.id).where(Annotation.image_id == Image.id).exists()
+    images = db.scalars(
+        select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)
     ).all()
-    invalid_box_count = sum(1 for annotation, _ in rows if is_invalid_box(annotation))
-    tiny_box_count = sum(1 for annotation, image in rows if is_tiny_box(annotation, image))
-    duplicate_box_count = _duplicate_box_count([annotation for annotation, _ in rows])
-    images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
     missing_metadata_count = sum(1 for image in images if missing_metadata_fields(image))
     missing_image_dimensions_count = sum(1 for image in images if has_missing_image_dimensions(image))
+    unannotated_candidates = db.scalars(
+        select(Image).where(Image.dataset_id == dataset_id, ~has_annotation)
+    ).all()
     unannotated_image_count = sum(
         1
-        for image in images
-        if not image.annotations and get_annotation_status(image) == "unreviewed"
+        for image in unannotated_candidates
+        if get_annotation_status(image) == "unreviewed"
     )
     unknown_class_reference_count = sum(
         int(warning.get("count") or 0)
@@ -204,6 +255,10 @@ def build_quality_summary(db: Session, dataset_id: int) -> DatasetQualitySummary
     if unknown_class_reference_count > 0:
         noun = "label references" if unknown_class_reference_count == 1 else "label references"
         issues.append(f"{unknown_class_reference_count} {noun} unknown class indexes.")
+    if annotation_count > detailed_scan_limit:
+        issues.append(
+            f"标注量较大（{annotation_count}），已跳过重复框全量扫描以加快加载。"
+        )
 
     ready_for_training = (
         image_count > 0

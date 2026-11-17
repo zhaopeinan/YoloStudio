@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import json
+import os
 from pathlib import Path
 import shutil
+import time
 from typing import Any
 
 from sqlalchemy import delete, func, or_, select
@@ -143,25 +145,57 @@ def expected_entity_path(
     raise StorageEntityNotFoundError("不支持的存储对象类型")
 
 
+_DIRECTORY_SIZE_CACHE: dict[str, tuple[float, int]] = {}
+_DIRECTORY_SIZE_CACHE_TTL_SEC = 60.0
+
+
+def clear_directory_size_cache() -> None:
+    _DIRECTORY_SIZE_CACHE.clear()
+
+
 def directory_size(path: Path, workspace_root: Path | None = None) -> int:
+    """Sum file sizes under path.
+
+    Large datasets (e.g. VisDrone ~8k images) used to make /api/storage/items hang
+    for tens of seconds because every file was Path.resolve()'d. Walk with os.scandir
+    instead and cache results briefly for repeated list calls.
+    """
     resolved_root = path.resolve()
-    if workspace_root is not None and not resolved_root.is_relative_to(workspace_root.resolve()):
+    workspace_resolved = workspace_root.resolve() if workspace_root is not None else None
+    if workspace_resolved is not None and not resolved_root.is_relative_to(workspace_resolved):
         raise StoragePathError("存储路径不在工作区内")
     if not resolved_root.exists():
         return 0
     if resolved_root.is_file():
         return resolved_root.stat().st_size
 
+    cache_key = str(resolved_root)
+    now = time.monotonic()
+    cached = _DIRECTORY_SIZE_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _DIRECTORY_SIZE_CACHE_TTL_SEC:
+        return cached[1]
+
     total = 0
-    for item in resolved_root.rglob("*"):
-        if not item.is_file():
+    stack = [resolved_root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                            continue
+                        if entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
             continue
-        resolved_item = item.resolve()
-        if workspace_root is not None and not resolved_item.is_relative_to(
-            workspace_root.resolve()
-        ):
-            raise StoragePathError("存储目录包含工作区外的文件")
-        total += resolved_item.stat().st_size
+
+    _DIRECTORY_SIZE_CACHE[cache_key] = (now, total)
     return total
 
 

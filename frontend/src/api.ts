@@ -386,6 +386,29 @@ export type GpuStatus = {
   queried_at: string;
 };
 
+export type MemoryStatus = {
+  used_mb: number | null;
+  total_mb: number | null;
+  percent: number | null;
+};
+
+export type DiskStatus = {
+  path: string;
+  used_gb: number | null;
+  total_gb: number | null;
+  percent: number | null;
+};
+
+export type SystemResources = {
+  cpu_percent: number | null;
+  load_average: number[] | null;
+  cpu_count: number | null;
+  memory: MemoryStatus;
+  disk: DiskStatus;
+  gpu: GpuStatus;
+  queried_at: string;
+};
+
 export type TrainingLiveProgress = {
   epoch: number | null;
   total_epochs: number | null;
@@ -1300,6 +1323,10 @@ export function getTrainingRunLive(
 
 export function getSystemGpu(): Promise<GpuStatus> {
   return requestJson<GpuStatus>("/api/system/gpu");
+}
+
+export function getSystemResources(): Promise<SystemResources> {
+  return requestJson<SystemResources>("/api/system/resources");
 }
 
 export function getTrainingRunArtifacts(runId: number): Promise<TrainingRunArtifactSummary> {

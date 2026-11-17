@@ -126,6 +126,7 @@ import { AnnotationFilterDrawer } from "./AnnotationFilterDrawer";
 import { AnnotationToolbar } from "./AnnotationToolbar";
 import { suggestClassFromFilename, type FilenameSuggestion } from "./annotation-suggestions";
 import { StorageManagementView } from "./StorageManagementView";
+import { SystemResourceBar } from "./SystemResourceBar";
 import { PreviewView } from "./PreviewView";
 import { TrainingLiveMonitor } from "./TrainingLiveMonitor";
 import { LoginView } from "./LoginView";
@@ -282,6 +283,44 @@ type CanvasPanState = {
   originalPanY: number;
 };
 
+const LAST_DATASET_STORAGE_KEY = "yolostudio.lastOpenedDataset";
+
+type LastOpenedDataset = {
+  project_id: number;
+  project_name: string;
+  dataset_id: number;
+  dataset_name: string;
+  image_count: number;
+};
+
+function readLastOpenedDataset(): LastOpenedDataset | null {
+  try {
+    const raw = window.localStorage.getItem(LAST_DATASET_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<LastOpenedDataset>;
+    if (
+      typeof parsed.project_id !== "number"
+      || typeof parsed.dataset_id !== "number"
+      || typeof parsed.project_name !== "string"
+      || typeof parsed.dataset_name !== "string"
+      || typeof parsed.image_count !== "number"
+    ) {
+      return null;
+    }
+    return parsed as LastOpenedDataset;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastOpenedDataset(dataset: LastOpenedDataset) {
+  window.localStorage.setItem(LAST_DATASET_STORAGE_KEY, JSON.stringify(dataset));
+}
+
+function clearLastOpenedDataset() {
+  window.localStorage.removeItem(LAST_DATASET_STORAGE_KEY);
+}
+
 export default function App() {
   const { user, loading: authLoading, isAdmin, logout } = useAuth();
   const [showUserManagement, setShowUserManagement] = useState(false);
@@ -289,6 +328,8 @@ export default function App() {
   const [datasetPageTab, setDatasetPageTab] = useState<"import" | "management">("management");
   const currentStepRef = useRef<WorkflowStep>("dataset");
   const workflowStepsRef = useRef<ReturnType<typeof buildWorkflowSteps>>([]);
+  const restoringLastDatasetRef = useRef(false);
+  const workspaceLoadIdRef = useRef(0);
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -796,6 +837,7 @@ export default function App() {
     canvasPanStateRef.current = null;
     isSpacePressedRef.current = false;
     setImportedDataset(null);
+    clearLastOpenedDataset();
     setClasses([]);
     setRoundSelectedClassIds([]);
     setDetectedClasses([]);
@@ -1223,62 +1265,77 @@ export default function App() {
   }
 
   async function loadDatasetWorkspace(dataset: DatasetImportResponse): Promise<{ classCount: number }> {
+    const loadId = ++workspaceLoadIdRef.current;
+    const isCurrent = () => workspaceLoadIdRef.current === loadId;
+
     setImportedDataset(dataset);
     setProjectName(dataset.project_name);
     setDatasetName(dataset.dataset_name);
+    writeLastOpenedDataset({
+      project_id: dataset.project_id,
+      project_name: dataset.project_name,
+      dataset_id: dataset.dataset_id,
+      dataset_name: dataset.dataset_name,
+      image_count: dataset.image_count,
+    });
 
-    const [
-      classResponse,
-      imageResponse,
-      qualityResponse,
-      coverageResponse,
-      qualityIssueResponse,
-      versionResponse,
-    ] = await Promise.all([
-      listClasses(dataset.project_id),
-      listImages(dataset.dataset_id, {}, { limit: imagePageSize, offset: 0 }),
-      getQuality(dataset.dataset_id),
-      getDatasetCoverage(dataset.dataset_id),
-      listQualityIssues(dataset.dataset_id, qualityIssueType),
-      listDatasetVersions(dataset.dataset_id),
-    ]);
-    const runResponse = await listTrainingRuns(dataset.project_id);
-
+    // Classes first so "本轮类别" unlocks immediately.
+    const classResponse = await listClasses(dataset.project_id);
+    if (!isCurrent()) {
+      return { classCount: 0 };
+    }
     setClasses(classResponse.items);
     const activeItems = classResponse.items.filter((classItem) => classItem.active);
     setRoundSelectedClassIds(activeItems.map((classItem) => classItem.id));
     setSelectedClassId(activeItems[0]?.id ?? classResponse.items[0]?.id ?? null);
     setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
     setVersionDatasetIds([dataset.dataset_id]);
-    await refreshDetectedClasses(dataset.dataset_id);
-    setImages(imageResponse.items);
-    setImagePage({
-      limit: imageResponse.limit,
-      offset: imageResponse.offset,
-      total: imageResponse.total,
-    });
-    setSelectedImageId(selectInitialAnnotationImageId(imageResponse.items, null));
+
+    const soft = async <T,>(label: string, task: Promise<T>): Promise<T | null> => {
+      try {
+        return await task;
+      } catch (error) {
+        console.warn(`[loadDatasetWorkspace] ${label} failed`, error);
+        return null;
+      }
+    };
+
+    // Images are required for annotation. Never wait on quality/coverage/issues —
+    // VisDrone-sized sets make those endpoints take tens of seconds and used to
+    // leave the annotation browser empty (黑屏 / 共 0 张) until they finished.
+    setImageFilters(defaultImageFilters());
+    setImageFilenameSearch("");
+    setImageFilterError(null);
+    try {
+      const imageResponse = await listImages(dataset.dataset_id, {}, { limit: imagePageSize, offset: 0 });
+      if (!isCurrent()) {
+        return { classCount: activeItems.length };
+      }
+      setImages(imageResponse.items);
+      setImagePage({
+        limit: imageResponse.limit,
+        offset: imageResponse.offset,
+        total: imageResponse.total,
+      });
+      setSelectedImageId(selectInitialAnnotationImageId(imageResponse.items, null));
+    } catch (error) {
+      if (!isCurrent()) {
+        return { classCount: activeItems.length };
+      }
+      setImages([]);
+      setImagePage({ limit: imagePageSize, offset: 0, total: 0 });
+      setSelectedImageId(null);
+      setImageFilterError(error instanceof Error ? error.message : "图像列表加载失败");
+    }
+
     setPendingAnnotationImageId(null);
     setAnnotationNotice(null);
     setAnnotations([]);
     clearAnnotationsDirty();
     setActiveReview(null);
-    setQuality(qualityResponse);
-    setCoverage(coverageResponse);
-    setQualityIssues(qualityIssueResponse.items);
+    setQualityIssues([]);
     setDimensionRefresh(null);
-    setVersions(versionResponse.items);
-    setSelectedTrainingVersionId((current) => {
-      if (current && versionResponse.items.some((item) => item.id === current)) {
-        return current;
-      }
-      return versionResponse.items[0]?.id ?? null;
-    });
     setVersionImageScope("annotated");
-    setRuns(runResponse.items);
-    setRunLogs({});
-    await refreshRunArtifacts(runResponse.items.map((run) => run.id));
-    await refreshTrainingModels(dataset.project_id);
     setPredictionJobs([]);
     setPredictions([]);
     setEvalReview(null);
@@ -1286,30 +1343,78 @@ export default function App() {
     setPredictionLogs({});
     setExportCapabilities(null);
     setExports([]);
+    setRunLogs({});
 
-    let projectVersionItems: DatasetVersion[] = versionResponse.items;
-    try {
-      const projectVersionResponse = await listProjectVersions(dataset.project_id);
-      projectVersionItems = projectVersionResponse.items;
-      setProjectVersions(projectVersionItems);
-    } catch {
-      setProjectVersions(versionResponse.items);
-    }
+    void refreshDetectedClasses(dataset.dataset_id);
 
-    const defaultEvalRun =
-      runResponse.items.find((run) => run.status === "completed") ?? runResponse.items[0] ?? null;
-    setSelectedEvalRunId(defaultEvalRun?.id ?? null);
-    setSelectedEvalVersionId(defaultEvalRun?.version_id ?? projectVersionItems[0]?.id ?? null);
+    // Secondary workspace data loads in the background so annotation can open now.
+    void (async () => {
+      const [qualityResponse, coverageResponse, versionResponse, runResponse] = await Promise.all([
+        soft("quality", getQuality(dataset.dataset_id)),
+        soft("coverage", getDatasetCoverage(dataset.dataset_id)),
+        soft("versions", listDatasetVersions(dataset.dataset_id)),
+        soft("runs", listTrainingRuns(dataset.project_id)),
+      ]);
+      if (!isCurrent()) {
+        return;
+      }
 
-    if (defaultEvalRun) {
-      await refreshRunSummary(defaultEvalRun.id);
-      await refreshProjectTrainingSummary(dataset.project_id);
-      await refreshPredictionJobs(defaultEvalRun.id);
-      await refreshExports(defaultEvalRun.id);
-    } else {
-      setRunSummary(null);
-      setProjectExperimentSummary(null);
-    }
+      if (qualityResponse) setQuality(qualityResponse);
+      if (coverageResponse) setCoverage(coverageResponse);
+
+      const versionItems = versionResponse?.items ?? [];
+      setVersions(versionItems);
+      setSelectedTrainingVersionId((current) => {
+        if (current && versionItems.some((item) => item.id === current)) {
+          return current;
+        }
+        return versionItems[0]?.id ?? null;
+      });
+
+      const runItems = runResponse?.items ?? [];
+      setRuns(runItems);
+      if (runItems.length > 0) {
+        await soft("run-artifacts", refreshRunArtifacts(runItems.map((run) => run.id)));
+        if (!isCurrent()) {
+          return;
+        }
+      }
+      await soft("training-models", refreshTrainingModels(dataset.project_id));
+      if (!isCurrent()) {
+        return;
+      }
+
+      let projectVersionItems: DatasetVersion[] = versionItems;
+      try {
+        const projectVersionResponse = await listProjectVersions(dataset.project_id);
+        if (!isCurrent()) {
+          return;
+        }
+        projectVersionItems = projectVersionResponse.items;
+        setProjectVersions(projectVersionItems);
+      } catch {
+        if (!isCurrent()) {
+          return;
+        }
+        setProjectVersions(versionItems);
+      }
+
+      const defaultEvalRun =
+        runItems.find((run) => run.status === "completed") ?? runItems[0] ?? null;
+      setSelectedEvalRunId(defaultEvalRun?.id ?? null);
+      setSelectedEvalVersionId(defaultEvalRun?.version_id ?? projectVersionItems[0]?.id ?? null);
+
+      if (defaultEvalRun) {
+        await soft("run-summary", refreshRunSummary(defaultEvalRun.id));
+        await soft("project-summary", refreshProjectTrainingSummary(dataset.project_id));
+        await soft("prediction-jobs", refreshPredictionJobs(defaultEvalRun.id));
+        await soft("exports", refreshExports(defaultEvalRun.id));
+      } else {
+        setRunSummary(null);
+        setProjectExperimentSummary(null);
+      }
+    })();
+
     return { classCount: activeItems.length };
   }
 
@@ -1366,6 +1471,42 @@ export default function App() {
     }
   }
 
+  useEffect(() => {
+    if (!user || authLoading || importedDataset || restoringLastDatasetRef.current) {
+      return;
+    }
+    const last = readLastOpenedDataset();
+    if (!last) {
+      return;
+    }
+    restoringLastDatasetRef.current = true;
+    void loadDatasetWorkspace({
+      project_id: last.project_id,
+      dataset_id: last.dataset_id,
+      project_name: last.project_name,
+      dataset_name: last.dataset_name,
+      image_count: last.image_count,
+      groups: [],
+    })
+      .then(({ classCount }) => {
+        setSelectedSavedDataset(`${last.project_id}:${last.dataset_id}`);
+        const requested = parseWorkflowHash(window.location.hash);
+        // Prefer the URL step when it becomes available after restore; otherwise
+        // land on annotation if round classes already exist.
+        if (requested !== "dataset") {
+          requestWorkflowStep(requested);
+        } else if (classCount > 0) {
+          commitWorkflowStep("annotation");
+        }
+      })
+      .catch(() => {
+        clearLastOpenedDataset();
+      })
+      .finally(() => {
+        restoringLastDatasetRef.current = false;
+      });
+  }, [user?.id, authLoading, importedDataset]);
+
   async function refreshTrainingPrep(datasetId = importedDataset?.dataset_id) {
     if (!datasetId) {
       return;
@@ -1375,10 +1516,15 @@ export default function App() {
     setQualityError(null);
 
     try {
+      // Quality issue samples scan every annotation on large sets (VisDrone ~45万框)
+      // and can take >60s; keep them optional so the quality page still renders.
       const [qualityResponse, coverageResponse, qualityIssueResponse, versionResponse] = await Promise.all([
         getQuality(datasetId),
         getDatasetCoverage(datasetId),
-        listQualityIssues(datasetId, qualityIssueType),
+        listQualityIssues(datasetId, qualityIssueType).catch((error) => {
+          console.warn("[refreshTrainingPrep] quality-issues failed", error);
+          return { items: [] as DatasetQualityIssue[] };
+        }),
         listDatasetVersions(datasetId),
       ]);
       setQuality(qualityResponse);
@@ -2882,6 +3028,7 @@ export default function App() {
           <h1>智航杯标注台</h1>
         </div>
         <div className="topbar-actions">
+          <SystemResourceBar />
           <div className="device-pill">
             <Activity size={16} />
             <span>{health?.devices.selected ?? "连接中"}</span>
@@ -4522,7 +4669,13 @@ export default function App() {
               </span>
             </div>
 
-            {classes.length === 0 ? (
+            {!importedDataset ? (
+              <p className="empty-state">
+                尚未打开数据集。请先到「项目与数据 → 数据管理」打开例如
+                <code>VisDrone2019-DET</code>
+                ，系统会加载该项目的类别库。
+              </p>
+            ) : classes.length === 0 ? (
               <p className="empty-state">项目类别库为空。请先在下方把类别加入项目库。</p>
             ) : (
               <fieldset
@@ -4628,8 +4781,10 @@ export default function App() {
                   <p className="empty-state">正在扫描文件名类别...</p>
                 ) : detectedClasses.length === 0 ? (
                   <p className="empty-state">
-                    未能从文件名识别出重复前缀类别。请确认图像命名类似
-                    <code>fire_truck_h20_a045.jpg</code>，或在下方编辑已有类别。
+                    未能从文件名识别出重复前缀类别。VisDrone 等公开集通常从
+                    <code>data.yaml</code>
+                    导入类别，不依赖文件名；若上方类别库已有条目，直接勾选即可。仿真数据请确认命名类似
+                    <code>fire_truck_h20_a045.jpg</code>。
                   </p>
                 ) : (
                   <fieldset
@@ -4717,7 +4872,9 @@ export default function App() {
               </div>
 
               <div className="class-list" aria-label="项目类别库">
-                {classes.length === 0 ? (
+                {!importedDataset ? (
+                  <p className="empty-state">打开数据集后显示该项目的类别库。</p>
+                ) : classes.length === 0 ? (
                   <p className="empty-state">类别库为空。</p>
                 ) : (
                   classes.map((classItem) =>
@@ -4996,7 +5153,22 @@ export default function App() {
 
           <div className="image-list" aria-label="已导入图像">
             {visibleImages.length === 0 ? (
-              <p className="empty-state">导入的图像将显示在这里。</p>
+              <div className="empty-state">
+                <p>
+                  {importedDataset && importedDataset.image_count > 0 && imagePage.total === 0
+                    ? "图像列表尚未加载完成或加载失败。"
+                    : "导入的图像将显示在这里。"}
+                </p>
+                {importedDataset && imagePage.total === 0 ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void refreshImages(importedDataset.dataset_id, 0)}
+                  >
+                    重新加载图像
+                  </button>
+                ) : null}
+              </div>
             ) : (
               visibleImages.map((image) => (
                 <button

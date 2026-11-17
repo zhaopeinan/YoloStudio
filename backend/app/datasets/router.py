@@ -274,6 +274,8 @@ def list_dataset_images(
 
     annotation_counts = (
         select(Annotation.image_id, func.count(Annotation.id).label("annotation_count"))
+        .join(Image, Annotation.image_id == Image.id)
+        .where(Image.dataset_id == dataset_id)
         .group_by(Annotation.image_id)
         .subquery()
     )
@@ -352,20 +354,29 @@ def get_dataset_coverage(
 
     images = db.scalars(select(Image).where(Image.dataset_id == dataset_id).order_by(Image.id)).all()
     image_ids = {image.id for image in images}
-    rows = db.execute(
-        select(Annotation, Image, ClassDef)
-        .join(Image, Annotation.image_id == Image.id)
-        .join(ClassDef, Annotation.class_id == ClassDef.id)
-        .where(Image.dataset_id == dataset_id)
-        .order_by(ClassDef.id, Annotation.id)
-    ).all()
+    annotated_image_ids = {
+        image_id
+        for image_id in db.scalars(
+            select(Annotation.image_id)
+            .join(Image, Annotation.image_id == Image.id)
+            .where(Image.dataset_id == dataset_id)
+            .distinct()
+        ).all()
+    }
+    annotation_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(Annotation)
+            .join(Image, Annotation.image_id == Image.id)
+            .where(Image.dataset_id == dataset_id)
+        )
+        or 0
+    )
     project_classes = db.scalars(
         select(ClassDef)
         .where(ClassDef.project_id == dataset.project_id, ClassDef.active == 1)
         .order_by(ClassDef.id)
     ).all()
-    annotated_image_ids = {annotation.image_id for annotation, _, _ in rows}
-    annotation_count = len(rows)
 
     platform_image_ids: dict[str, set[int]] = {}
     altitude_image_ids: dict[str, set[int]] = {}
@@ -376,43 +387,66 @@ def get_dataset_coverage(
 
     platform_annotation_counts = {label: 0 for label in platform_image_ids}
     altitude_annotation_counts = {label: 0 for label in altitude_image_ids}
-    class_rows: dict[int, dict] = {}
-    edge_tag_rows: dict[str, dict[str, set[int] | int]] = {}
-    for annotation, image, class_def in rows:
-        platform_annotation_counts[image.platform or "missing"] += 1
-        altitude_annotation_counts[_altitude_band(image.altitude)] += 1
+    images_by_id = {image.id: image for image in images}
 
-        class_row = class_rows.setdefault(
-            class_def.id,
-            {
-                "class": class_def,
-                "image_ids": set(),
-                "annotation_count": 0,
-            },
-        )
-        class_row["image_ids"].add(image.id)
-        class_row["annotation_count"] += 1
+    for platform_label, count in db.execute(
+        select(func.coalesce(Image.platform, "missing"), func.count(Annotation.id))
+        .select_from(Annotation)
+        .join(Image, Annotation.image_id == Image.id)
+        .where(Image.dataset_id == dataset_id)
+        .group_by(func.coalesce(Image.platform, "missing"))
+    ).all():
+        platform_annotation_counts[str(platform_label)] = int(count)
 
-        for raw_tag in annotation.edge_tags or []:
-            tag = str(raw_tag).strip()
-            if not tag:
-                continue
-            tag_row = edge_tag_rows.setdefault(
-                tag,
-                {
-                    "image_ids": set(),
-                    "annotation_count": 0,
-                },
+    for image_id, count in db.execute(
+        select(Annotation.image_id, func.count(Annotation.id))
+        .join(Image, Annotation.image_id == Image.id)
+        .where(Image.dataset_id == dataset_id)
+        .group_by(Annotation.image_id)
+    ).all():
+        image = images_by_id.get(int(image_id))
+        if image is None:
+            continue
+        altitude_annotation_counts[_altitude_band(image.altitude)] += int(count)
+
+    class_stats = {
+        int(class_id): {"image_count": int(img_count), "annotation_count": int(ann_count)}
+        for class_id, img_count, ann_count in db.execute(
+            select(
+                Annotation.class_id,
+                func.count(func.distinct(Annotation.image_id)),
+                func.count(Annotation.id),
             )
-            tag_row["image_ids"].add(image.id)
-            tag_row["annotation_count"] += 1
+            .join(Image, Annotation.image_id == Image.id)
+            .where(Image.dataset_id == dataset_id)
+            .group_by(Annotation.class_id)
+        ).all()
+    }
+
+    edge_tag_image_ids: dict[str, set[int]] = {}
+    edge_tag_counts: dict[str, int] = {}
+    # Scanning every annotation JSON blob is too expensive for VisDrone-scale sets.
+    if annotation_count <= 50_000:
+        for image_id, raw_tags in db.execute(
+            select(Annotation.image_id, Annotation.edge_tags)
+            .join(Image, Annotation.image_id == Image.id)
+            .where(Image.dataset_id == dataset_id, Annotation.edge_tags.is_not(None))
+        ).all():
+            if not raw_tags:
+                continue
+            for raw_tag in raw_tags:
+                tag = str(raw_tag).strip()
+                if not tag:
+                    continue
+                edge_tag_image_ids.setdefault(tag, set()).add(int(image_id))
+                edge_tag_counts[tag] = edge_tag_counts.get(tag, 0) + 1
 
     platforms = [
         _coverage_bucket(
             label,
             platform_image_ids[label],
             annotated_image_ids,
-            platform_annotation_counts[label],
+            platform_annotation_counts.get(label, 0),
         )
         for label in sorted(platform_image_ids)
     ]
@@ -422,45 +456,34 @@ def get_dataset_coverage(
             label,
             altitude_image_ids[label],
             annotated_image_ids,
-            altitude_annotation_counts[label],
+            altitude_annotation_counts.get(label, 0),
         )
         for label in sorted(altitude_image_ids, key=lambda item: altitude_order.get(item, 99))
     ]
-    classes = []
-    for class_def in project_classes:
-        row = class_rows.get(
-            class_def.id,
-            {
-                "image_ids": set(),
-                "annotation_count": 0,
-            },
+    classes = [
+        ClassCoverageBucket(
+            class_id=class_def.id,
+            class_name=class_def.name,
+            class_color=class_def.color,
+            image_count=int(class_stats.get(class_def.id, {}).get("image_count", 0)),
+            annotation_count=int(class_stats.get(class_def.id, {}).get("annotation_count", 0)),
         )
-        classes.append(
-            ClassCoverageBucket(
-                class_id=class_def.id,
-                class_name=class_def.name,
-                class_color=class_def.color,
-                image_count=len(row["image_ids"]),
-                annotation_count=int(row["annotation_count"]),
-            )
-        )
+        for class_def in project_classes
+    ]
     edge_tags = [
         {
             "tag": tag,
-            "image_count": len(row["image_ids"]),
-            "annotation_count": int(row["annotation_count"]),
+            "image_count": len(edge_tag_image_ids[tag]),
+            "annotation_count": edge_tag_counts[tag],
         }
-        for tag, row in sorted(
-            edge_tag_rows.items(),
-            key=lambda item: (-int(item[1]["annotation_count"]), item[0]),
-        )
+        for tag in sorted(edge_tag_counts, key=lambda item: (-edge_tag_counts[item], item))
     ]
 
     return DatasetCoverageSummary(
         dataset_id=dataset.id,
         image_count=len(image_ids),
         annotated_image_count=len(annotated_image_ids),
-        annotation_count=annotation_count,
+        annotation_count=int(annotation_count),
         platforms=platforms,
         altitude_bands=altitude_bands,
         classes=classes,

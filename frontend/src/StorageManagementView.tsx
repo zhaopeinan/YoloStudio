@@ -443,7 +443,7 @@ export function StorageManagementView({
       {message && <div role="alert" className="status-message error-message">{message}</div>}
       {notice && <div role="status" className="status-message success-message">{notice}</div>}
       {loading ? (
-        <p role="status">正在加载数据...</p>
+        <p role="status">正在加载数据… 大数据集首次统计体积可能需要十几秒，请稍候。</p>
       ) : (
         <div className="storage-table-scroll">
           {tab === "active" ? (

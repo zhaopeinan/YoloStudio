@@ -18,6 +18,7 @@ from app.storage.visibility import (
     active_entity_predicate,
     require_active_entity,
 )
+from app.system.resources import collect_system_resources
 from app.training.live import build_live_snapshot, query_nvidia_smi
 from app.training.runner import (
     cancel_training_run,
@@ -30,6 +31,7 @@ from app.training.schemas import (
     GpuStatus,
     ModelWeightList,
     ModelWeightRead,
+    SystemResources,
     TrainingLiveSnapshot,
     TrainingModelList,
     TrainingModelOption,
@@ -335,6 +337,12 @@ def get_training_run_live(
 def get_system_gpu() -> GpuStatus:
     """Read-only nvidia-smi snapshot; failures never affect training."""
     return GpuStatus.model_validate(query_nvidia_smi())
+
+
+@router.get("/system/resources", response_model=SystemResources)
+def get_system_resources(settings: Settings = Depends(get_settings)) -> SystemResources:
+    """CPU / memory / disk / GPU snapshot for the top status bar."""
+    return SystemResources.model_validate(collect_system_resources(settings))
 
 
 @router.get("/training/runs/{run_id}/summary", response_model=RunExperimentSummary)
