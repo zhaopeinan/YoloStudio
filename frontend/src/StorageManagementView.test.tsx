@@ -215,12 +215,9 @@ describe("StorageManagementView", () => {
 
     const table = await screen.findByRole("table", { name: "现有数据" });
     expect(within(table).getByText("camouflage-set")).toBeInTheDocument();
-    expect(
-      within(table).getByText("2 张图像 · 已标注 1 · 未标注 1 · 2 个边界框"),
-    ).toBeInTheDocument();
-    expect(
-      within(table).getByText("2 张图像 · 已标注 2 · 未标注 0 · 2 个边界框"),
-    ).toBeInTheDocument();
+    expect(within(table).getByText("2张图像 / 1张已标注")).toBeInTheDocument();
+    expect(within(table).getByText("2张图像 / 2张已标注")).toBeInTheDocument();
+    expect(within(table).getAllByText("2个标注")).toHaveLength(2);
     expect(within(table).getAllByText("受保护")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "移入回收站 camouflage-set" })).toBeDisabled();
     expect(screen.getAllByText("标注版本 4")).toHaveLength(2);

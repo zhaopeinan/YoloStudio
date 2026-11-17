@@ -91,23 +91,44 @@ function runStatusLabel(status: string): string {
   return labels[status] ?? status;
 }
 
-function contentSummary(item: Pick<StorageItem, "image_count" | "annotated_image_count" | "annotation_count">): string {
+type ContentSummaryCounts = Pick<
+  StorageItem,
+  "image_count" | "annotated_image_count" | "annotation_count"
+>;
+
+function contentSummaryParts(item: ContentSummaryCounts): { primary: string; secondary: string } {
   const imageCount = item.image_count ?? 0;
   const annotatedCount = item.annotated_image_count ?? 0;
-  const unannotatedCount = Math.max(0, imageCount - annotatedCount);
   const annotationCount = item.annotation_count ?? 0;
-  return `${imageCount} 张图像 · 已标注 ${annotatedCount} · 未标注 ${unannotatedCount} · ${annotationCount} 个边界框`;
+  return {
+    primary: `${imageCount}张图像 / ${annotatedCount}张已标注`,
+    secondary: `${annotationCount}个标注`,
+  };
 }
 
-function trashContentSummary(summary: TrashItem["summary"]): string {
+function ContentSummary({ item }: { item: ContentSummaryCounts }) {
+  const { primary, secondary } = contentSummaryParts(item);
+  return (
+    <>
+      <span>{primary}</span>
+      <small>{secondary}</small>
+    </>
+  );
+}
+
+function TrashContentSummary({ summary }: { summary: TrashItem["summary"] }) {
   if (summary.image_count === undefined) {
-    return summary.model || runStatusLabel(summary.status ?? "");
+    return <span>{summary.model || runStatusLabel(summary.status ?? "")}</span>;
   }
-  return contentSummary({
-    image_count: summary.image_count,
-    annotated_image_count: summary.annotated_image_count ?? null,
-    annotation_count: summary.annotation_count ?? 0,
-  });
+  return (
+    <ContentSummary
+      item={{
+        image_count: summary.image_count,
+        annotated_image_count: summary.annotated_image_count ?? null,
+        annotation_count: summary.annotation_count ?? 0,
+      }}
+    />
+  );
 }
 
 function resolveOpenableDataset(item: StorageItem, siblingItems: StorageItem[] = []): OpenableDatasetRef | null {
@@ -635,7 +656,7 @@ function ActiveTable({
               <td>{entityLabel(item.entity_type)}</td>
               <td>{item.project_name}</td>
               <td>
-                <span>{contentSummary(item)}</span>
+                <ContentSummary item={item} />
                 {item.split_counts && <small>{splitSummary(item.split_counts)}</small>}
               </td>
               <td>{formatBytes(item.size_bytes)}</td>
@@ -785,7 +806,9 @@ function TrashTable({
             <tr key={item.id} className={`trash-row ${status.className}`}>
               <th scope="row">{item.display_name}</th>
               <td>{entityLabel(item.entity_type)}</td>
-              <td>{trashContentSummary(item.summary)}</td>
+              <td>
+                <TrashContentSummary summary={item.summary} />
+              </td>
               <td>{formatBytes(item.size_bytes)}</td>
               <td>{formatDate(item.deleted_at)}</td>
               <td>{daysUntil(item.purge_after)} 天后清理</td>
@@ -918,7 +941,7 @@ function DetailDrawer({
             </div>
             <dl>
               <dt>所属项目</dt><dd>{detail.project_name}</dd>
-              <dt>图像与标注</dt><dd>{contentSummary(detail)}</dd>
+              <dt>图像与标注</dt><dd><ContentSummary item={detail} /></dd>
               {detail.split_counts && <><dt>数据切分</dt><dd>{splitSummary(detail.split_counts)}</dd></>}
               <dt>占用空间</dt><dd>{formatBytes(detail.size_bytes)}</dd>
               <dt>存储路径</dt><dd className="path-value" title={detail.artifact_path}>{detail.artifact_path}</dd>
