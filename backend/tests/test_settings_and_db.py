@@ -30,3 +30,8 @@ def test_init_db_creates_foundation_tables(tmp_path: Path):
         "users",
     }.issubset(tables)
     assert settings.workspace_root.exists()
+    with engine.connect() as connection:
+        journal_mode = connection.exec_driver_sql("PRAGMA journal_mode").scalar()
+        busy_timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar()
+    assert str(journal_mode).lower() == "wal"
+    assert int(busy_timeout) >= 60_000

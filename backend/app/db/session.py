@@ -1,19 +1,41 @@
 from collections.abc import Generator
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.settings import Settings, get_settings
 from app.db.models import Base
 
 
+SQLITE_BUSY_TIMEOUT_MS = 60_000
+
+
 def create_engine_for_settings(settings: Settings) -> Engine:
     settings.ensure_workspace()
-    return create_engine(
+    engine = create_engine(
         settings.database_url,
-        connect_args={"check_same_thread": False},
+        connect_args={
+            "check_same_thread": False,
+            # Wait instead of failing fast when training and API share SQLite.
+            "timeout": SQLITE_BUSY_TIMEOUT_MS / 1000,
+        },
         future=True,
     )
+    if engine.url.get_backend_name() == "sqlite":
+        _configure_sqlite(engine)
+    return engine
+
+
+def _configure_sqlite(db_engine: Engine) -> None:
+    """Enable WAL + busy timeout so API polls don't 500 during training writes."""
+
+    @event.listens_for(db_engine, "connect")
+    def _on_connect(dbapi_connection, _connection_record) -> None:  # noqa: ANN001
+        cursor = dbapi_connection.cursor()
+        cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 engine = create_engine_for_settings(get_settings())
@@ -22,6 +44,11 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 
 def init_db(db_engine: Engine = engine) -> None:
     Base.metadata.create_all(bind=db_engine)
+    if db_engine.url.get_backend_name() == "sqlite":
+        with db_engine.begin() as connection:
+            connection.exec_driver_sql(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+            connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+            connection.exec_driver_sql("PRAGMA synchronous=NORMAL")
     _ensure_preview_job_video_id(db_engine)
     _ensure_prediction_job_version_id(db_engine)
 

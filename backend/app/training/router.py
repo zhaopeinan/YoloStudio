@@ -258,6 +258,15 @@ def create_training_run(
         run = create_queued_run(db, settings, version, request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        # SQLite lock / unexpected IO during queue should surface as a clear API error.
+        message = str(exc)
+        if "database is locked" in message.lower():
+            raise HTTPException(
+                status_code=503,
+                detail="数据库正忙（通常因训练写库），请稍后再试",
+            ) from exc
+        raise
 
     background_tasks.add_task(execute_training_run, run.id, db.get_bind(), settings)
     return _read_run(db, run)
