@@ -1980,10 +1980,44 @@ input[type="color"] {
   margin-top: 10px;
 }
 
-.version-dataset-grid label span {
+.version-dataset-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.version-dataset-grid label {
+  align-items: flex-start;
+  min-width: 0;
+  overflow: hidden;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.version-dataset-grid label > input {
+  margin-top: 2px;
+}
+
+.version-dataset-grid label .version-dataset-label {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
   width: auto;
   height: auto;
   border-radius: 0;
+  line-height: 1.35;
+}
+
+.version-dataset-grid label .version-dataset-label strong {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 13px;
+  font-weight: 700;
+  color: #172026;
+}
+
+.version-dataset-grid label .version-dataset-label small {
+  color: #5b6b75;
+  font-size: 12px;
   line-height: 1.35;
 }
 

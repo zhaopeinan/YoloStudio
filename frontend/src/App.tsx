@@ -3866,12 +3866,18 @@ export default function App() {
                           disabled={!importedDataset || isCurrent}
                           onChange={() => toggleVersionDataset(dataset.id)}
                         />
-                        <span>
-                          {dataset.name}
-                          {isCurrent ? "（当前）" : ""}
-                          {" · "}
-                          {dataset.image_count} 张 / 已标注 {dataset.annotated_image_count ?? 0} / 未标注{" "}
-                          {Math.max(0, dataset.image_count - (dataset.annotated_image_count ?? 0))}
+                        <span className="version-dataset-label">
+                          <strong>
+                            {dataset.name}
+                            {isCurrent ? "（当前）" : ""}
+                          </strong>
+                          <small>
+                            {dataset.image_count} 张 / 已标注 {dataset.annotated_image_count ?? 0} / 未标注{" "}
+                            {Math.max(
+                              0,
+                              dataset.image_count - (dataset.annotated_image_count ?? 0),
+                            )}
+                          </small>
                         </span>
                       </label>
                     );
