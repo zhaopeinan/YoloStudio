@@ -5,6 +5,11 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class RemoteGpuInfo(BaseModel):
+    index: int
+    name: str
+
+
 class RemoteHostStatus(BaseModel):
     id: str
     label: str
@@ -16,6 +21,7 @@ class RemoteHostStatus(BaseModel):
     ultralytics_ok: bool = False
     cuda_available: bool = False
     gpu_count: int = 0
+    gpus: list[RemoteGpuInfo] = Field(default_factory=list)
     torch_version: str | None = None
     ultralytics_version: str | None = None
     disk: str | None = None

@@ -12,6 +12,7 @@ from app.core.devices import detect_devices
 from app.core.settings import Settings, get_settings
 from app.db.models import DatasetVersion, RunMetric, TrainingRun
 from app.db.session import SessionLocal
+from app.training.devices import parse_ultralytics_device
 
 
 ACTIVE_STATUSES = {"queued", "preparing", "running"}
@@ -438,7 +439,7 @@ def execute_training_run(run_id: int, bind=None, settings: Settings | None = Non
             epochs=config["epochs"],
             imgsz=config["image_size"],
             batch=config["batch_size"],
-            device=device,
+            device=parse_ultralytics_device(device),
             project=str(artifact_root),
             name="ultralytics",
             exist_ok=True,

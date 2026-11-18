@@ -2070,6 +2070,97 @@ input[type="color"] {
   transition: width 0.2s ease;
 }
 
+.training-gpu-summary {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.training-gpu-summary strong {
+  color: #172026;
+  font-size: 13px;
+}
+
+.training-gpu-summary span {
+  color: #5b6b75;
+  font-size: 12px;
+}
+
+.training-gpu-picker {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.training-gpu-picker-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.training-gpu-picker-heading strong {
+  display: block;
+  color: #172026;
+}
+
+.training-gpu-picker-heading span {
+  display: block;
+  margin-top: 2px;
+  color: #5b6b75;
+  font-size: 12px;
+}
+
+.training-gpu-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.training-gpu-grid label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.training-gpu-grid label.is-selected {
+  border-color: #1f6f8b;
+  background: #eef7fa;
+}
+
+.training-gpu-grid label span {
+  display: grid;
+  gap: 2px;
+  color: #172026;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.training-gpu-grid label small {
+  color: #5b6b75;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .training-gpu-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .training-weight-library-heading {
   display: flex;
   align-items: flex-start;

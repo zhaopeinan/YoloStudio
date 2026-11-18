@@ -483,6 +483,7 @@ export default function App() {
   const [trainingImageSize, setTrainingImageSize] = useState(640);
   const [trainingBatchSize, setTrainingBatchSize] = useState(8);
   const [trainingDevice, setTrainingDevice] = useState("");
+  const [trainingGpuIds, setTrainingGpuIds] = useState<number[]>([0]);
   const [trainingHost, setTrainingHost] = useState<"local" | "gpu05">("local");
   const [remoteHostStatus, setRemoteHostStatus] = useState<RemoteHostStatus | null>(null);
   const [remoteSyncJob, setRemoteSyncJob] = useState<RemoteSyncJob | null>(null);
@@ -1801,6 +1802,55 @@ export default function App() {
     setAugmentation((current) => ({ ...current, [field]: value }));
   }
 
+  function parseDeviceGpuIds(device: string): number[] {
+    const parts = device
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part !== "");
+    const ids = parts
+      .map((part) => Number(part))
+      .filter((value) => Number.isInteger(value) && value >= 0);
+    return ids.length > 0 ? Array.from(new Set(ids)).sort((a, b) => a - b) : [0];
+  }
+
+  function resolveTrainingDeviceValue(): string | undefined {
+    if (trainingHost === "gpu05") {
+      if (trainingGpuIds.length === 0) {
+        return undefined;
+      }
+      return [...trainingGpuIds].sort((a, b) => a - b).join(",");
+    }
+    return trainingDevice.trim() || undefined;
+  }
+
+  function remoteGpuOptions(): Array<{ index: number; name: string }> {
+    if (remoteHostStatus?.gpus && remoteHostStatus.gpus.length > 0) {
+      return remoteHostStatus.gpus
+        .map((gpu) => ({ index: gpu.index, name: gpu.name }))
+        .sort((a, b) => a.index - b.index);
+    }
+    const count =
+      remoteHostStatus?.gpu_count && remoteHostStatus.gpu_count > 0
+        ? remoteHostStatus.gpu_count
+        : 8;
+    return Array.from({ length: count }, (_, index) => ({
+      index,
+      name: "Tesla V100",
+    }));
+  }
+
+  function toggleTrainingGpu(index: number) {
+    setTrainingGpuIds((current) => {
+      if (current.includes(index)) {
+        if (current.length === 1) {
+          return current;
+        }
+        return current.filter((item) => item !== index).sort((a, b) => a - b);
+      }
+      return [...current, index].sort((a, b) => a - b);
+    });
+  }
+
   function buildTrainingRunRequest(versionId: number) {
     return {
       version_id: versionId,
@@ -1808,7 +1858,7 @@ export default function App() {
       epochs: trainingEpochs,
       image_size: trainingImageSize,
       batch_size: trainingBatchSize,
-      device: trainingDevice.trim() || undefined,
+      device: resolveTrainingDeviceValue(),
       host: trainingHost,
       augmentation_preset: augmentationPreset,
       augmentation,
@@ -1819,14 +1869,19 @@ export default function App() {
 
   function requestFromRunConfig(versionId: number, run: TrainingRun) {
     const config = run.config;
+    const host = stringConfig(config, "host", trainingHost) || "local";
+    const device =
+      host === "gpu05"
+        ? stringConfig(config, "device", resolveTrainingDeviceValue() ?? "0")
+        : stringConfig(config, "device", trainingDevice.trim()) || undefined;
     return {
       version_id: versionId,
       model: stringConfig(config, "model", trainingModel.trim() || "base:yolov8n.pt"),
       epochs: numberConfig(config, "epochs", trainingEpochs),
       image_size: numberConfig(config, "image_size", trainingImageSize),
       batch_size: numberConfig(config, "batch_size", trainingBatchSize),
-      device: stringConfig(config, "device", trainingDevice.trim()) || undefined,
-      host: stringConfig(config, "host", trainingHost) || "local",
+      device,
+      host,
       augmentation_preset: stringConfig(config, "augmentation_preset", augmentationPreset),
       augmentation: augmentationConfig(config, augmentation),
       tta: booleanConfig(config, "tta", trainingTta),
@@ -1840,7 +1895,9 @@ export default function App() {
     setTrainingEpochs(numberConfig(config, "epochs", 50));
     setTrainingImageSize(numberConfig(config, "image_size", 640));
     setTrainingBatchSize(numberConfig(config, "batch_size", 8));
-    setTrainingDevice(stringConfig(config, "device", ""));
+    const device = stringConfig(config, "device", "");
+    setTrainingDevice(device);
+    setTrainingGpuIds(parseDeviceGpuIds(device || "0"));
     const host = stringConfig(config, "host", "local");
     setTrainingHost(host === "gpu05" ? "gpu05" : "local");
     setAugmentationPreset(stringConfig(config, "augmentation_preset", "balanced"));
@@ -4059,28 +4116,93 @@ export default function App() {
                 <select
                   id="training-host"
                   value={trainingHost}
-                  onChange={(event) =>
-                    setTrainingHost(event.target.value === "gpu05" ? "gpu05" : "local")
-                  }
+                  onChange={(event) => {
+                    const nextHost = event.target.value === "gpu05" ? "gpu05" : "local";
+                    setTrainingHost(nextHost);
+                    if (nextHost === "gpu05" && trainingGpuIds.length === 0) {
+                      setTrainingGpuIds([0]);
+                    }
+                  }}
                   disabled={versions.length === 0}
                 >
                   <option value="local">本机 T4</option>
                   <option value="gpu05">GPU05 (V100)</option>
                 </select>
               </label>
-              <label htmlFor="training-device">
-                计算设备
-                <input
-                  id="training-device"
-                  value={trainingDevice}
-                  onChange={(event) => setTrainingDevice(event.target.value)}
-                  placeholder={
-                    trainingHost === "gpu05" ? "0" : (health?.devices.selected ?? "cpu")
-                  }
-                  disabled={versions.length === 0}
-                />
-              </label>
+              {trainingHost === "local" ? (
+                <label htmlFor="training-device">
+                  计算设备
+                  <input
+                    id="training-device"
+                    value={trainingDevice}
+                    onChange={(event) => setTrainingDevice(event.target.value)}
+                    placeholder={health?.devices.selected ?? "cpu"}
+                    disabled={versions.length === 0}
+                  />
+                </label>
+              ) : (
+                <div className="training-gpu-summary" aria-live="polite">
+                  <strong>已选 GPU</strong>
+                  <span>
+                    {trainingGpuIds.length > 0
+                      ? trainingGpuIds.map((id) => `#${id}`).join(", ")
+                      : "未选择"}
+                    {" · "}
+                    共 {trainingGpuIds.length} 卡
+                  </span>
+                </div>
+              )}
             </div>
+
+            {trainingHost === "gpu05" ? (
+              <div className="training-gpu-picker" aria-label="GPU05 多卡选择">
+                <div className="training-gpu-picker-heading">
+                  <div>
+                    <strong>选择 GPU</strong>
+                    <span>可多选；batch 为每卡 batch，总有效 batch ≈ 单卡 × 卡数</span>
+                  </div>
+                  <div className="remote-sync-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={versions.length === 0}
+                      onClick={() =>
+                        setTrainingGpuIds(remoteGpuOptions().map((gpu) => gpu.index))
+                      }
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={versions.length === 0}
+                      onClick={() => setTrainingGpuIds([0])}
+                    >
+                      仅 GPU0
+                    </button>
+                  </div>
+                </div>
+                <div className="training-gpu-grid">
+                  {remoteGpuOptions().map((gpu) => {
+                    const checked = trainingGpuIds.includes(gpu.index);
+                    return (
+                      <label key={gpu.index} className={checked ? "is-selected" : undefined}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={versions.length === 0}
+                          onChange={() => toggleTrainingGpu(gpu.index)}
+                        />
+                        <span>
+                          GPU {gpu.index}
+                          <small>{gpu.name}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             {trainingHost === "gpu05" ? (
               <div className="remote-sync-panel" aria-label="GPU05 资源同步">
@@ -4265,7 +4387,8 @@ export default function App() {
                 versions.length === 0 ||
                 !selectedTrainingVersionId ||
                 isStartingRun ||
-                (trainingHost === "gpu05" && remoteSyncJob?.status !== "completed")
+                (trainingHost === "gpu05" &&
+                  (remoteSyncJob?.status !== "completed" || trainingGpuIds.length === 0))
               }
               onClick={() => void handleStartTrainingRun()}
             >

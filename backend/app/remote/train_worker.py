@@ -88,12 +88,19 @@ def main() -> int:
                 f"(model={config.get('model_ref')} -> {config['model_path']})"
             ),
         )
+        device_value = config["device"]
+        if isinstance(device_value, str) and "," in device_value:
+            device = [int(part.strip()) for part in device_value.split(",") if part.strip()]
+        elif isinstance(device_value, str) and device_value.strip().isdigit():
+            device = int(device_value.strip())
+        else:
+            device = device_value
         results = model.train(
             data=str(training_yaml),
             epochs=int(config["epochs"]),
             imgsz=int(config["image_size"]),
             batch=int(config["batch_size"]),
-            device=str(config["device"]),
+            device=device,
             project=str(artifact_root),
             name="ultralytics",
             exist_ok=True,

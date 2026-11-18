@@ -51,15 +51,39 @@ def probe_remote_host(settings: Settings) -> dict:
     remote_root = quote_remote(settings.remote_root)
     env_script = (
         f"{python} - <<'PY'\n"
-        "import json\n"
-        "payload = {'ultralytics_ok': False, 'cuda_available': False, 'gpu_count': 0, 'torch': None, 'error': None}\n"
+        "import json, shutil, subprocess\n"
+        "payload = {"
+        "'ultralytics_ok': False, 'cuda_available': False, 'gpu_count': 0, "
+        "'gpus': [], 'torch': None, 'error': None"
+        "}\n"
         "try:\n"
         "    import torch\n"
         "    payload['torch'] = getattr(torch, '__version__', None)\n"
         "    payload['cuda_available'] = bool(torch.cuda.is_available())\n"
-        "    payload['gpu_count'] = int(torch.cuda.device_count()) if payload['cuda_available'] else 0\n"
+        "    count = int(torch.cuda.device_count()) if payload['cuda_available'] else 0\n"
+        "    payload['gpu_count'] = count\n"
+        "    payload['gpus'] = ["
+        "{'index': i, 'name': torch.cuda.get_device_name(i)} for i in range(count)"
+        "]\n"
         "except Exception as exc:\n"
         "    payload['error'] = f'torch: {exc.__class__.__name__}: {exc}'\n"
+        "if not payload['gpus'] and shutil.which('nvidia-smi'):\n"
+        "    try:\n"
+        "        completed = subprocess.run(\n"
+        "            ['nvidia-smi', '--query-gpu=index,name', '--format=csv,noheader'],\n"
+        "            capture_output=True, text=True, check=False, timeout=10,\n"
+        "        )\n"
+        "        gpus = []\n"
+        "        for line in completed.stdout.splitlines():\n"
+        "            parts = [p.strip() for p in line.split(',', 1)]\n"
+        "            if len(parts) == 2 and parts[0].isdigit():\n"
+        "                gpus.append({'index': int(parts[0]), 'name': parts[1]})\n"
+        "        if gpus:\n"
+        "            payload['gpus'] = gpus\n"
+        "            payload['gpu_count'] = len(gpus)\n"
+        "            payload['cuda_available'] = True\n"
+        "    except Exception:\n"
+        "        pass\n"
         "try:\n"
         "    import ultralytics\n"
         "    payload['ultralytics_ok'] = True\n"
@@ -109,6 +133,23 @@ def probe_remote_host(settings: Settings) -> dict:
         else:
             disk_line = line
 
+    gpus = payload.get("gpus") if isinstance(payload.get("gpus"), list) else []
+    normalized_gpus = []
+    for item in gpus:
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get("index"))
+        except (TypeError, ValueError):
+            continue
+        normalized_gpus.append(
+            {
+                "index": index,
+                "name": str(item.get("name") or f"GPU {index}"),
+            }
+        )
+    gpu_count = int(payload.get("gpu_count") or len(normalized_gpus) or 0)
+
     return {
         "id": host_id,
         "label": label,
@@ -119,7 +160,8 @@ def probe_remote_host(settings: Settings) -> dict:
         "python": settings.remote_python,
         "ultralytics_ok": bool(payload.get("ultralytics_ok")),
         "cuda_available": bool(payload.get("cuda_available")),
-        "gpu_count": int(payload.get("gpu_count") or 0),
+        "gpu_count": gpu_count,
+        "gpus": normalized_gpus,
         "torch_version": payload.get("torch"),
         "ultralytics_version": payload.get("ultralytics"),
         "disk": disk_line,

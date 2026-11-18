@@ -668,6 +668,11 @@ export type TrainingRunCreate = {
   threshold_scan: boolean;
 };
 
+export type RemoteGpuInfo = {
+  index: number;
+  name: string;
+};
+
 export type RemoteHostStatus = {
   id: string;
   label: string;
@@ -679,6 +684,7 @@ export type RemoteHostStatus = {
   ultralytics_ok: boolean;
   cuda_available: boolean;
   gpu_count: number;
+  gpus?: RemoteGpuInfo[];
   torch_version?: string | null;
   ultralytics_version?: string | null;
   disk?: string | null;

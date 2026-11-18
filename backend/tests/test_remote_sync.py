@@ -6,6 +6,7 @@ import pytest
 
 from app.remote.fingerprint import compute_sync_fingerprint
 from app.remote.rsync import parse_rsync_progress_line
+from app.training.devices import parse_ultralytics_device
 from test_dataset_import_api import create_import_zip, isolated_client
 from test_training_api import _create_version
 
@@ -16,6 +17,13 @@ def test_parse_rsync_progress_line():
     assert progress.bytes_done == 1234567
     assert progress.percent == 45.0
     assert progress.speed_bps == pytest.approx(12.34 * 1024 * 1024)
+
+
+def test_parse_ultralytics_device_multi_gpu():
+    assert parse_ultralytics_device("0") == 0
+    assert parse_ultralytics_device("0,1,2,3") == [0, 1, 2, 3]
+    assert parse_ultralytics_device([0, 1]) == [0, 1]
+    assert parse_ultralytics_device("cpu") == "cpu"
 
 
 def test_compute_sync_fingerprint_changes_with_model(tmp_path: Path):
@@ -125,7 +133,8 @@ def test_remote_sync_create_and_progress_with_mocked_executor(tmp_path: Path, mo
             "python": "python3",
             "ultralytics_ok": True,
             "cuda_available": True,
-            "gpu_count": 5,
+            "gpu_count": 8,
+            "gpus": [{"index": i, "name": "Tesla V100-PCIE-32GB"} for i in range(8)],
             "error": None,
             "hostname": "gpu05",
         },
