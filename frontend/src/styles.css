@@ -1914,14 +1914,27 @@ input[type="color"] {
   margin-top: 12px;
 }
 
-.subset-controls > span {
+.subset-controls > span,
+.subset-controls-heading span {
   color: #62727e;
   font-size: 13px;
   font-weight: 700;
 }
 
+.subset-controls-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subset-controls-heading .version-scope-hint {
+  margin: 4px 0 0;
+}
+
 .subset-grid {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 8px;
 }
 
@@ -1946,6 +1959,25 @@ input[type="color"] {
   width: 10px;
   height: 10px;
   border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.subset-extra-tag {
+  margin-left: auto;
+  color: #5b6b75;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.version-class-modal {
+  width: min(560px, 100%);
+}
+
+.version-class-modal-grid {
+  max-height: min(50vh, 360px);
+  overflow: auto;
+  margin-top: 10px;
 }
 
 .version-dataset-grid label span {

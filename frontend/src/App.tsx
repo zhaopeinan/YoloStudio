@@ -392,6 +392,8 @@ export default function App() {
   const [isLoadingDetectedClasses, setIsLoadingDetectedClasses] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
   const [versionClassIds, setVersionClassIds] = useState<number[]>([]);
+  const [showAddVersionClasses, setShowAddVersionClasses] = useState(false);
+  const [pendingExtraVersionClassIds, setPendingExtraVersionClassIds] = useState<number[]>([]);
   const [classError, setClassError] = useState<string | null>(null);
   const [isEnablingDetectedClasses, setIsEnablingDetectedClasses] = useState(false);
   const [isSavingRoundScope, setIsSavingRoundScope] = useState(false);
@@ -744,6 +746,34 @@ export default function App() {
     };
   }, []);
 
+  const presentVersionClassIds = useMemo(() => {
+    if (datasetAnnotationClasses.length > 0) {
+      return datasetAnnotationClasses.map((item) => item.id);
+    }
+    if (coverage?.classes?.length) {
+      return coverage.classes
+        .filter((row) => row.annotation_count > 0)
+        .map((row) => row.class_id);
+    }
+    return [];
+  }, [coverage, datasetAnnotationClasses]);
+  const presentVersionClassIdSet = useMemo(
+    () => new Set(presentVersionClassIds),
+    [presentVersionClassIds],
+  );
+  const visibleVersionClasses = useMemo(() => {
+    const selectedExtra = new Set(
+      versionClassIds.filter((classId) => !presentVersionClassIdSet.has(classId)),
+    );
+    return classes.filter(
+      (classItem) =>
+        presentVersionClassIdSet.has(classItem.id) || selectedExtra.has(classItem.id),
+    );
+  }, [classes, presentVersionClassIdSet, versionClassIds]);
+  const addableVersionClasses = useMemo(
+    () => classes.filter((classItem) => !presentVersionClassIdSet.has(classItem.id)),
+    [classes, presentVersionClassIdSet],
+  );
   const hasActiveRun = useMemo(() => runs.some((run) => isActiveRun(run.status)), [runs]);
   const hasActivePredictionJob = useMemo(
     () => predictionJobs.some((job) => isActivePredictionJob(job.status)),
@@ -1348,7 +1378,11 @@ export default function App() {
     const activeItems = classResponse.items.filter((classItem) => classItem.active);
     setRoundSelectedClassIds(activeItems.map((classItem) => classItem.id));
     setSelectedClassId(activeItems[0]?.id ?? classResponse.items[0]?.id ?? null);
-    setVersionClassIds(classResponse.items.map((classItem) => classItem.id));
+    // Version class subset defaults to classes present in this dataset's annotations,
+    // filled in after annotation-classes / coverage load — not the whole project library.
+    setVersionClassIds([]);
+    setShowAddVersionClasses(false);
+    setPendingExtraVersionClassIds([]);
     setVersionDatasetIds([dataset.dataset_id]);
 
     const soft = async <T,>(label: string, task: Promise<T>): Promise<T | null> => {
@@ -1397,6 +1431,9 @@ export default function App() {
     }
     const annotationClassItems = annotationClassResponse?.items ?? [];
     setDatasetAnnotationClasses(annotationClassItems);
+    if (annotationClassItems.length > 0) {
+      setVersionClassIds(annotationClassItems.map((item) => item.id));
+    }
     setImageFilters((current) => {
       if (!current.class_id) {
         return current;
@@ -1437,7 +1474,15 @@ export default function App() {
       }
 
       if (qualityResponse) setQuality(qualityResponse);
-      if (coverageResponse) setCoverage(coverageResponse);
+      if (coverageResponse) {
+        setCoverage(coverageResponse);
+        const coveredIds = coverageResponse.classes
+          .filter((row) => row.annotation_count > 0)
+          .map((row) => row.class_id);
+        if (coveredIds.length > 0) {
+          setVersionClassIds((current) => (current.length > 0 ? current : coveredIds));
+        }
+      }
 
       const versionItems = versionResponse?.items ?? [];
       setVersions(versionItems);
@@ -1793,6 +1838,29 @@ export default function App() {
         ? current.filter((existing) => existing !== classId)
         : [...current, classId],
     );
+  }
+
+  function openAddVersionClassesModal() {
+    setPendingExtraVersionClassIds(
+      versionClassIds.filter((classId) => !presentVersionClassIdSet.has(classId)),
+    );
+    setShowAddVersionClasses(true);
+  }
+
+  function togglePendingExtraVersionClass(classId: number) {
+    setPendingExtraVersionClassIds((current) =>
+      current.includes(classId)
+        ? current.filter((existing) => existing !== classId)
+        : [...current, classId],
+    );
+  }
+
+  function confirmAddVersionClasses() {
+    setVersionClassIds((current) => {
+      const presentSelected = current.filter((classId) => presentVersionClassIdSet.has(classId));
+      return Array.from(new Set([...presentSelected, ...pendingExtraVersionClassIds]));
+    });
+    setShowAddVersionClasses(false);
   }
 
   function setAugmentationValue(
@@ -3839,12 +3907,32 @@ export default function App() {
                 : "全量范围会包含尚未标注的图像，空标签将作为负样本参与训练。"}
             </p>
             <div className="subset-controls" aria-label="版本类别子集">
-              <span>类别子集</span>
+              <div className="subset-controls-heading">
+                <span>类别子集</span>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={!importedDataset || addableVersionClasses.length === 0}
+                  onClick={openAddVersionClassesModal}
+                >
+                  添加其他类别
+                  {addableVersionClasses.length > 0
+                    ? `（${addableVersionClasses.length}）`
+                    : ""}
+                </button>
+              </div>
+              <p className="version-scope-hint">
+                默认只显示当前标注数据中已出现的类别；需要把未出现的项目类别一并导出时，点「添加其他类别」。
+              </p>
               <div className="subset-grid">
                 {classes.length === 0 ? (
                   <p className="empty-state">冻结类别子集前，请先创建项目类别。</p>
+                ) : visibleVersionClasses.length === 0 ? (
+                  <p className="empty-state">
+                    当前数据集暂无已标注类别。可点击「添加其他类别」从项目类别库中选择。
+                  </p>
                 ) : (
-                  classes.map((classItem) => (
+                  visibleVersionClasses.map((classItem) => (
                     <label key={classItem.id}>
                       <input
                         type="checkbox"
@@ -3854,6 +3942,9 @@ export default function App() {
                       />
                       <span style={{ background: classItem.color }} />
                       {classItem.name}
+                      {!presentVersionClassIdSet.has(classItem.id) ? (
+                        <em className="subset-extra-tag">额外</em>
+                      ) : null}
                     </label>
                   ))
                 )}
@@ -5376,6 +5467,58 @@ export default function App() {
                 onClick={() => void handleDeleteClass()}
               >
                 {isDeletingClass ? "正在删除..." : "确认删除"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {showAddVersionClasses ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setShowAddVersionClasses(false)}
+        >
+          <div
+            className="modal-dialog version-class-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="添加其他类别"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <h2>添加其他类别</h2>
+            </header>
+            <p className="version-scope-hint">
+              以下类别当前标注数据中未出现，勾选后会加入版本导出子集。
+            </p>
+            <div className="subset-grid version-class-modal-grid">
+              {addableVersionClasses.length === 0 ? (
+                <p className="empty-state">没有可追加的项目类别。</p>
+              ) : (
+                addableVersionClasses.map((classItem) => (
+                  <label key={classItem.id}>
+                    <input
+                      type="checkbox"
+                      checked={pendingExtraVersionClassIds.includes(classItem.id)}
+                      onChange={() => togglePendingExtraVersionClass(classItem.id)}
+                    />
+                    <span style={{ background: classItem.color }} />
+                    {classItem.name}
+                  </label>
+                ))
+              )}
+            </div>
+            <footer>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setShowAddVersionClasses(false)}
+              >
+                取消
+              </button>
+              <button type="button" onClick={confirmAddVersionClasses}>
+                确认添加
               </button>
             </footer>
           </div>

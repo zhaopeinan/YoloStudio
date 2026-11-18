@@ -1093,6 +1093,35 @@ vi.mock("./api", () => ({
   replaceAnnotations: apiMock.replaceAnnotations,
   getQuality: apiMock.getQuality,
   getDatasetCoverage: apiMock.getDatasetCoverage,
+  getSystemResources: async () => ({
+    cpu_percent: 10,
+    load_average: [0.1, 0.1, 0.1],
+    cpu_count: 8,
+    memory: { used_mb: 1024, total_mb: 8192, percent: 12.5 },
+    disk: { path: "/tmp", used_gb: 10, total_gb: 100, percent: 10 },
+    gpu: {
+      available: false,
+      gpus: [],
+      error: null,
+      queried_at: new Date().toISOString(),
+    },
+    queried_at: new Date().toISOString(),
+  }),
+  listRemoteHosts: async () => ({
+    items: [],
+    local: { id: "local", label: "本机 T4" },
+  }),
+  listDatasetAnnotationClasses: async () => ({
+    items: [
+      {
+        id: 1,
+        name: "target",
+        color: "#ef4444",
+        image_count: 1,
+        annotation_count: 1,
+      },
+    ],
+  }),
   listQualityIssues: apiMock.listQualityIssues,
   applyQualityTags: apiMock.applyQualityTags,
   refreshImageDimensions: apiMock.refreshImageDimensions,
