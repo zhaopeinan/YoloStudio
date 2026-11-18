@@ -319,3 +319,29 @@ class PreviewJob(TimestampMixin, Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     video: Mapped[PreviewVideo | None] = relationship(back_populates="jobs")
+
+
+class RemoteSyncJob(TimestampMixin, Base):
+    """Tracks dataset-version + weight sync from the control plane to a remote host."""
+
+    __tablename__ = "remote_sync_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("dataset_versions.id"), nullable=False, index=True
+    )
+    model_ref: Mapped[str] = mapped_column(String(240), nullable=False)
+    host: Mapped[str] = mapped_column(String(40), nullable=False, default="gpu05", index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    bytes_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bytes_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    files_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    files_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    speed_bps: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    remote_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    local_pid: Mapped[int | None] = mapped_column(Integer)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

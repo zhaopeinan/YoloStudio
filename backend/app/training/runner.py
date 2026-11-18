@@ -43,11 +43,13 @@ def run_artifact_root(settings: Settings, project_id: int, run_id: int) -> Path:
 
 def build_run_config(request) -> dict:
     augmentation = request.augmentation.model_dump()
+    host = getattr(request, "host", None) or "local"
     return {
         "model": request.model,
         "epochs": request.epochs,
         "image_size": request.image_size,
         "batch_size": request.batch_size,
+        "host": host,
         "augmentation_preset": request.augmentation_preset,
         "augmentation": augmentation,
         "tta": request.tta,
@@ -174,6 +176,7 @@ def validate_training_dataset(version: DatasetVersion, version_root: Path) -> No
 
 
 def create_queued_run(db, settings: Settings, version: DatasetVersion, request) -> TrainingRun:
+    from app.remote.sync import require_completed_sync_for_training
     from app.training.weights import resolve_training_model
 
     active = db.scalar(
@@ -187,11 +190,30 @@ def create_queued_run(db, settings: Settings, version: DatasetVersion, request) 
     # Validate the selected model can be resolved before queuing.
     resolve_training_model(db, settings, version.project_id, request.model)
 
+    host = getattr(request, "host", None) or "local"
+    if host not in {"local", settings.remote_host_id}:
+        raise ValueError(f"不支持的训练主机: {host}")
+    if host != "local":
+        if not settings.remote_enabled:
+            raise ValueError("远程训练已禁用")
+        require_completed_sync_for_training(
+            db,
+            settings,
+            project_id=version.project_id,
+            version_id=version.id,
+            model_ref=request.model,
+            host=host,
+        )
+
+    device = request.device
+    if host != "local" and not device:
+        device = "0"
+
     run = TrainingRun(
         project_id=version.project_id,
         version_id=version.id,
         status="queued",
-        device=resolve_device(request.device),
+        device=resolve_device(device),
         config=build_run_config(request),
         artifact_path="",
         log_path="",
@@ -273,14 +295,23 @@ def complete_training_run(run_id: int, bind=None) -> None:
 
 def cancel_training_run(run_id: int, bind=None) -> bool:
     session_factory = _session_factory(bind)
+    host = "local"
     with session_factory() as db:
         run = db.get(TrainingRun, run_id)
         if run is None or run.status not in ACTIVE_STATUSES:
             return False
+        host = str((run.config or {}).get("host") or "local")
         run.status = "cancelled"
         run.ended_at = _now()
         db.commit()
     append_run_log(run_id, "training cancelled", bind=bind)
+    if host != "local":
+        try:
+            from app.remote.train import cancel_remote_training_run
+
+            cancel_remote_training_run(run_id, bind=bind)
+        except Exception:
+            append_run_log(run_id, "remote cancel signal failed", bind=bind)
     return True
 
 
@@ -325,10 +356,17 @@ def fail_training_run(run_id: int, message: str, bind=None) -> None:
 
 
 def execute_training_run(run_id: int, bind=None, settings: Settings | None = None) -> None:
+    settings = settings or get_settings()
     session_factory = _session_factory(bind)
     with session_factory() as db:
         run = db.get(TrainingRun, run_id)
         if run is None:
+            return
+        host = str((run.config or {}).get("host") or "local")
+        if host != "local":
+            from app.remote.train import execute_remote_training_run
+
+            execute_remote_training_run(run_id, bind=bind, settings=settings)
             return
         run.status = "preparing"
         run.started_at = _now()

@@ -2008,6 +2008,68 @@ input[type="color"] {
   background: #f8fafb;
 }
 
+.remote-sync-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  background: #f4f8fa;
+}
+
+.remote-sync-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.remote-sync-heading strong {
+  display: block;
+  color: #172026;
+}
+
+.remote-sync-heading span {
+  display: block;
+  margin-top: 2px;
+  color: #5b6b75;
+  font-size: 12px;
+}
+
+.remote-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remote-sync-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.remote-sync-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #44535c;
+  font-size: 12px;
+}
+
+.remote-sync-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #d9e3ea;
+  overflow: hidden;
+}
+
+.remote-sync-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: #1f6f8b;
+  transition: width 0.2s ease;
+}
+
 .training-weight-library-heading {
   display: flex;
   align-items: flex-start;

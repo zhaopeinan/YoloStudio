@@ -661,10 +661,60 @@ export type TrainingRunCreate = {
   image_size: number;
   batch_size: number;
   device?: string;
+  host?: string;
   augmentation_preset: string;
   augmentation: TrainingAugmentationConfig;
   tta: boolean;
   threshold_scan: boolean;
+};
+
+export type RemoteHostStatus = {
+  id: string;
+  label: string;
+  enabled: boolean;
+  online: boolean;
+  ssh_host: string;
+  remote_root: string;
+  python: string;
+  ultralytics_ok: boolean;
+  cuda_available: boolean;
+  gpu_count: number;
+  torch_version?: string | null;
+  ultralytics_version?: string | null;
+  disk?: string | null;
+  hostname?: string | null;
+  error?: string | null;
+};
+
+export type RemoteHostListResponse = {
+  items: RemoteHostStatus[];
+  local: { id: string; label: string };
+};
+
+export type RemoteSyncJob = {
+  id: number;
+  project_id: number;
+  version_id: number;
+  model_ref: string;
+  host: string;
+  status: string;
+  bytes_total: number;
+  bytes_done: number;
+  files_total: number;
+  files_done: number;
+  speed_bps: number;
+  percent: number | null;
+  fingerprint: string;
+  remote_fingerprint: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RemoteSyncJobListResponse = {
+  items: RemoteSyncJob[];
 };
 
 export type PredictionJob = {
@@ -1318,6 +1368,34 @@ export function createTrainingRun(body: TrainingRunCreate): Promise<TrainingRun>
   return requestJson<TrainingRun>("/api/training/runs", {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export function listRemoteHosts(): Promise<RemoteHostListResponse> {
+  return requestJson<RemoteHostListResponse>("/api/remote-hosts");
+}
+
+export function startRemoteSync(
+  projectId: number,
+  body: { version_id: number; model_ref: string; host?: string },
+): Promise<RemoteSyncJob> {
+  return requestJson<RemoteSyncJob>(`/api/projects/${projectId}/remote-sync`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getRemoteSyncJob(jobId: number): Promise<RemoteSyncJob> {
+  return requestJson<RemoteSyncJob>(`/api/remote-sync/${jobId}`);
+}
+
+export function listRemoteSyncJobs(projectId: number): Promise<RemoteSyncJobListResponse> {
+  return requestJson<RemoteSyncJobListResponse>(`/api/projects/${projectId}/remote-sync`);
+}
+
+export function cancelRemoteSyncJob(jobId: number): Promise<RemoteSyncJob> {
+  return requestJson<RemoteSyncJob>(`/api/remote-sync/${jobId}/cancel`, {
+    method: "POST",
   });
 }
 

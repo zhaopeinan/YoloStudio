@@ -29,6 +29,22 @@ class Settings(BaseSettings):
             "hybrid (INT8 body + FP16 outputs), or int8 (often breaks class scores)"
         ),
     )
+    remote_enabled: bool = Field(default=True, description="Enable GPU05 remote training/sync")
+    remote_ssh_host: str = Field(
+        default="gpu05",
+        description="SSH host alias or address for GPU05 (uses ~/.ssh/config)",
+    )
+    remote_root: Path = Field(
+        default=Path("/data/home/pnzhao/yolostudio-remote"),
+        description="Fixed remote workspace root on GPU05 (project data only)",
+    )
+    remote_python: str = Field(
+        default="python3",
+        description="Python executable on GPU05 with ultralytics/torch available",
+    )
+    remote_connect_timeout: int = Field(default=15, ge=1, le=120)
+    remote_host_id: str = Field(default="gpu05", description="Logical host id used by the UI/API")
+    remote_host_label: str = Field(default="GPU05 (V100)")
 
     @property
     def database_path(self) -> Path:

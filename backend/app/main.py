@@ -23,6 +23,7 @@ from app.preview.router import router as preview_router
 from app.quality.router import router as quality_router
 from app.storage.router import router as storage_router
 from app.storage.service import purge_expired_trash, reconcile_trash
+from app.remote.router import router as remote_router
 from app.training.router import router as training_router
 from app.users.router import router as users_router
 from app.versions.router import project_versions_router, router as versions_router
@@ -88,6 +89,7 @@ app.include_router(quality_router)
 app.include_router(versions_router)
 app.include_router(project_versions_router)
 app.include_router(training_router)
+app.include_router(remote_router)
 app.include_router(prediction_router)
 app.include_router(preview_router)
 app.include_router(exports_router)

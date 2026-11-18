@@ -26,6 +26,7 @@ class TrainingRunCreate(BaseModel):
     image_size: int = Field(default=640, ge=32, le=4096)
     batch_size: int = Field(default=8, ge=1, le=256)
     device: str | None = Field(default=None, max_length=40)
+    host: str = Field(default="local", max_length=40)
     augmentation_preset: str = Field(default="balanced", max_length=80)
     augmentation: TrainingAugmentationConfig = Field(default_factory=TrainingAugmentationConfig)
     tta: bool = False

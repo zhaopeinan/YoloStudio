@@ -106,6 +106,10 @@ import {
   listRunExports,
   listTrainingModels,
   listTrainingRuns,
+  listRemoteHosts,
+  getRemoteSyncJob,
+  startRemoteSync,
+  cancelRemoteSyncJob,
   replaceAnnotations,
   refreshImageDimensions,
   scanDataset,
@@ -115,6 +119,8 @@ import {
   uploadDatasetSource,
   uploadModelWeight,
   authedMediaUrl,
+  type RemoteHostStatus,
+  type RemoteSyncJob,
 } from "./api";
 import {
   formatEdgeTag,
@@ -477,6 +483,11 @@ export default function App() {
   const [trainingImageSize, setTrainingImageSize] = useState(640);
   const [trainingBatchSize, setTrainingBatchSize] = useState(8);
   const [trainingDevice, setTrainingDevice] = useState("");
+  const [trainingHost, setTrainingHost] = useState<"local" | "gpu05">("local");
+  const [remoteHostStatus, setRemoteHostStatus] = useState<RemoteHostStatus | null>(null);
+  const [remoteSyncJob, setRemoteSyncJob] = useState<RemoteSyncJob | null>(null);
+  const [isProbingRemote, setIsProbingRemote] = useState(false);
+  const [isStartingRemoteSync, setIsStartingRemoteSync] = useState(false);
   const [augmentationPreset, setAugmentationPreset] = useState("balanced");
   const [augmentation, setAugmentation] = useState<TrainingAugmentationConfig>(defaultAugmentation);
   const [trainingTta, setTrainingTta] = useState(false);
@@ -1106,6 +1117,50 @@ export default function App() {
 
     return () => window.clearInterval(interval);
   }, [activeRunIds, hasActiveRun, importedDataset]);
+
+  useEffect(() => {
+    if (trainingHost !== "gpu05" || currentStep !== "training") {
+      return;
+    }
+    void refreshRemoteHostStatus();
+  }, [trainingHost, currentStep]);
+
+  useEffect(() => {
+    setRemoteSyncJob((current) => {
+      if (!current) return current;
+      if (
+        current.version_id !== selectedTrainingVersionId ||
+        current.model_ref !== (trainingModel.trim() || "base:yolov8n.pt")
+      ) {
+        return null;
+      }
+      return current;
+    });
+  }, [selectedTrainingVersionId, trainingModel]);
+
+  useEffect(() => {
+    if (
+      !remoteSyncJob ||
+      (remoteSyncJob.status !== "queued" && remoteSyncJob.status !== "running")
+    ) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      void getRemoteSyncJob(remoteSyncJob.id)
+        .then((job) => {
+          setRemoteSyncJob(job);
+          if (job.status === "completed") {
+            setTrainingNotice(`同步任务 #${job.id} 已完成，可以开始 GPU05 训练`);
+          } else if (job.status === "failed") {
+            setTrainingError(job.error_message || `同步任务 #${job.id} 失败`);
+          }
+        })
+        .catch((error: Error) => {
+          setTrainingError(error.message);
+        });
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [remoteSyncJob]);
 
   useEffect(() => {
     if (!selectedEvalRunId || !hasActivePredictionJob) {
@@ -1754,6 +1809,7 @@ export default function App() {
       image_size: trainingImageSize,
       batch_size: trainingBatchSize,
       device: trainingDevice.trim() || undefined,
+      host: trainingHost,
       augmentation_preset: augmentationPreset,
       augmentation,
       tta: trainingTta,
@@ -1770,6 +1826,7 @@ export default function App() {
       image_size: numberConfig(config, "image_size", trainingImageSize),
       batch_size: numberConfig(config, "batch_size", trainingBatchSize),
       device: stringConfig(config, "device", trainingDevice.trim()) || undefined,
+      host: stringConfig(config, "host", trainingHost) || "local",
       augmentation_preset: stringConfig(config, "augmentation_preset", augmentationPreset),
       augmentation: augmentationConfig(config, augmentation),
       tta: booleanConfig(config, "tta", trainingTta),
@@ -1784,12 +1841,83 @@ export default function App() {
     setTrainingImageSize(numberConfig(config, "image_size", 640));
     setTrainingBatchSize(numberConfig(config, "batch_size", 8));
     setTrainingDevice(stringConfig(config, "device", ""));
+    const host = stringConfig(config, "host", "local");
+    setTrainingHost(host === "gpu05" ? "gpu05" : "local");
     setAugmentationPreset(stringConfig(config, "augmentation_preset", "balanced"));
     setAugmentation(augmentationConfig(config, defaultAugmentation));
     setTrainingTta(booleanConfig(config, "tta", false));
     setThresholdScan(booleanConfig(config, "threshold_scan", false));
     setTrainingNotice(`已加载训练任务 #${run.id} 的配置`);
     setTrainingError(null);
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let value = bytes;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index += 1;
+    }
+    return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
+  }
+
+  function formatSpeed(bps: number): string {
+    if (!Number.isFinite(bps) || bps <= 0) return "—";
+    return `${formatBytes(bps)}/s`;
+  }
+
+  async function refreshRemoteHostStatus() {
+    setIsProbingRemote(true);
+    try {
+      const response = await listRemoteHosts();
+      setRemoteHostStatus(response.items[0] ?? null);
+    } catch (error) {
+      setRemoteHostStatus(null);
+      setTrainingError(error instanceof Error ? error.message : "远程主机探测失败");
+    } finally {
+      setIsProbingRemote(false);
+    }
+  }
+
+  async function handleStartRemoteSync() {
+    const version =
+      versions.find((item) => item.id === selectedTrainingVersionId) ?? versions[0] ?? null;
+    if (!version || !importedDataset) {
+      return;
+    }
+    setIsStartingRemoteSync(true);
+    setTrainingError(null);
+    setTrainingNotice(null);
+    try {
+      const job = await startRemoteSync(importedDataset.project_id, {
+        version_id: version.id,
+        model_ref: trainingModel.trim() || "base:yolov8n.pt",
+        host: "gpu05",
+      });
+      setRemoteSyncJob(job);
+      if (job.status === "completed") {
+        setTrainingNotice("当前版本与模型已在 GPU05 上同步完成，可直接开始远程训练");
+      } else {
+        setTrainingNotice(`已开始同步到 GPU05（任务 #${job.id}）`);
+      }
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "同步启动失败");
+    } finally {
+      setIsStartingRemoteSync(false);
+    }
+  }
+
+  async function handleCancelRemoteSync() {
+    if (!remoteSyncJob) return;
+    try {
+      const job = await cancelRemoteSyncJob(remoteSyncJob.id);
+      setRemoteSyncJob(job);
+      setTrainingNotice(`已取消同步任务 #${job.id}`);
+    } catch (error) {
+      setTrainingError(error instanceof Error ? error.message : "取消同步失败");
+    }
   }
 
   async function refreshTrainingModels(projectId = importedDataset?.project_id) {
@@ -3926,17 +4054,118 @@ export default function App() {
             </div>
 
             <div className="training-number-grid">
+              <label htmlFor="training-host">
+                训练机器
+                <select
+                  id="training-host"
+                  value={trainingHost}
+                  onChange={(event) =>
+                    setTrainingHost(event.target.value === "gpu05" ? "gpu05" : "local")
+                  }
+                  disabled={versions.length === 0}
+                >
+                  <option value="local">本机 T4</option>
+                  <option value="gpu05">GPU05 (V100)</option>
+                </select>
+              </label>
               <label htmlFor="training-device">
                 计算设备
                 <input
                   id="training-device"
                   value={trainingDevice}
                   onChange={(event) => setTrainingDevice(event.target.value)}
-                  placeholder={health?.devices.selected ?? "cpu"}
+                  placeholder={
+                    trainingHost === "gpu05" ? "0" : (health?.devices.selected ?? "cpu")
+                  }
                   disabled={versions.length === 0}
                 />
               </label>
             </div>
+
+            {trainingHost === "gpu05" ? (
+              <div className="remote-sync-panel" aria-label="GPU05 资源同步">
+                <div className="remote-sync-heading">
+                  <div>
+                    <strong>同步到 GPU05</strong>
+                    <span>仅传输当前冻结版本与起始权重，完成后才能远程训练</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void refreshRemoteHostStatus()}
+                    disabled={isProbingRemote}
+                  >
+                    {isProbingRemote ? "探测中…" : "探测主机"}
+                  </button>
+                </div>
+                {remoteHostStatus ? (
+                  <p className="version-scope-hint">
+                    {remoteHostStatus.online ? "在线" : "离线"}
+                    {remoteHostStatus.hostname ? ` · ${remoteHostStatus.hostname}` : ""}
+                    {remoteHostStatus.cuda_available
+                      ? ` · CUDA ${remoteHostStatus.gpu_count} 卡`
+                      : " · 无 CUDA"}
+                    {remoteHostStatus.ultralytics_ok ? " · Ultralytics 可用" : " · Ultralytics 不可用"}
+                    {remoteHostStatus.error ? ` · ${remoteHostStatus.error}` : ""}
+                  </p>
+                ) : (
+                  <p className="version-scope-hint">尚未探测远程主机状态。</p>
+                )}
+                <div className="remote-sync-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={
+                      versions.length === 0 ||
+                      !selectedTrainingVersionId ||
+                      isStartingRemoteSync ||
+                      remoteSyncJob?.status === "queued" ||
+                      remoteSyncJob?.status === "running"
+                    }
+                    onClick={() => void handleStartRemoteSync()}
+                  >
+                    {isStartingRemoteSync ? "正在启动同步…" : "同步到 GPU05"}
+                  </button>
+                  {remoteSyncJob &&
+                  (remoteSyncJob.status === "queued" || remoteSyncJob.status === "running") ? (
+                    <button
+                      type="button"
+                      className="secondary-button danger"
+                      onClick={() => void handleCancelRemoteSync()}
+                    >
+                      取消同步
+                    </button>
+                  ) : null}
+                </div>
+                {remoteSyncJob ? (
+                  <div className="remote-sync-progress" aria-live="polite">
+                    <div className="remote-sync-progress-meta">
+                      <span>
+                        任务 #{remoteSyncJob.id} · {remoteSyncJob.status}
+                      </span>
+                      <span>
+                        {formatBytes(remoteSyncJob.bytes_done)} /{" "}
+                        {formatBytes(remoteSyncJob.bytes_total)} ·{" "}
+                        {formatSpeed(remoteSyncJob.speed_bps)}
+                      </span>
+                    </div>
+                    <div className="remote-sync-progress-bar" aria-hidden="true">
+                      <span
+                        style={{
+                          width: `${Math.max(
+                            0,
+                            Math.min(100, remoteSyncJob.percent ?? (remoteSyncJob.status === "completed" ? 100 : 0)),
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    {remoteSyncJob.error_message ? (
+                      <p className="run-error">{remoteSyncJob.error_message}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="augmentation-panel" aria-label="数据增强策略">
               <label htmlFor="augmentation-preset">
@@ -4032,11 +4261,20 @@ export default function App() {
 
             <button
               type="button"
-              disabled={versions.length === 0 || !selectedTrainingVersionId || isStartingRun}
+              disabled={
+                versions.length === 0 ||
+                !selectedTrainingVersionId ||
+                isStartingRun ||
+                (trainingHost === "gpu05" && remoteSyncJob?.status !== "completed")
+              }
               onClick={() => void handleStartTrainingRun()}
             >
               <Play size={16} />
-              {isStartingRun ? "正在启动" : "开始训练"}
+              {isStartingRun
+                ? "正在启动"
+                : trainingHost === "gpu05"
+                  ? "在 GPU05 开始训练"
+                  : "开始训练"}
             </button>
           </div>
 
@@ -4069,7 +4307,7 @@ export default function App() {
                   <span>{run.artifact_path}</span>
                   <span>
                     {String(run.config.model ?? "未指定模型")} | {String(run.config.epochs ?? "?")} 轮 |{" "}
-                    {run.device}
+                    {String(run.config.host ?? "local") === "gpu05" ? "GPU05" : "本机"} | {run.device}
                   </span>
                   {Object.keys(run.latest_metrics).length > 0 ? (
                     <div className="metric-chips">
